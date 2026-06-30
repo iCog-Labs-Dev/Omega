@@ -95,6 +95,17 @@
        "- Complete with durable reusable memory: complete-goals-ltm summary" (newline)
        "- Clear transient frame data: clear-frame-junk summary"))
 
+(= (getDirectiveSkills)
+      ("ATTENTION_DIRECTIVE_SKILLS:"
+       "- Delegate a task to a sub-agent module: dispatch-directive target task gate criteria priority slice" (newline)
+       "  Example: dispatch-directive llm-primary Generate python-syntax \"\" 1.0 deliverables" (newline)
+       "  Example: dispatch-directive researcher Evaluate llm-judge \"Summary is factual and complete\" 0.9 deliverables,history-summary" (newline)
+       "- Execute the last generated code: execute-last-code" (newline)
+       "- Send the last directive output to the user with an intro message: send-directive-output intro" (newline)
+       "- Show the last executed directive and its result: show-last-directive" (newline)
+       "- Get the raw output from the last executed directive: get-last-directive-output" (newline)
+       "- Check if the last directive was admitted by its gate (True/False): last-directive-admitted"))
+
 (= (read-file $file)
    (progn (translatePredicate (exists_file $file))
           (translatePredicate (read_file_to_string $file $content ()))
