@@ -178,7 +178,7 @@ def setActiveProvider(provider_name: str, model_name: str = "") -> None:
     Only overrides the model name for OpenAI, since (LLM) in loop.metta is
     OpenAI-specific. Other providers use their registered model names."""
     global _active_provider_name
-    _active_provider_name = str(provider_name)
+    _active_provider_name = str(provider_name).strip().strip("'\"")
     if model_name and provider_name == "OpenAI":
         provider = _get_provider(provider_name)
         if provider and isinstance(provider, AIProvider):
