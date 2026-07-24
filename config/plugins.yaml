@@ -58,3 +58,11 @@
 - name: workflow
   loader: metta
   location: "{REPO}/plugins/workflow"
+
+- name: telegram_media
+  loader: python
+  location: "{REPO}/plugins/media"
+
+- name: media
+  loader: metta
+  location: "{REPO}/plugins/media"
