@@ -97,11 +97,22 @@
 
 (= (getDirectiveSkills)
       ("ATTENTION_DIRECTIVE_SKILLS:"
-       "- Delegate a task to a sub-agent module: dispatch-directive target task gate criteria priority slice" (newline)
-       "  Example: dispatch-directive llm-primary Generate python-syntax \"\" 1.0 deliverables" (newline)
-       "  Example: dispatch-directive researcher Evaluate llm-judge \"Summary is factual and complete\" 0.9 deliverables,history-summary" (newline)
-       "- Execute the last generated code: execute-last-code" (newline)
+       "- Delegate a task to a sub-agent module: dispatch-directive target task gate \"criteria\" priority slice" (newline)
+       "  target: module name from DIRECTIVE_MODULES" (newline)
+       "  task: Generate=produce new content | Critique=identify issues | Revise=improve existing | Execute=run code | Evaluate=assess quality" (newline)
+       "  gate: python-syntax=valid Python | exec-success=ran without error | task-consistency=output structure matches task | nonempty=non-empty output | passthrough=no validation" (newline)
+       "  criteria: use \"\" for all gates" (newline)
+       "  slice: comma-separated frame fields to pass as context (deliverables | results | history-summary)" (newline)
+       "  Example: dispatch-directive researcher Generate nonempty \"\" 1.0 deliverables,history-summary" (newline)
+       "  Example: dispatch-directive researcher Evaluate task-consistency \"\" 1.0 results,deliverables" (newline)
+       "  Example: dispatch-directive critic Critique task-consistency \"\" 1.0 results" (newline)
+       "  Example: dispatch-directive critic Evaluate task-consistency \"\" 1.0 results,deliverables" (newline)
+       "  Example: dispatch-directive general Generate python-syntax \"\" 1.0 deliverables" (newline)
+       "  Example: dispatch-directive general Revise nonempty \"\" 1.0 results,deliverables" (newline)
+       "  Example: dispatch-directive python-executor Execute exec-success \"\" 1.0 deliverables" (newline)
+       "- Execute the last generated code using python-executor (use after dispatch-directive generates code): execute-last-code" (newline)
        "- Send the last directive output to the user with an intro message: send-directive-output intro" (newline)
+       "  Example: send-directive-output Here is the Python function you requested:" (newline)
        "- Show the last executed directive and its result: show-last-directive" (newline)
        "- Get the raw output from the last executed directive: get-last-directive-output" (newline)
        "- Check if the last directive was admitted by its gate (True/False): last-directive-admitted"))
@@ -148,6 +159,16 @@
 
 (= (pin $x)
    PIN-SUCCESS)
+
+(= (complete-goals-stm $summary)
+   (progn
+      (ad-clear-last-directive)
+      (ctx-complete-goals-to-stm $summary)))
+
+(= (complete-goals-ltm $summary)
+   (progn
+      (ad-clear-last-directive)
+      (ctx-complete-goals-to-ltm $summary)))
 
 (= (compact-frame $summary)
    (progn
