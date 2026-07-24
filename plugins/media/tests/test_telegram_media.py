@@ -8,7 +8,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _MEDIA_DIR = os.path.dirname(_HERE)
 _REPO_ROOT = os.path.dirname(os.path.dirname(_MEDIA_DIR))
 
-# telegram_media.py pulls in pluginapi (src/) the same way core's
+# telegram_media.py pulls in channels (src/) the same way core's
 # channels/telegram.py does when loaded as a real plugin. It no longer needs
 # channels/auth.py — the fork's channel uses its own admin_ids/allowed_chats
 # authorization, not core's auth handshake.
@@ -321,7 +321,7 @@ def test_dm_authorization_gates_non_admin_allows_admin():
 
 
 def test_plugin_registration_exposes_comm_channel():
-    assert issubclass(tm.TelegramChannel, __import__("pluginapi").CommChannel)
+    assert issubclass(tm.TelegramChannel, __import__("channels").CommChannel)
     channel = tm.TelegramChannel()
     assert hasattr(channel, "config") and hasattr(channel, "receive") and hasattr(channel, "send")
 

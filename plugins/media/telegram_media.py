@@ -19,7 +19,7 @@ except ImportError:
 
 from config_helper import is_category_blocked, get_spam_protection_config
 import media_handler
-import pluginapi as plugin
+import channels
 
 # A plugin must not reconfigure the host's root logging or create files on
 # import (the fork's tg_channel called logging.basicConfig with a FileHandler
@@ -912,7 +912,7 @@ def alert_ethics_violation(tool_name, text=None):
                 logging.error(f"Failed to send ethics alert to admin {admin_id} for tool {tool_name}")
 
 
-class TelegramChannel(plugin.CommChannel):
+class TelegramChannel(channels.CommChannel):
     """CommChannel wrapper around the aiogram-based _TelegramChannel above.
     config() starts the bot on its own thread/loop (non-blocking); receive()
     and send() proxy to the already-thread-safe module functions."""
@@ -933,4 +933,4 @@ class TelegramChannel(plugin.CommChannel):
 
 def loadOmegaClawPlugin():
     import media_handler  # noqa: F401 - ensure the media_handler alias is registered
-    plugin.registerCommChannel("telegram_media", TelegramChannel())
+    channels.registerCommChannel("telegram_media", TelegramChannel())
