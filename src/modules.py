@@ -19,10 +19,11 @@ import shlex
 import subprocess
 import tempfile
 import os
+import resource
 from typing import Callable, Dict
 
 from providers.lib_llm_ext import callActiveProvider
-from src.helper import strip_code_fences, _field
+from src.helper import strip_code_fences, strip_metta, _field, _extract_current_frame
 from src.gates import run_gate
 
 class ModuleResult:
@@ -48,48 +49,111 @@ def _call_llm(prompt: str, max_tokens: int) -> ModuleResult:
     except Exception as e:
         return ModuleResult(output="", success=False, error=str(e))
 
-def _strip_metta(s: str) -> str:
-    """Strip whitespace and a single wrapping MeTTa repr quote pair."""
-    s = str(s).strip()
-    if (s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')):
-        s = s[1:-1]
-    return s.strip()
+# Single source of truth for task-specific prompting.
+# Each entry: (role_sentence, instruction_prefix)
+# Used by all LLM-backed modules — modules may prepend their own persona
+# before calling _task_prompt, but the task instruction always comes from here.
+_TASK_TEMPLATES: dict[str, tuple[str, str]] = {
+    "Generate":  ("You are a precise generator. Produce the requested output directly.",
+                  "Generate the following:\n"),
+    "Critique":  ("You are a rigorous critic. Identify flaws, gaps, and inconsistencies.",
+                  "Critique the following:\n"),
+    "Revise":    ("You are a careful revisor. Improve the content based on the feedback provided.",
+                  "Revise the following, incorporating the feedback:\n"),
+    "Execute":   ("You are an execution engine. Run or apply the given instructions precisely.",
+                  "Execute the following:\n"),
+    "Evaluate":  ("You are an objective evaluator. Assess quality, correctness, and completeness.",
+                  "Evaluate the following. Format as OVERALL/SCORE/STRENGTHS/WEAKNESSES:\n"),
+}
 
-def _llm_primary(context: str, task: str) -> ModuleResult:
-    """General generation and reasoning using the loop's active LLM provider."""
-    prompt = f"TASK: {task}\n\n{context}" if task else context
-    return _call_llm(prompt, max_tokens=6000)
+def _task_prompt(task: str, context: str, persona: str = "") -> str:
+    """
+    Build a prompt from the task template.
+    persona: optional module-specific role sentence that replaces the default role.
+    """
+    role, instruction = _TASK_TEMPLATES.get(task, ("", f"TASK: {task}\n"))
+    header = f"{persona or role}\n\n" if (persona or role) else ""
+    return f"{header}{instruction}{context}"
+
+_DEF_RE = __import__("re").compile(r"^\s*(class |def )", __import__("re").MULTILINE)
+
+def _needs_test_invocation(code: str) -> bool:
+    """True when code has class/def but no top-level executable call or print."""
+    if not _DEF_RE.search(code):
+        return False
+    # If there's already a top-level call (non-indented statement after the defs)
+    for line in code.splitlines():
+        if line and not line[0].isspace() and not line.startswith(("class ", "def ", "#", "import ", "from ")):
+            return False
+    return True
+
+def _general(context: str, task: str) -> ModuleResult:
+    """General-purpose reasoning and generation using the loop's active LLM provider."""
+    result = _call_llm(_task_prompt(task, context), max_tokens=6000)
+    if not result.success:
+        return result
+    code = strip_code_fences(result.output)
+    if _needs_test_invocation(code):
+        test = _call_llm(
+            f"Append a short test invocation to the following Python code so running it produces visible output. "
+            f"Return only the complete code with the test appended, no explanation.\n\n{code}",
+            max_tokens=6000,
+        )
+        if test.success and test.output.strip():
+            result.output = test.output
+    return result
 
 def _code_reviewer(context: str, task: str) -> ModuleResult:
     """Code review: returns VERDICT/ISSUES/SUGGESTION for the given code."""
+    # Output format varies by task type so the gate can check structure.
+    _formats = {
+        "Critique":  "VERDICT: PASS or FAIL\nISSUES: (list each issue, or 'None')\nSUGGESTION: (one concrete improvement, or 'None')",
+        "Evaluate":  "VERDICT: PASS or FAIL\nSCORE: (0-10)\nSTRENGTHS: (list)\nWEAKNESSES: (list)",
+        "Revise":    "REVISED_CODE:\n(full revised code here)\nCHANGES: (list of changes made)",
+        "Generate":  "(produce the requested code directly, no extra commentary)",
+        "Execute":   "(apply or run the instructions and report the result)",
+    }
+    fmt = _formats.get(task, _formats["Critique"])
     prompt = (
-        "You are a precise code reviewer. Your job is to review the code below "
-        "and return structured feedback.\n\n"
-        "FORMAT YOUR RESPONSE AS:\n"
-        "VERDICT: PASS or FAIL\n"
-        "ISSUES: (list each issue on a new line, or 'None' if no issues)\n"
-        "SUGGESTION: (one concrete improvement if FAIL, or 'None' if PASS)\n\n"
-        f"CODE TO REVIEW:\n{context}"
+        f"You are a precise code reviewer.\n\n"
+        f"FORMAT YOUR RESPONSE AS:\n{fmt}\n\n"
+        f"CODE:\n{context}"
     )
     return _call_llm(prompt, max_tokens=1500)
 
+def _sandbox_limits():
+    """Applied in the executor child process via preexec_fn."""
+    # 5s CPU time — SIGXCPU on breach
+    resource.setrlimit(resource.RLIMIT_CPU,   (5,   5))
+    # 256 MB virtual memory
+    resource.setrlimit(resource.RLIMIT_AS,    (256 * 1024 * 1024, 256 * 1024 * 1024))
+    # 1 MB max file write
+    resource.setrlimit(resource.RLIMIT_FSIZE, (1 * 1024 * 1024,   1 * 1024 * 1024))
+    # 32 open file descriptors (limits socket creation)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
+
+
 def _python_executor(context: str, task: str) -> ModuleResult:
-    """Runs Python code in a subprocess and returns stdout/stderr (10s timeout)."""
+    """Runs Python code in a sandboxed subprocess (10s wall-clock, 5s CPU, 256MB RAM, 1MB writes)."""
     code = strip_code_fences(context)
 
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w", encoding="utf-8"
-        ) as f:
-            f.write(code)
-            tmp_path = f.name
+        fd, tmp_path = tempfile.mkstemp(suffix=".py")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(code)
+        except Exception:
+            os.close(fd)
+            raise
+        os.chmod(tmp_path, 0o600)
 
         result = subprocess.run(
             ["python3", tmp_path],
             capture_output=True,
             text=True,
             timeout=10,
+            preexec_fn=_sandbox_limits,
         )
 
         if result.returncode == 0:
@@ -105,11 +169,7 @@ def _python_executor(context: str, task: str) -> ModuleResult:
             )
 
     except subprocess.TimeoutExpired:
-        return ModuleResult(
-            output="",
-            success=False,
-            error="Execution timed out after 10 seconds",
-        )
+        return ModuleResult(output="", success=False, error="Execution timed out after 10 seconds")
     except Exception as e:
         return ModuleResult(output="", success=False, error=str(e))
     finally:
@@ -121,34 +181,27 @@ def _python_executor(context: str, task: str) -> ModuleResult:
 
 def _researcher(context: str, task: str) -> ModuleResult:
     """Information gathering and synthesis — factual, well-structured analysis."""
-    prompt = (
-        "You are a focused research assistant. Analyse the provided context and "
-        "produce a clear, factual, well-structured response.\n\n"
-        "Guidelines:\n"
-        "- Answer directly without restating or narrating the context you received\n"
-        "- Be concise and precise\n"
-        "- Cite reasoning, not just conclusions\n"
-        "- If uncertain, say so explicitly\n\n"
-        f"TASK: {task}\n\n"
-        f"CONTEXT:\n{context}"
+    persona = (
+        "You are a focused research assistant. Produce a clear, factual, well-structured response.\n"
+        "- Answer directly; do not restate the context\n"
+        "- Be concise and precise; cite reasoning not just conclusions\n"
+        "- If uncertain, say so explicitly"
     )
-    return _call_llm(prompt, max_tokens=3000)
+    return _call_llm(_task_prompt(task, context, persona=persona), max_tokens=3000)
 
 def _critic(context: str, task: str) -> ModuleResult:
     """Identifies weaknesses and gaps — returns OVERALL/WEAKNESSES/SUGGESTIONS."""
-    prompt = (
-        "You are a rigorous critic. Your job is to identify weaknesses, "
-        "inconsistencies, and gaps in the content below.\n\n"
+    persona = (
+        "You are a rigorous critic. Identify weaknesses, inconsistencies, and gaps.\n"
         "FORMAT YOUR RESPONSE AS:\n"
         "OVERALL: (one sentence assessment)\n"
         "WEAKNESSES: (list each weakness on a new line)\n"
-        "SUGGESTIONS: (one concrete suggestion per weakness)\n\n"
-        f"CONTENT TO CRITIQUE:\n{context}"
+        "SUGGESTIONS: (one concrete suggestion per weakness)"
     )
-    return _call_llm(prompt, max_tokens=2000)
+    return _call_llm(_task_prompt(task, context, persona=persona), max_tokens=2000)
 
 _REGISTRY: Dict[str, Callable[[str, str], ModuleResult]] = {
-    "llm-primary":     _llm_primary,
+    "general":         _general,
     "code-reviewer":   _code_reviewer,
     "python-executor": _python_executor,
     "researcher":      _researcher,
@@ -185,82 +238,29 @@ def list_modules_formatted() -> str:
 
 def parse_directive_args(arg_string: str) -> dict:
     """
-    Parse a single directive argument string into its six components.
-    Handles quoted criteria strings that may contain spaces, and also
-    unquoted multi-word criteria (everything between gate and priority).
-
-    Expected format:
-      target task gate "criteria with spaces" priority slice
-      target task gate "" priority slice
-      target task gate criteria_word priority slice
-      target task gate unquoted multi word criteria 1.0 slice
-
-    Returns dict with keys: target, task, gate, criteria, priority, slice
+    Parse directive args: target task gate "criteria" priority slice
+    Positions 0-5 are strictly positional. Criteria must be quoted if it
+    contains spaces. shlex.split handles the quoting.
     """
     defaults = {
-        "target":   "llm-primary",
+        "target":   "general",
         "task":     "Generate",
-        "gate":     "llm-judge",
+        "gate":     "nonempty",
         "criteria": "",
         "priority": "1.0",
         "slice":    "deliverables,history-summary",
     }
-
     try:
         parts = shlex.split(arg_string)
     except ValueError:
         parts = arg_string.split()
 
-    if len(parts) < 3:
-        result = dict(defaults)
-        for i, key in enumerate(["target", "task", "gate"]):
-            if i < len(parts):
-                result[key] = parts[i]
-        return result
-
-    target, task, gate = parts[0], parts[1], parts[2]
-    rest = parts[3:]  # everything after gate
-
-    # Detect if criteria was properly quoted (shlex kept it as one token)
-    # by checking whether the last two tokens look like priority + slice.
-    # Priority is a float-like string; slice contains letters/commas.
-    # Walk from the end: last token = slice, second-to-last = priority.
-    if len(rest) == 0:
-        criteria, priority, slice_val = "", defaults["priority"], defaults["slice"]
-    elif len(rest) == 1:
-        # only criteria
-        criteria, priority, slice_val = rest[0], defaults["priority"], defaults["slice"]
-    elif len(rest) == 2:
-        # could be criteria + priority, or priority + slice
-        try:
-            float(rest[-1])
-            criteria, priority, slice_val = rest[0], rest[1], defaults["slice"]
-        except ValueError:
-            try:
-                float(rest[0])
-                criteria, priority, slice_val = "", rest[0], rest[1]
-            except ValueError:
-                criteria, priority, slice_val = rest[0], defaults["priority"], rest[1]
-    else:
-        # 3+ tokens: last = slice (contains comma or letters, not a float),
-        # second-to-last = priority (float), everything in between = criteria
-        slice_val = rest[-1]
-        try:
-            float(rest[-2])
-            priority = rest[-2]
-            criteria = " ".join(rest[:-2])
-        except ValueError:
-            priority = defaults["priority"]
-            criteria = " ".join(rest[:-1])
-
-    return {
-        "target":   target,
-        "task":     task,
-        "gate":     gate,
-        "criteria": criteria,
-        "priority": priority,
-        "slice":    slice_val,
-    }
+    keys = ["target", "task", "gate", "criteria", "priority", "slice"]
+    result = dict(defaults)
+    for i, key in enumerate(keys):
+        if i < len(parts):
+            result[key] = parts[i]
+    return result
 
 def _run_directive_cycle(
     target: str, context: str, task: str,
@@ -269,6 +269,7 @@ def _run_directive_cycle(
     """Core directive execution cycle: invoke module, run gate, retry on failure."""
     attempts    = 0
     last_reason = ""
+    best_output = ""
     output      = ""
     while attempts < max_attempts:
         retry_context = context if attempts == 0 else (
@@ -276,64 +277,97 @@ def _run_directive_cycle(
         )
         result      = invoke(target, retry_context, task)
         output      = result.as_str()
+        if not best_output and output.strip():
+            best_output = output
         gate_result = run_gate(gate, output, task, criteria)
         attempts   += 1
         if gate_result.passed:
             return f"{output}|||True|||{gate_result.reason}|||{attempts}"
         last_reason = gate_result.retry_feedback()
-    return f"{output}|||False|||failed after {attempts} attempts: {last_reason}|||{attempts}"
+    failure_output = best_output or output
+    return f"{failure_output}|||False|||failed after {attempts} attempts: {last_reason}|||{attempts}"
 
 def build_slice_from_metta(fields_str: str, frame_str: str) -> str:
     """
-    Bridge: extract requested fields from the frame s-expression string.
-    fields_str — comma-separated field names, e.g. 'deliverables,history-summary'
-    frame_str  — the full ContextProjection s-expr from contextFrameForPrompt
+    Bridge: extract requested fields scoped to the CurrentFrame block only.
+    Returns only the matched fields. Returns empty string if none are found
+    so the caller can decide on a fallback rather than flooding the module
+    with the full raw frame.
     """
-    fields_str = _strip_metta(fields_str)
-    frame_str  = _strip_metta(frame_str)
-    fields     = [f.strip() for f in fields_str.split(",") if f.strip()]
+    fields_str    = strip_metta(fields_str)
+    frame_str     = strip_metta(frame_str)
+    current_frame = _extract_current_frame(frame_str)
+    fields        = [f.strip() for f in fields_str.split(",") if f.strip()]
 
     parts = []
     for field_name in fields:
-        value = _field(frame_str, field_name)
+        value = _field(current_frame, field_name)
         if value:
             parts.append(f"{field_name}: {value}")
-    return "\n".join(parts) if parts else frame_str
+    return "\n".join(parts)
+
+def dispatch_directive_args_from_metta(arg_string: str) -> str:
+    """Bridge: parse directive args and return 'target|||task|||gate|||criteria|||priority'."""
+    args = parse_directive_args(strip_metta(arg_string))
+    return f"{args['target']}|||{args['task']}|||{args['gate']}|||{args['criteria']}|||{args['priority']}"
+
+def directive_args_field(args_str: str, field: str) -> str:
+    """Bridge: extract a field from the pipe-delimited args string."""
+    mapping = {"target": 0, "task": 1, "gate": 2, "criteria": 3, "priority": 4}
+    idx = mapping.get(field)
+    if idx is None:
+        return ""
+    parts = str(args_str).split("|||", maxsplit=4)
+    return parts[idx].strip() if idx < len(parts) else ""
 
 def dispatch_directive_from_metta(arg_string: str, frame_str: str) -> str:
     """
     Single-string entry point called from attention.metta.
     Parses the argument string, builds the context slice, runs the
     full directive execution cycle, and returns the pipe-delimited result.
+
+    max_attempts is derived from priority: priority >= 1.0 → 3 attempts,
+    priority < 1.0 → 1 attempt (low-priority directives don't retry).
     """
-    args         = parse_directive_args(_strip_metta(arg_string))
+    args         = parse_directive_args(strip_metta(arg_string))
     target       = args["target"]
     task         = args["task"]
     gate         = args["gate"]
     criteria     = args["criteria"]
     slice_fields = args["slice"]
+    try:
+        priority = float(args["priority"])
+    except (ValueError, TypeError):
+        priority = 1.0
+
+    # priority >= 1.0 → full 3-attempt retry; lower priority → single attempt
+    max_attempts = 3 if priority >= 1.0 else 1
 
     context = build_slice_from_metta(slice_fields, frame_str)
     if not context.strip():
-        context = _strip_metta(frame_str)
+        context = strip_metta(frame_str)
 
-    return _run_directive_cycle(target, context, task, gate, criteria, max_attempts=3)
+    return _run_directive_cycle(target, context, task, gate, criteria, max_attempts=max_attempts)
 
 def execute_directive_from_metta(
     target: str, context: str, task: str,
     gate: str, criteria: str, max_retries: str
 ) -> str:
-    """Bridge: run the full directive execution cycle including retry logic."""
-    target   = _strip_metta(target)
-    context  = _strip_metta(context)
-    task     = _strip_metta(task)
-    gate     = _strip_metta(gate)
-    criteria = _strip_metta(criteria)
+    """
+    Bridge: run the full directive execution cycle including retry logic.
+    max_retries is the number of *retries after the first attempt*, so
+    max_attempts = max_retries + 1. Minimum is 1 attempt (0 retries).
+    """
+    target   = strip_metta(target)
+    context  = strip_metta(context)
+    task     = strip_metta(task)
+    gate     = strip_metta(gate)
+    criteria = strip_metta(criteria)
     try:
-        max_ret = max(1, int(_strip_metta(max_retries)) + 1)
+        max_attempts = max(1, int(strip_metta(max_retries)) + 1)
     except ValueError:
-        max_ret = 3
-    return _run_directive_cycle(target, context, task, gate, criteria, max_attempts=max_ret)
+        max_attempts = 3
+    return _run_directive_cycle(target, context, task, gate, criteria, max_attempts=max_attempts)
 
 
 def directive_result_field(result_str: str, field: str) -> str:
