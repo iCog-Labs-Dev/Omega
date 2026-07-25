@@ -257,34 +257,29 @@ def _generate_image_bytes(prompt):
         return None
 
 
-def _live_tg_channel():
-    """Return the telegram_media module whose _channel is the LIVE connected
-    instance. The bot is loaded by MeTTa as top-level `telegram_media`, but a
-    plain `import telegram_media` can yield a SECOND, unconnected module object
-    (its own never-started _channel). Search sys.modules for the connected one
-    so send_photo reaches the running bot; fall back gracefully."""
-    import sys
-    fallback = None
-    for name, mod in list(sys.modules.items()):
-        if mod is None or not (name == "telegram_media" or name.endswith(".telegram_media")):
-            continue
-        ch = getattr(mod, "_channel", None)
-        if ch is not None and getattr(ch, "connected", False):
-            return mod
-        if fallback is None and ch is not None:
-            fallback = mod
-    if fallback is not None:
-        return fallback
-    import telegram_media
-    return telegram_media
+_live_send_photo = None
+_live_channel = None
+
+
+def register_channel(send_photo, channel):
+    """Give this module a direct handle on the LIVE channel, called by the
+    channel plugin's loadOmegaClawPlugin.
+
+    Registration is explicit rather than looked up by module name because the
+    plugin loader execs plugin modules without adding them to sys.modules, so
+    `import telegram_media` here would build a second, never-started copy whose
+    bot and event loop are None — generated images would be produced and then
+    dropped."""
+    global _live_send_photo, _live_channel
+    _live_send_photo = send_photo
+    _live_channel = channel
 
 
 def _image_generation_allowed():
     """Read the allow_image_generation gate from the active channel's reply
     constraints. Fail closed (False) if unavailable."""
     try:
-        tg_channel = _live_tg_channel()
-        constraints = getattr(tg_channel._channel, "reply_constraints", None) or {}
+        constraints = getattr(_live_channel, "reply_constraints", None) or {}
         return bool(constraints.get("allow_image_generation", False))
     except Exception as e:
         logger.error(f"Could not read allow_image_generation gate: {e}")
@@ -323,9 +318,10 @@ def generate_and_send(prompt):
     image_bytes = _generate_image_bytes(prompt)
     if not image_bytes:
         return f"IMAGE_FAILED: could not generate image for: {prompt}"
+    if _live_send_photo is None:
+        return "IMAGE_FAILED: generated but no channel is registered to send it"
     try:
-        tg_channel = _live_tg_channel()
-        tg_channel.send_photo(image_bytes, caption=prompt[:1024])
+        _live_send_photo(image_bytes, caption=prompt[:1024])
     except Exception as e:
         logger.error(f"Failed to send generated image: {e}")
         return f"IMAGE_FAILED: generated but could not send: {e}"

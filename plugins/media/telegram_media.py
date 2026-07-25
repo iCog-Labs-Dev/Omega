@@ -932,5 +932,8 @@ class TelegramChannel(channels.CommChannel):
 
 
 def loadOmegaClawPlugin():
-    import media_handler  # noqa: F401 - ensure the media_handler alias is registered
+    import media_handler
+    # Hand media_handler this module's live channel so generate-image can send
+    # the images it produces; it cannot find them by importing us by name.
+    media_handler.register_channel(send_photo, _channel)
     channels.registerCommChannel("telegram_media", TelegramChannel())

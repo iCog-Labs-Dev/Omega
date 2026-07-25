@@ -199,29 +199,60 @@ def test_generate_and_send_success():
     orig_allowed = mh._image_generation_allowed
     orig_unsafe = mh._prompt_is_unsafe
     orig_gen = mh._generate_image_bytes
-    orig_channel = mh._live_tg_channel
+    orig_send, orig_chan = mh._live_send_photo, mh._live_channel
 
-    class FakeChannel:
-        def __init__(self):
-            self.sent = None
-
-        def send_photo(self, image_bytes, caption=None):
-            self.sent = (image_bytes, caption)
-
-    fake_channel = FakeChannel()
+    sent = {}
     mh._image_generation_allowed = lambda: True
     mh._prompt_is_unsafe = lambda prompt: False
     mh._generate_image_bytes = lambda prompt: b"img"
-    mh._live_tg_channel = lambda: fake_channel
+    mh.register_channel(lambda image_bytes, caption=None: sent.update(
+        bytes=image_bytes, caption=caption), object())
     try:
         out = mh.generate_and_send("a cat")
         assert out.startswith("IMAGE_SENT"), out
-        assert fake_channel.sent[0] == b"img", fake_channel.sent
+        assert sent["bytes"] == b"img", sent
     finally:
         mh._image_generation_allowed = orig_allowed
         mh._prompt_is_unsafe = orig_unsafe
         mh._generate_image_bytes = orig_gen
-        mh._live_tg_channel = orig_channel
+        mh._live_send_photo, mh._live_channel = orig_send, orig_chan
+
+
+def test_generate_and_send_without_registered_channel():
+    # Regression: the image generated but no channel was registered to send it.
+    # Live runs hit this because the plugin loader execs plugin modules without
+    # adding them to sys.modules, so looking the channel up by name found a
+    # second, never-started copy.
+    orig_allowed = mh._image_generation_allowed
+    orig_unsafe = mh._prompt_is_unsafe
+    orig_gen = mh._generate_image_bytes
+    orig_send = mh._live_send_photo
+
+    mh._image_generation_allowed = lambda: True
+    mh._prompt_is_unsafe = lambda prompt: False
+    mh._generate_image_bytes = lambda prompt: b"img"
+    mh._live_send_photo = None
+    try:
+        out = mh.generate_and_send("a cat")
+        assert out == "IMAGE_FAILED: generated but no channel is registered to send it", out
+    finally:
+        mh._image_generation_allowed = orig_allowed
+        mh._prompt_is_unsafe = orig_unsafe
+        mh._generate_image_bytes = orig_gen
+        mh._live_send_photo = orig_send
+
+
+def test_register_channel_wires_gate_and_sender():
+    orig_send, orig_chan = mh._live_send_photo, mh._live_channel
+    try:
+        class Chan:
+            reply_constraints = {"allow_image_generation": True}
+        mh.register_channel(lambda *a, **k: None, Chan())
+        assert mh._image_generation_allowed() is True
+        Chan.reply_constraints = {"allow_image_generation": False}
+        assert mh._image_generation_allowed() is False
+    finally:
+        mh._live_send_photo, mh._live_channel = orig_send, orig_chan
 
 
 def test_generate_and_send_empty_prompt():
@@ -243,5 +274,7 @@ if __name__ == "__main__":
     test_generate_and_send_unsafe()
     test_generate_and_send_generation_failure()
     test_generate_and_send_success()
+    test_generate_and_send_without_registered_channel()
+    test_register_channel_wires_gate_and_sender()
     test_generate_and_send_empty_prompt()
     print("all media_handler tests passed")
