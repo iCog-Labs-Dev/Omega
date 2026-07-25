@@ -62,7 +62,3 @@
 - name: telegram_media
   loader: python
   location: "{REPO}/plugins/media"
-
-- name: media
-  loader: metta
-  location: "{REPO}/plugins/media"

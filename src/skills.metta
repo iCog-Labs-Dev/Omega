@@ -20,6 +20,8 @@
     ;COMMUNICATION CHANNELS:
     "- Send message to user: send string"
     "- Search the web: websearch string"
+    "- See/read an image the user attached. Call when a message shows [image] and you need its contents; optionally pass what to look for, e.g. describe-image what error is shown: describe-image query"
+    "- Generate an image and send it to the user. Use when the user asks you to create, draw, generate, paint, or show a picture or image. Pass a vivid, detailed English description, e.g. generate-image a red panda astronaut floating in space, studio lighting: generate-image description"
     "- Search the web using the Tavily Search Agent: tavily-search string"
     "- Get technical analysis for a stock ticker using the Technical Analysis Agent: technical-analysis ticker"
     ;CODE EXECUTION:
@@ -105,6 +107,16 @@
 
 (= (websearch $msg)
    (py-call (websearch.search $msg)))
+
+; Media skills, backed by the media_handler module of the telegram_media plugin
+; (plugins/media). Registered here rather than by the plugin itself: skills
+; added from a MeTTa plugin's loadOmegaClawPlugin are not visible in getSkills
+; (see tests/smoke_media_plugin.metta).
+(= (describe-image $query)
+   (py-call (media_handler.describe_image $query)))
+
+(= (generate-image $prompt)
+   (py-call (media_handler.generate_and_send $prompt)))
 
 (= (get-io-policy)
    (py-call (policy.get_allowed_policy_paths (securityPolicyPath))))
