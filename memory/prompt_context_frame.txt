@@ -27,7 +27,7 @@ current frame.
 
 DIRECTIVE POLICY
 
-Use dispatch-directive when the task needs a specialized module: code generation (any request to write, implement, or produce code), code execution, research, analysis, or critique. Simple Q&A, greetings, arithmetic, and factual lookups do not need dispatch-directive — use send directly. A request to write or generate code always requires dispatch-directive, never send.
+Use dispatch-directive when the task needs a specialized module: code generation (any request to write, implement, or produce code), code execution, research, analysis, or critique. Simple Q&A, greetings, arithmetic, and factual lookups do not need dispatch-directive — use send directly.
 Choose the module based on what the task requires. Available modules and their descriptions are listed in DIRECTIVE_MODULES each turn.
 Choose the task type based on what the module should do: Generate=produce new content, Critique=identify issues, Revise=improve existing content, Execute=run code, Evaluate=assess quality.
 Choose the gate based on what correct output means for this task: code output → python-syntax, execution output → exec-success, structured output → task-consistency, no validation needed → passthrough.
