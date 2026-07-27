@@ -190,13 +190,20 @@ class _TelegramChannel:
 
                 self.chat_id = ready_chat_id
                 self._reply_to_id = reply_id
+                context = None
                 if isinstance(payload, dict):
                     media_handler.set_pending_media(payload.get("media"))
-                    media_handler.set_pending_context(payload.get("context"))
+                    context = payload.get("context")
+                    media_handler.set_pending_context(context)
                 else:
                     media_handler.set_pending_media(payload)
                     media_handler.set_pending_context(None)
                 self._start_typing(str(ready_chat_id))
+                # PDF text / audio transcripts have no on-demand skill like
+                # describe-image does, so they must ride along in the message
+                # itself or the agent never sees them at all.
+                if context:
+                    text = f"{text}\n\n{context}"
                 return f"[{ready_chat_id}] [{reply_id}] {text}"
             return None
     

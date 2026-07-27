@@ -132,6 +132,12 @@ def test_pdf_handler_extracts_text():
         chat_id, display_text, reply_id, payload = ch._message_queue[0]
         assert "report.pdf" in display_text, display_text
         assert payload == {"media": None, "context": "extracted text here"}
+
+        # Regression: the extracted text must reach the agent. There is no
+        # on-demand skill for PDFs like describe-image, so if get_last_message
+        # doesn't inline it, the agent never sees the document at all.
+        result = ch.get_last_message()
+        assert "extracted text here" in result, result
     finally:
         restore()
 
@@ -164,6 +170,9 @@ def test_voice_handler_transcribes_audio():
         chat_id, display_text, reply_id, payload = ch._message_queue[0]
         assert "sent audio" in display_text, display_text
         assert payload == {"media": None, "context": "hello from the transcript"}
+
+        result = ch.get_last_message()
+        assert "hello from the transcript" in result, result
     finally:
         restore()
 
