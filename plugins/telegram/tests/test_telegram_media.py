@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 import threading
+import types
 from types import SimpleNamespace
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +16,23 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(_MEDIA_DIR))
 sys.path.insert(0, _MEDIA_DIR)
 sys.path.insert(0, os.path.join(_REPO_ROOT, "src"))
 sys.path.insert(0, _REPO_ROOT)
+
+try:
+    import channels  # noqa: F401
+except ModuleNotFoundError:
+    # Checked out on its own, with no core tree above this directory. Stub the
+    # two names the channel uses so the suite stays runnable standalone; the
+    # real module only matters when the plugin is loaded by core.
+    _stub = types.ModuleType("channels")
+
+    class _CommChannel:
+        def config(self, config): pass
+        def receive(self): pass
+        def send(self, message): pass
+
+    _stub.CommChannel = _CommChannel
+    _stub.registerCommChannel = lambda name, channel: None
+    sys.modules["channels"] = _stub
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 
