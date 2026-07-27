@@ -59,6 +59,18 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages \
     torch==2.12.1 \
  && python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 
+# A plugin declares its own dependencies in plugins/<name>/requirements.txt.
+# Install them here so enabling a plugin in config/plugins.yaml is the only step
+# needed to run it; without this the plugin loader fails on import.
+COPY ./plugins /tmp/plugins
+RUN for req in /tmp/plugins/*/requirements.txt; do \
+      if [ -f "$req" ]; then \
+        echo "Installing plugin dependencies from $req" \
+        && python3 -m pip install --no-cache-dir --break-system-packages -r "$req"; \
+      fi; \
+    done \
+ && rm -rf /tmp/plugins
+
 # Pre-download the sentence-transformers model so runtime does not need network access.
 RUN mkdir -p "${HF_HOME}" "${SENTENCE_TRANSFORMERS_HOME}" \
  && python3 - <<PY
