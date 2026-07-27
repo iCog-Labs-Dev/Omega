@@ -78,8 +78,8 @@ def _image_key(image_parts):
 
 
 def _call_vision_model(image_parts, prompt):
-    """Vision call via the OpenRouterVision provider. Isolated so tests stub it."""
-    from openrouter_vision import vision_chat
+    """Vision call via the configured vision provider. Isolated so tests stub it."""
+    from vision import vision_chat
     return vision_chat(image_parts, prompt)
 
 
