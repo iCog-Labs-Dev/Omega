@@ -1,7 +1,7 @@
 ; The media skills (describe-image, generate-image) are visible in getSkills.
 ;
 ; They are registered statically in src/skills.metta rather than by the
-; plugins/media plugin itself. Reason, verified on SWI-Prolog 10.0.2 + PeTTa
+; plugins/telegram plugin itself. Reason, verified on SWI-Prolog 10.0.2 + PeTTa
 ; v1.0.4 (the versions pinned in the repo Dockerfile):
 ;
 ;   A MeTTa plugin's loadOmegaClawPlugin cannot register skills. loadPlugin
@@ -20,7 +20,7 @@
 ;   docker build -t omegaclaw:test .
 ;   docker run --rm --entrypoint sh -v "$PWD":/PeTTa/repos/OmegaClaw-Core:ro \
 ;     -w /PeTTa/repos/OmegaClaw-Core -e PETTA_PATH=/PeTTa omegaclaw:test \
-;     -c "sh /PeTTa/run.sh tests/smoke_media_plugin.metta"
+;     -c "sh /PeTTa/run.sh tests/smoke_telegram_plugin.metta"
 
 !(import! &self ./tests/lib/utils)
 !(import! &self ./src/utils)

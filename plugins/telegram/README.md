@@ -22,7 +22,7 @@ send them back.
 ```yaml
 - name: telegram_media
   loader: python
-  location: "{REPO}/plugins/media"
+  location: "{REPO}/plugins/telegram"
 ```
 
 **2. Register the two skills** in core's `src/skills.metta`:

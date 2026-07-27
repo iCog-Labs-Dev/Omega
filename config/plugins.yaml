@@ -61,4 +61,4 @@
 
 - name: telegram_media
   loader: python
-  location: "{REPO}/plugins/media"
+  location: "{REPO}/plugins/telegram"

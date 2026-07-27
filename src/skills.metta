@@ -109,9 +109,9 @@
    (py-call (websearch.search $msg)))
 
 ; Media skills, backed by the media_handler module of the telegram_media plugin
-; (plugins/media). Registered here rather than by the plugin itself: skills
+; (plugins/telegram). Registered here rather than by the plugin itself: skills
 ; added from a MeTTa plugin's loadOmegaClawPlugin are not visible in getSkills
-; (see tests/smoke_media_plugin.metta).
+; (see tests/smoke_telegram_plugin.metta).
 (= (describe-image $query)
    (py-call (media_handler.describe_image $query)))
 
