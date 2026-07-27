@@ -9,7 +9,19 @@ import asyncio
 _config_cache = None
 _config_mtime = 0
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "telegram_profile.yaml")
-openai_client = openai.AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+_openai_client = None
+
+
+def _get_openai_client():
+    """Build the moderation client lazily so importing this module (which
+    happens whenever the plugin loads, independent of which channel is
+    active) does not require OPENAI_API_KEY to be set. Isolated so tests
+    can stub it."""
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = openai.AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    return _openai_client
 
 def _load_config():
     """Loads and caches the telegram profile YAML configuration."""
@@ -111,7 +123,7 @@ async def _llm_classify(text, categories, memCheck=False):
         return await use_model(text, categories)
 
     try:
-        response = await openai_client.moderations.create(input=text)
+        response = await _get_openai_client().moderations.create(input=text)
         result = response.results[0]
 
         thresholds = {
