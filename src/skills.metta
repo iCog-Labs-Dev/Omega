@@ -20,8 +20,6 @@
     ;COMMUNICATION CHANNELS:
     "- Send message to user: send string"
     "- Search the web: websearch string"
-    "- Search the web using the Tavily Search Agent: tavily-search string"
-    "- Get technical analysis for a stock ticker using the Technical Analysis Agent: technical-analysis ticker"
     ;CODE EXECUTION:
     "- Execute MeTTa expression: metta sexpression"
     ;ADDITIONAL RULES AND CLARIFICATIONS FOR SKILLS
