@@ -1,23 +1,42 @@
 """
 Smoke (OMEGA-140): the web search skill actually returns results.
 
-Runs the real `websearch.search_` inside the container against live
-DuckDuckGo (via ddgs), so it catches the OMEGA-138 failure mode where
-DuckDuckGo changed its response format and search silently returned an
-empty list.
+Runs `websearch.search` inside the container against live SearXNG,
+so it catches failures where search silently returns an empty result.
 """
 from helpers import dexec
 
 
 def test_websearch_returns_results():
-    code = (
+    # Wait for SearXNG independently of Compose's depends_on condition.
+    healthz_code = """
+import time
+import urllib.request
+
+deadline = time.time() + 30
+while True:
+    try:
+        response = urllib.request.urlopen("http://searxng:8080/healthz", timeout=5)
+        assert response.status == 200
+        break
+    except Exception:
+        if time.time() >= deadline:
+            raise
+        time.sleep(2)
+"""
+    res = dexec("python3", "-c", healthz_code)
+    assert res.returncode == 0, f"SearXNG healthz wait failed: {res.stderr!r}"
+
+    search_code = (
         "import os, sys;"
         "sys.path.insert(0, os.path.join(os.environ['OMEGACLAW_DIR'], 'src'));"
         "import websearch;"
-        "print('COUNT', len(websearch.search_('test')))"
+        "result = websearch.search('test');"
+        "print('RESULT', result)"
     )
-    res = dexec("python3", "-c", code)
+    res = dexec("python3", "-c", search_code)
     assert res.returncode == 0, f"search failed: {res.stderr!r}"
-    count = next((int(l.split()[1]) for l in res.stdout.splitlines()
-                  if l.startswith("COUNT")), 0)
-    assert count > 0, f"search_('test') returned {count}; out={res.stdout!r} err={res.stderr!r}"
+    result = next((line[len("RESULT "): ] for line in res.stdout.splitlines()
+                   if line.startswith("RESULT ")), "")
+    assert result.startswith("("), f"result does not start with '(': {result!r}"
+    assert "TITLE:" in result, f"no TITLE: in result: {result!r}"
