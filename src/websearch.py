@@ -16,13 +16,11 @@ MAX_FIELD_CHARS = 300
 MAX_OUTPUT_CHARS = 8000
 
 _STRIP = str.maketrans("", "", '()"')
-_DELIMITER = ":-:-:-:"
 
 def _clean(value):
     if not isinstance(value, str):
         value = str(value) if value is not None else ""
     value = value.translate(_STRIP)
-    value = value.replace(_DELIMITER, "")
     value = " ".join(value.split())
     return value[:MAX_FIELD_CHARS]
 

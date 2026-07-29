@@ -331,6 +331,12 @@ python3 "$tmp_py_file" "$tmp_config_file" </dev/tty
 
 . "$tmp_config_file"
 
+# Keep the original Docker commands for the standalone bootstrap path.  A
+# checkout has the SearXNG Compose definition, so its lifecycle is managed by
+# this script instead.
+stop_command="docker stop omegaclaw"
+restart_command="docker start omegaclaw"
+
 cat <<EOF
 
 ============================================
@@ -338,10 +344,10 @@ cat <<EOF
 ============================================
 
 Stop OmegaClaw:
-  ./scripts/omegaclaw stop
+  ${stop_command}
 
 Restart OmegaClaw:
-  ./scripts/omegaclaw start
+  ${restart_command}
 
 To switch to a different channel or token:
   Rerun this script
@@ -485,7 +491,6 @@ help() {
 
 options() {
     OMEGACLAW_AUTH_SECRET=0000
-    auth_secret_explicit=0
     provider=ASICloud
     image=singularitynet/omegaclaw:latest
     commchannel=irc
@@ -511,7 +516,7 @@ options() {
     while getopts s:t:p:u:c:d:l:m: flag
     do
         case "${flag}" in
-            s) OMEGACLAW_AUTH_SECRET=${OPTARG}; auth_secret_explicit=1;;
+            s) OMEGACLAW_AUTH_SECRET=${OPTARG};;
             t) commchannel=${OPTARG};;
             p) provider=${OPTARG};;
             u) openaiapi_url=${OPTARG};;
@@ -569,89 +574,60 @@ options() {
 }
 
 _omegaclaw_dir="${HOME}/.omegaclaw"
-_compose_file="${_omegaclaw_dir}/docker-compose.yml"
-_compose_override="${_omegaclaw_dir}/docker-compose.override.yml"
-_compose_env="${_omegaclaw_dir}/.env"
-_searxng_settings="${_omegaclaw_dir}/searxng-settings.yml"
-_compose_template=""
-_searxng_settings_template=""
+_searxng_env="${_omegaclaw_dir}/searxng.env"
+_searxng_compose_file=""
+_searxng_network="omegaclaw_internal"
+_use_searxng_compose=0
 if [ -f "${BASH_SOURCE[0]}" ]; then
     _script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-    _checkout_compose_template="${_script_dir}/../docker-compose.yml"
-    _checkout_searxng_settings_template="${_script_dir}/../config/searxng/settings.yml"
-    if [ -f "${_checkout_compose_template}" ] && [ -f "${_checkout_searxng_settings_template}" ]; then
-        _compose_template="${_checkout_compose_template}"
-        _searxng_settings_template="${_checkout_searxng_settings_template}"
+    _checkout_searxng_compose_file="${_script_dir}/../docker-compose.yml"
+    if [ -f "${_checkout_searxng_compose_file}" ]; then
+        _searxng_compose_file="${_checkout_searxng_compose_file}"
     fi
 fi
 
-# Serialize a key=value pair as a YAML double-quoted list item.
-# Escapes backslashes and double quotes; rejects newlines.
-_yaml_cmd_item() {
-    local key="$1" value="$2"
-    if [[ ${value} == *$'\n'* || ${value} == *$'\r'* ]]; then
-        echo "Argument '${key}' contains a newline" >&2
-        return 1
+_searxng_secret() {
+    local secret=""
+    if [ -f "${_searxng_env}" ]; then
+        secret="$(sed -n 's/^SEARXNG_SECRET=//p' "${_searxng_env}" | head -n 1)"
     fi
-    value="${value//\\/\\\\}"
-    value="${value//\"/\\\"}"
-    printf '      - "%s=%s"\n' "${key}" "${value}"
+    if [ -z "${secret}" ]; then
+        mkdir -p "${_omegaclaw_dir}"
+        chmod 0700 "${_omegaclaw_dir}"
+        secret="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+        umask 077
+        printf 'SEARXNG_SECRET=%s\n' "${secret}" > "${_searxng_env}"
+    fi
+    printf '%s' "${secret}"
 }
 
-# Serialize a key=value pair for the Compose .env file.
-# Uses single-quoted values; rejects newlines; escapes embedded single quotes.
-_compose_env_line() {
-    local key="$1" value="$2"
-    if [[ ${value} == *$'\n'* || ${value} == *$'\r'* ]]; then
-        echo "Environment value '${key}' contains a newline" >&2
+_searxng_compose() {
+    if [ -z "${_searxng_compose_file}" ]; then
         return 1
     fi
-    local sq apos
-    sq="'"
-    apos="\\'"
-    value="${value//$sq/$apos}"
-    printf "%s='%s'\n" "${key}" "${value}"
+    local secret
+    secret="$(_searxng_secret)"
+    SEARXNG_SECRET="${secret}" docker compose -f "${_searxng_compose_file}" "$@"
 }
 
-# Read a value written by _compose_env_line without changing literal apostrophes.
-_compose_env_value() {
-    local key="$1" env_file="$2" line value quote backslash decoded
-    quote="'"
-    backslash="\\"
+_start_searxng() {
+    if [ -z "${_searxng_compose_file}" ]; then
+        echo "SearXNG requires running OmegaClaw from a repository checkout." >&2
+        return 1
+    fi
+    _searxng_compose up -d searxng
 
-    while IFS= read -r line || [ -n "${line}" ]; do
-        [[ "${line}" == "${key}="* ]] || continue
-        value="${line#*=}"
-        if [[ ${#value} -ge 2 && "${value:0:1}" == "${quote}" && "${value: -1}" == "${quote}" ]]; then
-            value="${value:1:${#value}-2}"
+    local container status
+    for _ in $(seq 1 60); do
+        container="$(_searxng_compose ps -q searxng)"
+        status="$(docker inspect --format '{{.State.Health.Status}}' "${container}" 2>/dev/null || true)"
+        if [ "${status}" = "healthy" ]; then
+            return 0
         fi
-        decoded=""
-        while [ -n "${value}" ]; do
-            if [[ "${value:0:1}" == "${backslash}" && "${value:1:1}" == "${quote}" ]]; then
-                decoded+="${quote}"
-                value="${value:2}"
-            else
-                decoded+="${value:0:1}"
-                value="${value:1}"
-            fi
-        done
-        printf '%s' "${decoded}"
-        return 0
-    done < "${env_file}"
+        sleep 1
+    done
+    echo "SearXNG did not become healthy within 60 seconds." >&2
     return 1
-}
-
-_get_container_mode() {
-    docker inspect omegaclaw --format '{{index .Config.Labels "omegaclaw.mode"}}' 2>/dev/null || true
-}
-
-_compose() {
-    local compose_files=(docker compose -f "${_compose_file}")
-    if [ -f "${_compose_override}" ]; then
-        compose_files+=(-f "${_compose_override}")
-    fi
-    compose_files+=(--env-file "${_compose_env}")
-    "${compose_files[@]}" "$@"
 }
 
 start() {
@@ -666,14 +642,14 @@ start() {
         container_log_config_path="/tmp/omegaclaw-logging.conf"
     fi
 
-    _teardown_conflicting_mode
     if [ "${provider}" = "Test" ]; then
-        # Test provider: use direct docker run — no SearXNG, no compose file written.
-        # Tear down any existing compose stack first so searxng doesn't keep running.
+        # Test provider keeps the existing direct Docker lifecycle.
+        _searxng_compose down 2>/dev/null || true
         _start_direct
     else
-        # All real providers: use Docker Compose so SearXNG runs alongside OmegaClaw.
-        _start_compose
+        _start_searxng
+        _use_searxng_compose=1
+        SEARXNG_URL="http://searxng:8080" _start_direct
     fi
 }
 
@@ -682,8 +658,19 @@ _start_direct() {
     docker pull "${image}" 2>/dev/null || true
 
     local log_config_volume=()
+    local searxng_url_env=()
+    local searxng_network=()
+    local searxng_label=()
     if [ -n "${container_log_config_path}" ]; then
         log_config_volume=(--volume "${log_config_abs}:${container_log_config_path}:ro")
+    fi
+    # CI may provide a local SearXNG sidecar for the direct Test-provider mode.
+    if [ -n "${SEARXNG_URL:-}" ]; then
+        searxng_url_env=(-e "SEARXNG_URL=${SEARXNG_URL}")
+    fi
+    if [ "${_use_searxng_compose}" -eq 1 ]; then
+        searxng_network=(--network "${_searxng_network}")
+        searxng_label=(--label omegaclaw.searxng=true)
     fi
 
     local docker_cmd=(
@@ -698,6 +685,9 @@ _start_direct() {
             --tmpfs /run:size=16m,mode=755
             --volume omegaclaw-memory:/PeTTa/repos/OmegaClaw-Core/memory
             ${log_config_volume[@]+"${log_config_volume[@]}"}
+            ${searxng_url_env[@]+"${searxng_url_env[@]}"}
+            ${searxng_network[@]+"${searxng_network[@]}"}
+            ${searxng_label[@]+"${searxng_label[@]}"}
             -e "${api_token_var}"="${api_token}"
             -e "TG_BOT_TOKEN=${TG_BOT_TOKEN:-}"
             -e "SL_BOT_TOKEN=${SL_BOT_TOKEN:-}"
@@ -716,192 +706,44 @@ _start_direct() {
     fi
 
     if [ "${commchannel}" = "irc" ]; then
-        docker_cmd+=("IRC_channel=${IRC_channel}")
+      docker_cmd+=("IRC_channel=${IRC_channel}")
     elif [ "${commchannel}" = "telegram" ]; then
-        docker_cmd+=("TG_POLL_TIMEOUT=${TG_POLL_TIMEOUT}")
+      docker_cmd+=("TG_POLL_TIMEOUT=${TG_POLL_TIMEOUT}")
     elif [ "${commchannel}" = "slack" ]; then
-        docker_cmd+=("SL_CHANNEL_ID=${SL_CHANNEL_ID}")
-        docker_cmd+=("SL_POLL_INTERVAL=${SL_POLL_INTERVAL}")
+      docker_cmd+=("SL_CHANNEL_ID=${SL_CHANNEL_ID}")
+      docker_cmd+=("SL_POLL_INTERVAL=${SL_POLL_INTERVAL}")
     elif [ "${commchannel}" = "websocket" ]; then
-        docker_cmd+=("WS_URL=${WS_URL}")
-        docker_cmd+=("WS_TOKEN=${WS_TOKEN}")
+      docker_cmd+=("WS_URL=${WS_URL}")
+      docker_cmd+=("WS_TOKEN=${WS_TOKEN}")
     elif [ "${commchannel}" = "test" ]; then
-        docker_cmd+=("TEST_SERVER_IP=${TEST_SERVER_IP}")
+      docker_cmd+=("TEST_SERVER_IP=${TEST_SERVER_IP}")
     else
-        echo "Unsupported commchannel: ${commchannel}" >&2
-        return 1
+      echo "Unsupported commchannel: ${commchannel}" >&2
+      return 1
     fi
 
     if [ -n "${model:-}" ]; then
-        docker_cmd+=("model=${model}")
+      docker_cmd+=("model=${model}")
     fi
 
     if [ -n "${openaiapi_url:-}" ]; then
-        docker_cmd+=("openaiapi_url=${openaiapi_url}")
+      docker_cmd+=("openaiapi_url=${openaiapi_url}")
     fi
 
     "${docker_cmd[@]}"
-}
 
-_start_compose() {
-    docker pull "${image}" 2>/dev/null || true
-
-    # Create ~/.omegaclaw/ with restricted permissions.
-    mkdir -p "${_omegaclaw_dir}"
-    chmod 0700 "${_omegaclaw_dir}"
-
-    # Ensure the omegaclaw-memory volume exists before compose tries to use it.
-    # Declared external:true in the compose file so compose never creates or deletes it.
-    docker volume create omegaclaw-memory >/dev/null 2>&1 || true
-
-    # Install the reviewed SearXNG settings next to the Compose file.
-    cp "${_searxng_settings_template}" "${_searxng_settings}"
-    chmod 0600 "${_searxng_settings}"
-
-    # Preserve generated-once secrets across restarts; generate on first run.
-    local searxng_secret_key=""
-    local omegaclaw_auth_secret="${OMEGACLAW_AUTH_SECRET}"
-    if [ -f "${_compose_env}" ]; then
-        searxng_secret_key="$(_compose_env_value "SEARXNG_SECRET_KEY" "${_compose_env}" || true)"
-        # Preserve the generated auth secret unless -s explicitly supplied a new one.
-        if [ "${auth_secret_explicit}" -eq 0 ]; then
-            local prev_secret
-            prev_secret="$(_compose_env_value "OMEGACLAW_AUTH_SECRET" "${_compose_env}" || true)"
-            if [ -n "${prev_secret}" ]; then
-                omegaclaw_auth_secret="${prev_secret}"
-            fi
-        fi
-    fi
-    if [ -z "${searxng_secret_key}" ]; then
-        searxng_secret_key="$(python3 -c 'import secrets, string; print(secrets.token_urlsafe(32))')"
-    fi
-
-    # Write ~/.omegaclaw/.env atomically with restricted permissions.
-    # Secrets go here only — never into the compose file itself.
-    local tmp_env
-    tmp_env="$(mktemp "${_omegaclaw_dir}/.env.XXXXXX")"
-    chmod 0600 "${tmp_env}"
-    {
-        _compose_env_line "OMEGACLAW_IMAGE"     "${image}"
-        _compose_env_line "API_TOKEN_VAR"       "${api_token_var}"
-        _compose_env_line "API_TOKEN"           "${api_token}"
-        _compose_env_line "TG_BOT_TOKEN"        "${TG_BOT_TOKEN:-}"
-        _compose_env_line "SL_BOT_TOKEN"        "${SL_BOT_TOKEN:-}"
-        _compose_env_line "OMEGACLAW_AUTH_SECRET" "${omegaclaw_auth_secret}"
-        _compose_env_line "IMPORT_KB_ON_START"  "${IMPORT_KB_ON_START:-0}"
-        _compose_env_line "SEARXNG_SECRET_KEY"  "${searxng_secret_key}"
-    } >> "${tmp_env}"
-    mv "${tmp_env}" "${_compose_env}"
-
-    # Build the compose command list — channel-specific and optional args appended
-    # as individual YAML list items so no value ever needs shell splitting.
-    # Written to a temp file so serializer failures are not swallowed by $().
-    local tmp_cmd_items
-    tmp_cmd_items="$(mktemp)"
-    {
-        _yaml_cmd_item "commchannel"        "${commchannel}"        || return 1
-        _yaml_cmd_item "provider"           "${provider}"           || return 1
-        _yaml_cmd_item "embeddingprovider"  "${embeddingprovider}"  || return 1
-        _yaml_cmd_item "securityPolicyPath" "/PeTTa/repos/OmegaClaw-Core/profile/policy.yaml" || return 1
-        _yaml_cmd_item "memoryDirectory"    '$$MEMORY_DIR'          || return 1
-
-        if [ "${commchannel}" = "irc" ]; then
-            _yaml_cmd_item "IRC_channel" "${IRC_channel}"           || return 1
-        elif [ "${commchannel}" = "telegram" ]; then
-            _yaml_cmd_item "TG_POLL_TIMEOUT" "${TG_POLL_TIMEOUT}"  || return 1
-        elif [ "${commchannel}" = "slack" ]; then
-            _yaml_cmd_item "SL_CHANNEL_ID"    "${SL_CHANNEL_ID}"   || return 1
-            _yaml_cmd_item "SL_POLL_INTERVAL" "${SL_POLL_INTERVAL}" || return 1
-        elif [ "${commchannel}" = "websocket" ]; then
-            _yaml_cmd_item "WS_URL"   "${WS_URL}"                  || return 1
-            _yaml_cmd_item "WS_TOKEN" "${WS_TOKEN}"                || return 1
-        fi
-
-        if [ -n "${model:-}" ]; then
-            _yaml_cmd_item "model" "${model}"                      || return 1
-        fi
-        if [ -n "${openaiapi_url:-}" ]; then
-            _yaml_cmd_item "openaiapi_url" "${openaiapi_url}"      || return 1
-        fi
-        if [ -n "${container_log_config_path}" ]; then
-            _yaml_cmd_item "logConfigPath" "${container_log_config_path}" || return 1
-        fi
-    } > "${tmp_cmd_items}" || { rm -f "${tmp_cmd_items}"; return 1; }
-    local cmd_items
-    cmd_items="$(cat "${tmp_cmd_items}")"
-    rm -f "${tmp_cmd_items}"
-
-    # Optional log config volume entry for the generated override file.
-    local log_volume_section=""
-    if [ -n "${container_log_config_path}" ]; then
-        local log_volume_spec="${log_config_abs}:${container_log_config_path}:ro"
-        log_volume_spec="${log_volume_spec//\\/\\\\}"
-        log_volume_spec="${log_volume_spec//\"/\\\"}"
-        log_volume_section=$'    volumes:\n'
-        log_volume_section+="      - \"${log_volume_spec}\""
-    fi
-
-    cp "${_compose_template}" "${_compose_file}"
-    chmod 0600 "${_compose_file}"
-
-    cat > "${_compose_override}" <<COMPOSE_OVERRIDE
-services:
-  omegaclaw:
-    command:
-${cmd_items}
-${log_volume_section}
-COMPOSE_OVERRIDE
-    chmod 0600 "${_compose_override}"
-
-    _compose up -d
-}
-
-# Tear down a conflicting prior mode before launching a new one.
-_teardown_conflicting_mode() {
-    local mode
-    mode="$(_get_container_mode)"
-    if [ "${mode}" = "direct" ]; then
-        docker rm -f omegaclaw 2>/dev/null || true
-    elif [ "${mode}" = "compose" ]; then
-        _compose down 2>/dev/null || true
-    elif docker inspect omegaclaw >/dev/null 2>&1; then
-        # Pre-migration container with no omegaclaw.mode label — remove it.
-        docker rm -f omegaclaw 2>/dev/null || true
-    elif [ -f "${_compose_file}" ]; then
-        # The main container may have been removed while the SearXNG sidecar remains.
-        _compose down 2>/dev/null || true
-    fi
 }
 
 stop() {
-    local mode
-    mode="$(_get_container_mode)"
-    if [ "${mode}" = "compose" ]; then
-        _compose stop
-    elif [ "${mode}" = "direct" ]; then
-        docker stop omegaclaw
-    elif [ -f "${_compose_file}" ]; then
-        # Container absent but compose file exists — stop the known project.
-        _compose stop 2>/dev/null || true
-    else
-        docker stop omegaclaw 2>/dev/null || true
-    fi
+    docker stop omegaclaw 2>/dev/null || true
+    _searxng_compose stop 2>/dev/null || true
 }
 
 clean() {
-    local mode
-    mode="$(_get_container_mode)"
-    if [ "${mode}" = "compose" ] || [ -f "${_compose_file}" ]; then
-        _compose down -v 2>/dev/null || true
-        # Also remove a direct-mode container that may have replaced the compose one.
-        docker rm -f omegaclaw 2>/dev/null || true
-        # down -v does not remove external volumes — delete omegaclaw-memory explicitly.
-        docker volume rm omegaclaw-memory 2>/dev/null || true
-        rm -rf "${_omegaclaw_dir}"
-    else
-        docker rm -f omegaclaw 2>/dev/null || true
-        docker volume rm omegaclaw-memory 2>/dev/null || true
-    fi
+    docker rm -f omegaclaw 2>/dev/null || true
+    _searxng_compose down -v 2>/dev/null || true
+    docker volume rm omegaclaw-memory 2>/dev/null || true
+    rm -rf "${_omegaclaw_dir}"
 }
 
 set -euo pipefail

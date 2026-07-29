@@ -1,37 +1,6 @@
 name: omegaclaw
 
 services:
-  omegaclaw:
-    image: ${OMEGACLAW_IMAGE}
-    container_name: omegaclaw
-    restart: unless-stopped
-    networks:
-      - internal
-    depends_on:
-      searxng:
-        condition: service_healthy
-    security_opt:
-      - no-new-privileges:true
-    init: true
-    tty: true
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    tmpfs:
-      - /tmp:size=64m,mode=1777
-      - /var/tmp:size=64m,mode=1777
-      - /run:size=16m,mode=755
-    volumes:
-      - omegaclaw-memory:/PeTTa/repos/OmegaClaw-Core/memory
-    labels:
-      omegaclaw.mode: compose
-    environment:
-      - ${API_TOKEN_VAR}=${API_TOKEN}
-      - TG_BOT_TOKEN=${TG_BOT_TOKEN}
-      - SL_BOT_TOKEN=${SL_BOT_TOKEN}
-      - OMEGACLAW_AUTH_SECRET=${OMEGACLAW_AUTH_SECRET}
-      - IMPORT_KB_ON_START=${IMPORT_KB_ON_START}
-      - SEARXNG_URL=http://searxng:8080
-
   searxng:
     image: docker.io/searxng/searxng:2026.7.26-b060c780d@sha256:d0aaeb14880e6e92bde1518fcc7261e995783367d63d95203383607bef9c6516
     restart: unless-stopped
@@ -40,10 +9,10 @@ services:
     networks:
       - internal
     volumes:
-      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
+      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
       - searxng-data:/var/cache/searxng/
     environment:
-      - SEARXNG_SECRET=${SEARXNG_SECRET_KEY}
+      - SEARXNG_SECRET=${SEARXNG_SECRET:?SEARXNG_SECRET must be set}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 5s
@@ -53,9 +22,8 @@ services:
 
 networks:
   internal:
+    name: omegaclaw_internal
     driver: bridge
 
 volumes:
-  omegaclaw-memory:
-    external: true
   searxng-data:
