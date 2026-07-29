@@ -331,12 +331,6 @@ python3 "$tmp_py_file" "$tmp_config_file" </dev/tty
 
 . "$tmp_config_file"
 
-# Keep the original Docker commands for the standalone bootstrap path.  A
-# checkout has the SearXNG Compose definition, so its lifecycle is managed by
-# this script instead.
-stop_command="docker stop omegaclaw"
-restart_command="docker start omegaclaw"
-
 cat <<EOF
 
 ============================================
@@ -344,10 +338,10 @@ cat <<EOF
 ============================================
 
 Stop OmegaClaw:
-  ${stop_command}
+  ./scripts/omegaclaw stop
 
 Restart OmegaClaw:
-  ${restart_command}
+  ./scripts/omegaclaw resume
 
 To switch to a different channel or token:
   Rerun this script
@@ -474,7 +468,8 @@ help() {
     echo
     echo -e "Commands:"
     echo -e "\tstart start new docker container"
-    echo -e "\tstop stop docker container"
+    echo -e "\tresume start an existing OmegaClaw deployment"
+    echo -e "\tstop stop OmegaClaw and SearXNG"
     echo -e "\tclean remove container and clean up memory"
     echo
     echo -e "Options:"
@@ -676,7 +671,6 @@ _start_direct() {
     local docker_cmd=(
         docker run -d -it
             --name omegaclaw
-            --label omegaclaw.mode=direct
             --security-opt no-new-privileges:true
             --init
             --add-host=host.docker.internal:host-gateway
@@ -731,12 +725,29 @@ _start_direct() {
     fi
 
     "${docker_cmd[@]}"
-
 }
 
 stop() {
     docker stop omegaclaw 2>/dev/null || true
     _searxng_compose stop 2>/dev/null || true
+}
+
+resume() {
+    local uses_searxng omegaclaw_running
+    if ! docker inspect omegaclaw >/dev/null 2>&1; then
+        echo "No OmegaClaw container exists. Run the launcher for initial setup." >&2
+        return 1
+    fi
+
+    uses_searxng="$(docker inspect omegaclaw --format '{{index .Config.Labels "omegaclaw.searxng"}}')"
+    if [ "${uses_searxng}" = "true" ]; then
+        _start_searxng
+    fi
+
+    omegaclaw_running="$(docker inspect omegaclaw --format '{{.State.Running}}')"
+    if [ "${omegaclaw_running}" != "true" ]; then
+        docker start omegaclaw
+    fi
 }
 
 clean() {
@@ -750,6 +761,7 @@ set -euo pipefail
 options "$@"
 case "${command}" in
     start) start ;;
+    resume) resume ;;
     stop) stop ;;
     clean) clean ;;
     -h) help ;;
