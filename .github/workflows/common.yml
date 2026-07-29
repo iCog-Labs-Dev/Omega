@@ -82,7 +82,31 @@ jobs:
         if: inputs.run_tests
         run: |
           chmod +x ./scripts/omegaclaw
-          ./scripts/omegaclaw start -p Test -t test -d singularitynet/omegaclaw:${{ env.AUTOTESTS_OMEGACLAW_TAG }}
+          SEARXNG_URL=http://searxng:8080 ./scripts/omegaclaw start -p Test -t test -d singularitynet/omegaclaw:${{ env.AUTOTESTS_OMEGACLAW_TAG }}
+          docker network create omegaclaw-ci
+          docker network connect omegaclaw-ci omegaclaw
+          docker run -d \
+            --name omegaclaw-searxng-ci \
+            --network omegaclaw-ci \
+            --network-alias searxng \
+            --security-opt no-new-privileges:true \
+            -e SEARXNG_SECRET=ci-test-secret \
+            -v "$GITHUB_WORKSPACE/config/searxng/settings.yml:/etc/searxng/settings.yml:ro" \
+            docker.io/searxng/searxng:2026.7.26-b060c780d@sha256:d0aaeb14880e6e92bde1518fcc7261e995783367d63d95203383607bef9c6516
+          echo "Waiting for SearXNG to become ready..."
+          searxng_ready=
+          for i in $(seq 1 60); do
+            if docker exec omegaclaw-searxng-ci wget -qO- http://localhost:8080/healthz >/dev/null 2>&1; then
+              searxng_ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ -z "$searxng_ready" ]; then
+            echo "::error::SearXNG did not become ready in 60s"
+            docker logs omegaclaw-searxng-ci
+            exit 1
+          fi
           pip install pytest
           echo "Waiting for agent to become ready..."
           ready=
