@@ -82,14 +82,29 @@ To run a specific version of OmegaClaw set version in `TAG` environment variable
 export TAG=v0.1.17; curl -fsSL  https://github.com/asi-alliance/OmegaClaw-Core/raw/refs/tags/$TAG/scripts/omegaclaw | bash -s -- singularitynet/omegaclaw:$TAG
 ```
 
-To stop OmegaClaw:
+For a direct Docker installation, stop OmegaClaw with:
 ```
-./scripts/omegaclaw stop
+docker stop omegaclaw
 ```
 
-To restart OmegaClaw:
+To restart a direct Docker installation:
 ```
-./scripts/omegaclaw start
+docker start omegaclaw
+```
+
+For a checkout-based SearXNG deployment, start a new configuration or change
+provider/channel settings with:
+```
+./scripts/omegaclaw start \
+  -d <docker-image> \
+  -p <provider> \
+  -t <channel-type> \
+  -c <channel>
+```
+
+To stop both OmegaClaw and SearXNG:
+```
+./scripts/omegaclaw stop
 ```
 
 To stop OmegaClaw and reset its memory:
