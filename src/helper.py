@@ -76,7 +76,6 @@ def make_id(prefix="id"):
     stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
     return f"{prefix}-{stamp}"
 
-
 def extract_timestamp(line):
     m = TS_RE.search(line)
     if not m:
@@ -232,7 +231,8 @@ _NON_PYTHON_FENCE_TAGS = {"text", "bash", "sh", "shell", "output", "plaintext", 
 
 def strip_code_fences(code: str) -> str:
     """Extract and concatenate content from Python code fences only.
-    Fences tagged as non-Python (```text, ```bash, etc.) are skipped.
+    Fences tagged as non-Python (```text, ```bash, etc.) and blocks introduced
+    by an Output: label are skipped.
     Discards surrounding prose. If no Python fences found, returns original stripped.
     Multiple Python fences (e.g. function def + runner) are joined with a newline.
     """
@@ -240,24 +240,33 @@ def strip_code_fences(code: str) -> str:
     lines = code.splitlines()
     blocks = []
     inner = None
+    in_fence = False
     skip_block = False
+    previous_text = ""
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("```"):
-            if inner is None:
+            if not in_fence:
                 # Opening fence — check the tag
                 tag = stripped[3:].strip().lower().split()[0] if stripped[3:].strip() else ""
-                skip_block = tag in _NON_PYTHON_FENCE_TAGS
+                # LLMs occasionally label a displayed runtime result as
+                # ```python.  An Output: label is authoritative: that block
+                # is data, not source code for the directive gate/executor.
+                skip_block = tag in _NON_PYTHON_FENCE_TAGS or previous_text.lower().startswith("output:")
                 if not skip_block:
                     inner = []
+                in_fence = True
             else:
                 # Closing fence
                 if not skip_block and inner is not None:
                     blocks.append("\n".join(inner).strip())
                 inner = None
                 skip_block = False
+                in_fence = False
         elif inner is not None and not skip_block:
             inner.append(line)
+        elif stripped:
+            previous_text = stripped
     if not blocks:
         return code
     return "\n\n".join(b for b in blocks if b)
@@ -383,37 +392,6 @@ def _field(expr: str, field_name: str) -> Optional[str]:
     while end < len(expr) and not expr[end].isspace() and expr[end] != ")":
         end += 1
     return expr[start:end]
-
-def _extract_current_frame(frame_str: str) -> str:
-    """Extract the (CurrentFrame ...) block from a ContextProjection string.
-    Falls back to the full string if not found.
-    """
-    token = "(CurrentFrame"
-    idx = frame_str.find(token)
-    if idx < 0:
-        return frame_str
-    depth = 0
-    in_str = False
-    escaped = False
-    for j in range(idx, len(frame_str)):
-        ch = frame_str[j]
-        if in_str:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-            if depth == 0:
-                return frame_str[idx : j + 1]
-    return frame_str
 
 
 def cfv2_refs_completed_after(index_repr, date_prefix) -> str:

@@ -1,8 +1,3 @@
-(= (ad-build-slice $fields)
-   (py-call (modules.build_slice_from_metta
-               (repr $fields)
-               (contextFrameForPrompt))))
-
 (= (ad-list-modules)
    (py-call (modules.list_modules_formatted)))
 
@@ -43,6 +38,7 @@
       (criteria  (get-state &ad-last-criteria))
       (priority  (get-state &ad-last-priority))
       (output    (get-state &ad-last-output))
+      (code      (get-state &ad-last-code))
       (admitted  (get-state &ad-last-admitted))
       (reason    (get-state &ad-last-reason))
       (attempts  (get-state &ad-last-attempts))))
@@ -58,8 +54,20 @@
        _))
 
 (= (execute-last-code)
-   (if (== (get-state &ad-last-output) "")
-       (DirectiveResult (admitted False) (output "") (reason "no code to execute") (attempts 0))
+   (if (== (get-state &ad-last-target) "")
+       (progn
+          (ad-record-to-frame
+             "target=python-executor task=Execute admitted=False attempts=0 reason=no code to execute"
+             ExecutionOutput
+             "output= attempts=0"
+             False)
+          (DirectiveResult (admitted False) (output "") (reason "no code to execute") (attempts 0)))
+   (let $eligible-flag
+        (py-call (modules.directive_execution_eligible
+                    (repr (get-state &ad-last-task))
+                    (repr (get-state &ad-last-gate))
+                    (repr (get-state &ad-last-admitted))))
+   (if (== $eligible-flag 1)
    (let* (($raw      (get-state &ad-last-output))
           ($code     (py-call (helper.strip_code_fences (repr $raw))))
           ($result   (py-call (modules.execute_directive_from_metta
@@ -70,7 +78,8 @@
                                  (repr "")
                                  (repr 1))))
           ($output   (py-call (modules.directive_result_field $result "output")))
-          ($admitted (py-call (modules.directive_result_field $result "admitted")))
+          ($admitted-flag (py-call (modules.directive_result_admitted_flag $result)))
+          ($admitted (if (== $admitted-flag 1) True False))
           ($reason   (py-call (modules.directive_result_field $result "gate_reason")))
           ($attempts (py-call (modules.directive_result_field $result "attempts"))))
       (progn
@@ -90,7 +99,15 @@
             (admitted $admitted)
             (output   $output)
             (reason   $reason)
-            (attempts $attempts))))))
+            (attempts $attempts))))
+       (progn
+          (ad-record-to-frame
+             "target=python-executor task=Execute admitted=False attempts=0 reason=last directive is not admitted Python code"
+             ExecutionOutput
+             "output= attempts=0"
+             False)
+          (DirectiveResult (admitted False) (output "")
+                           (reason "last directive is not admitted Python code") (attempts 0)))))))
 
 (= (dispatch-directive $args)
    (let* (($args_str (py-call (modules.dispatch_directive_args_from_metta (repr $args))))
@@ -103,7 +120,8 @@
                                  (repr $args)
                                  (contextFrameForPrompt))))
           ($output   (py-call (modules.directive_result_field $result "output")))
-          ($admitted (py-call (modules.directive_result_field $result "admitted")))
+          ($admitted-flag (py-call (modules.directive_result_admitted_flag $result)))
+          ($admitted (if (== $admitted-flag 1) True False))
           ($reason   (py-call (modules.directive_result_field $result "gate_reason")))
           ($attempts (py-call (modules.directive_result_field $result "attempts"))))
       (progn
@@ -133,7 +151,7 @@
    (py-str
       ("AVAILABLE_DIRECTIVE_MODULES:" (newline)
        (ad-list-modules) (newline)
-       "AVAILABLE_GATES: python-syntax | metta-syntax | math-result | nonempty | exec-success | task-consistency | passthrough" (newline)
+       "AVAILABLE_GATES: python-syntax | metta-syntax | math-result | nonempty | exec-success | research-quality | task-consistency | passthrough" (newline)
        "AVAILABLE_TASKS: Generate | Critique | Revise | Execute | Evaluate" (newline)
        "FORMAT: dispatch-directive target task gate \"criteria\" priority slice  (criteria must be quoted, use \"\" for none)")))
 (= (show-last-directive)
@@ -142,23 +160,22 @@
 (= (last-directive-admitted)
    (get-state &ad-last-admitted))
 
-(= (send-directive-output $intro)
-   (if (== (get-state &ad-last-admitted) ())
+(= (send-directive-result $intro)
+   (if (== (get-state &ad-last-target) "")
        (send "No directive has been run yet.")
-   (if (== (get-state &ad-last-admitted) False)
-       (send (py-str ("Directive failed: " (get-state &ad-last-reason))))
-       (if (== (get-state &ad-last-code) "")
-           ;; No code was executed — send output directly
-           (send (py-str ($intro (newline) (get-state &ad-last-output))))
-           ;; Code was executed — show code block and execution result
-           (send (py-str ($intro (newline)
-                          "```python" (newline)
-                          (get-state &ad-last-code) (newline)
-                          "```" (newline)
-                          "Output:" (newline)
-                          (get-state &ad-last-output))))))))
+       (if (== (get-state &ad-last-admitted) False)
+           (send (py-str ("Directive was not admitted: "
+                          (get-state &ad-last-reason))))
+           (if (== (get-state &ad-last-code) "")
+               (send (py-str ($intro (newline)
+                              (get-state &ad-last-output))))
+               (send (py-str ($intro (newline)
+                              "```python" (newline)
+                              (get-state &ad-last-code) (newline)
+                              "```" (newline)
+                              "Output:" (newline)
+                              (get-state &ad-last-output))))))))
 
-;; Initialization
 (= (ad-init)
    (progn
       (ad-clear-last-directive)

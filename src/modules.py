@@ -16,6 +16,7 @@ Design:
 """
 
 import shlex
+import re
 import subprocess
 import tempfile
 import os
@@ -75,7 +76,7 @@ def _task_prompt(task: str, context: str, persona: str = "") -> str:
     header = f"{persona or role}\n\n" if (persona or role) else ""
     return f"{header}{instruction}{context}"
 
-_DEF_RE = __import__("re").compile(r"^\s*(class |def )", __import__("re").MULTILINE)
+_DEF_RE = re.compile(r"^\s*(class |def )", re.MULTILINE)
 
 def _needs_test_invocation(code: str) -> bool:
     """True when code has class/def but no top-level executable call or print."""
@@ -89,11 +90,18 @@ def _needs_test_invocation(code: str) -> bool:
 
 def _general(context: str, task: str) -> ModuleResult:
     """General-purpose reasoning and generation using the loop's active LLM provider."""
-    result = _call_llm(_task_prompt(task, context), max_tokens=6000)
+    prompt = _task_prompt(task, context)
+    if task == "Generate":
+        prompt = (
+            "If the requested deliverable is Python code, return only the code. "
+            "Do not add a greeting, Markdown fence, explanation, or claimed runtime output.\n\n"
+            + prompt
+        )
+    result = _call_llm(prompt, max_tokens=6000)
     if not result.success:
         return result
     code = strip_code_fences(result.output)
-    if _needs_test_invocation(code):
+    if task == "Generate" and _needs_test_invocation(code):
         test = _call_llm(
             f"Append a short test invocation to the following Python code so running it produces visible output. "
             f"Return only the complete code with the test appended, no explanation.\n\n{code}",
@@ -133,8 +141,8 @@ def _sandbox_limits():
     resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
 
 
-def _python_executor(context: str, task: str) -> ModuleResult:
-    """Runs Python code in a sandboxed subprocess (10s wall-clock, 5s CPU, 256MB RAM, 1MB writes)."""
+def _python_executor(context: str, _task: str) -> ModuleResult:
+    """Runs Python in a resource-limited subprocess (not a security sandbox)."""
     code = strip_code_fences(context)
 
     tmp_path = None
@@ -180,12 +188,14 @@ def _python_executor(context: str, task: str) -> ModuleResult:
                 pass
 
 def _researcher(context: str, task: str) -> ModuleResult:
-    """Information gathering and synthesis — factual, well-structured analysis."""
+    """Focused research synthesis from a clean user-task brief."""
     persona = (
-        "You are a focused research assistant. Produce a clear, factual, well-structured response.\n"
-        "- Answer directly; do not restate the context\n"
-        "- Be concise and precise; cite reasoning not just conclusions\n"
-        "- If uncertain, say so explicitly"
+        "You are a focused research subagent. Give a self-contained, concise, factual synthesis of the user's task.\n"
+        "- Lead with the direct answer, then explain the key findings, reasoning, tradeoffs, and material caveats.\n"
+        "- Choose the most useful structure for the question; do not follow a rigid template.\n"
+        "- State uncertainty when it materially affects the answer.\n"
+        "- Do not mention frame state, history, directives, tool calls, or search mechanics.\n"
+        "- Do not invent sources or URLs."
     )
     return _call_llm(_task_prompt(task, context, persona=persona), max_tokens=3000)
 
@@ -252,8 +262,10 @@ def parse_directive_args(arg_string: str) -> dict:
     }
     try:
         parts = shlex.split(arg_string)
-    except ValueError:
-        parts = arg_string.split()
+    except ValueError as exc:
+        result = dict(defaults)
+        result["_error"] = f"Invalid directive arguments: {exc}"
+        return result
 
     keys = ["target", "task", "gate", "criteria", "priority", "slice"]
     result = dict(defaults)
@@ -277,6 +289,11 @@ def _run_directive_cycle(
         )
         result      = invoke(target, retry_context, task)
         output      = result.as_str()
+        # A Python-syntax directive owns a runnable code artifact, not the
+        # surrounding prose a general LLM may include.  Keep the normalized
+        # artifact in both the gate and the directive cache.
+        if gate == "python-syntax":
+            output = strip_code_fences(output)
         if not best_output and output.strip():
             best_output = output
         gate_result = run_gate(gate, output, task, criteria)
@@ -290,18 +307,37 @@ def _run_directive_cycle(
 def build_slice_from_metta(fields_str: str, frame_str: str) -> str:
     """
     Bridge: extract requested fields scoped to the CurrentFrame block only.
-    Returns only the matched fields. Returns empty string if none are found
-    so the caller can decide on a fallback rather than flooding the module
-    with the full raw frame.
+    Scoping to CurrentFrame avoids false matches from RootFrame fields that
+    share the same names (e.g. deliverables, results).
+    Returns only the matched fields, or empty string if none found.
     """
-    fields_str    = strip_metta(fields_str)
-    frame_str     = strip_metta(frame_str)
-    current_frame = _extract_current_frame(frame_str)
-    fields        = [f.strip() for f in fields_str.split(",") if f.strip()]
+    fields_str = strip_metta(fields_str)
+    frame_str  = strip_metta(frame_str)
 
-    parts = []
+    # Extract only the (CurrentFrame ...) block to avoid RootFrame field collisions
+    token = "(CurrentFrame"
+    idx = frame_str.find(token)
+    if idx >= 0:
+        depth, in_str, escaped = 0, False, False
+        for j in range(idx, len(frame_str)):
+            ch = frame_str[j]
+            if in_str:
+                if escaped: escaped = False
+                elif ch == "\\": escaped = True
+                elif ch == '"': in_str = False
+                continue
+            if ch == '"': in_str = True
+            elif ch == "(": depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    frame_str = frame_str[idx : j + 1]
+                    break
+
+    fields = [f.strip() for f in fields_str.split(",") if f.strip()]
+    parts  = []
     for field_name in fields:
-        value = _field(current_frame, field_name)
+        value = _field(frame_str, field_name)
         if value:
             parts.append(f"{field_name}: {value}")
     return "\n".join(parts)
@@ -326,8 +362,8 @@ def dispatch_directive_from_metta(arg_string: str, frame_str: str) -> str:
     Parses the argument string, builds the context slice, runs the
     full directive execution cycle, and returns the pipe-delimited result.
 
-    max_attempts is derived from priority: priority >= 1.0 → 3 attempts,
-    priority < 1.0 → 1 attempt (low-priority directives don't retry).
+    High-priority directives receive up to three attempts; low-priority and
+    researcher directives receive one focused attempt.
     """
     args         = parse_directive_args(strip_metta(arg_string))
     target       = args["target"]
@@ -335,16 +371,27 @@ def dispatch_directive_from_metta(arg_string: str, frame_str: str) -> str:
     gate         = args["gate"]
     criteria     = args["criteria"]
     slice_fields = args["slice"]
+    parse_error  = args.get("_error")
+    if parse_error:
+        return f"|||False|||{parse_error}|||0"
     try:
         priority = float(args["priority"])
     except (ValueError, TypeError):
         priority = 1.0
 
-    # priority >= 1.0 → full 3-attempt retry; lower priority → single attempt
-    max_attempts = 3 if priority >= 1.0 else 1
+    # Research is a single focused synthesis pass. Other high-priority
+    # directives retain their retry budget for repairable gate failures.
+    max_attempts = 1 if target == "researcher" else (3 if priority >= 1.0 else 1)
+
+    # Research should receive only the current user task, never frame history
+    # or prior directive output that could leak into the research artifact.
+    if target == "researcher":
+        slice_fields = "deliverables"
 
     context = build_slice_from_metta(slice_fields, frame_str)
     if not context.strip():
+        if target == "researcher":
+            return "|||False|||Research requires current frame deliverables|||0"
         context = strip_metta(frame_str)
 
     return _run_directive_cycle(target, context, task, gate, criteria, max_attempts=max_attempts)
@@ -383,3 +430,21 @@ def directive_result_field(result_str: str, field: str) -> str:
     if idx < len(parts):
         return parts[idx].strip()
     return ""
+
+
+def directive_result_admitted_flag(result_str: str) -> int:
+    """Return 1 for an admitted directive result, otherwise 0.
+
+    Integers cross the Python-to-MeTTa bridge as native numeric atoms, unlike
+    the textual ``True``/``False`` field values returned by
+    ``directive_result_field``.
+    """
+    return 1 if directive_result_field(result_str, "admitted") == "True" else 0
+
+
+def directive_execution_eligible(task: str, gate: str, admitted: str) -> int:
+    """Return 1 only for the admitted Python generation held in the hot cache."""
+    task = strip_metta(task)
+    gate = strip_metta(gate)
+    admitted = strip_metta(admitted).lower()
+    return 1 if task == "Generate" and gate == "python-syntax" and admitted == "true" else 0

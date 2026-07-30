@@ -2,7 +2,7 @@
 Admission gates for HyperClaw attention directives.
 
 Each gate is a function: (output, task, criteria) -> GateResult
-- Structural/parseability: python-syntax, metta-syntax
+- Structural validation:    python-syntax, metta-syntax
 - Execution:               exec-success
 - Numerical plausibility:  math-result  (range-aware via criteria)
 - Task-consistency:        task-consistency (output structure matches task type)
@@ -45,7 +45,7 @@ def gate_python_syntax(output: str, task: str, criteria: str) -> GateResult:
 
 
 def gate_metta_syntax(output: str, task: str, criteria: str) -> GateResult:
-    """Check MeTTa syntax: non-empty, starts with '(', balanced parentheses outside strings."""
+    """Check basic MeTTa structure: non-empty, starts with '(', balanced parentheses outside strings."""
     code = strip_code_fences(output).strip()
     if not code:
         return GateResult(False, "Empty MeTTa output", "Output is empty")
@@ -165,19 +165,37 @@ def gate_exec_success(output: str, task: str, criteria: str) -> GateResult:
     return GateResult(True, "Execution succeeded")
 
 
+def gate_research_quality(output: str, task: str, criteria: str) -> GateResult:
+    """Reject empty, trivial, or frame-contaminated research output."""
+    if not output or not output.strip():
+        return GateResult(False, "Empty research output", "Researcher returned an empty response")
+    if len(output.strip()) < 120:
+        return GateResult(False, "Research output too short", "Provide a substantive research synthesis")
+    forbidden = ("human_message:", "history-summary", "directiveadmitted", "directiverejected", "contextprojection")
+    lowered = output.lower()
+    leaked = [marker for marker in forbidden if marker in lowered]
+    if leaked:
+        return GateResult(False, "Research output contains frame metadata", f"Remove frame metadata: {', '.join(leaked)}")
+    return GateResult(True, "Research output is substantive and free of frame metadata")
+
+
 def gate_passthrough(output: str, task: str, criteria: str) -> GateResult:
     """Always admits. Used when no gate is needed."""
     return GateResult(True, "Passthrough gate — always admits")
 
 
-# Expected structural markers per task type.
-# A task-consistency check passes if at least one marker for the task is present.
-_TASK_MARKERS: dict[str, list[str]] = {
-    "Critique":  ["OVERALL:", "WEAKNESSES:", "ISSUES:", "VERDICT:"],
-    "Evaluate":  ["OVERALL:", "SCORE:", "STRENGTHS:", "WEAKNESSES:", "VERDICT:"],
-    "Revise":    ["REVISED", "CHANGES:", "REVISION:"],
-    "Generate":  [],   # no structural requirement — nonempty is sufficient
-    "Execute":   [],   # execution output has no required structure
+# Each task may use one of several complete marker groups. This supports the
+# code-reviewer and critic module formats without admitting a lone heading.
+_TASK_MARKER_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "Critique": (
+        ("VERDICT:", "ISSUES:"),
+        ("OVERALL:", "WEAKNESSES:", "SUGGESTIONS:"),
+    ),
+    "Evaluate": (
+        ("OVERALL:", "SCORE:", "STRENGTHS:", "WEAKNESSES:"),
+        ("VERDICT:", "SCORE:", "STRENGTHS:", "WEAKNESSES:"),
+    ),
+    "Revise": (("REVISED", "CHANGES:"),),
 }
 
 
@@ -185,88 +203,28 @@ def gate_task_consistency(output: str, task: str, criteria: str) -> GateResult:
     """
     Check that the output structure is consistent with the task type.
 
-    Critique/Evaluate outputs must contain at least one expected section header.
-    Revise outputs must contain a revision marker.
+    Critique/Evaluate outputs must contain one complete expected section group.
+    Revise outputs must contain both a revision and changes marker.
     Generate/Execute outputs only need to be non-empty.
     """
     if not output or not output.strip():
         return GateResult(False, "Empty output", "Module returned an empty string")
 
-    markers = _TASK_MARKERS.get(task, [])
-    if not markers:
+    marker_groups = _TASK_MARKER_GROUPS.get(task, ())
+    if not marker_groups:
         # Generate and Execute: non-empty is sufficient
         return GateResult(True, f"Task {task}: non-empty output accepted")
 
     upper = output.upper()
-    found = [m for m in markers if m in upper]
-    if found:
-        return GateResult(True, f"Task {task}: found expected markers {found}")
+    for group in marker_groups:
+        if all(marker in upper for marker in group):
+            return GateResult(True, f"Task {task}: found expected markers {list(group)}")
 
     return GateResult(
         False,
         f"Task {task}: output missing expected structure",
-        f"Expected at least one of {markers} in the output for a {task} task. "
+        f"Expected one complete marker group {list(marker_groups)} for a {task} task. "
         f"Got: '{output[:150]}'"
-    )
-
-
-def gate_certified_method(output: str, task: str, criteria: str) -> GateResult:
-    """
-    Check that the output is consistent with the frame's certified method.
-
-    The criteria string must contain the certified method description extracted
-    from the frame (passed by attention.metta via the criteria field).
-    Format: "method: <description>" — attention.metta extracts this from
-    cfv2-current-method and passes it as the criteria argument.
-
-    If no method description is provided in criteria, the gate passes
-    (no certified method is set for this frame).
-
-    This implements the paper's "preventing the forgotten method" guarantee:
-    the output must reference key terms from the certified method description.
-    """
-    if not criteria or not criteria.strip():
-        return GateResult(True, "No certified method set — gate skipped")
-
-    # Extract method description from criteria string
-    c = criteria.strip()
-    if c.lower().startswith("method:"):
-        method_desc = c[len("method:"):].strip()
-    else:
-        method_desc = c
-
-    if not method_desc:
-        return GateResult(True, "No certified method description — gate skipped")
-
-    # Extract key terms from the method description (words > 4 chars, skip stopwords)
-    _STOPWORDS = {"with", "that", "this", "from", "using", "based", "which", "where",
-                  "their", "have", "been", "will", "should", "would", "could"}
-    key_terms = [
-        w.lower() for w in re.findall(r"\b[a-zA-Z]{5,}\b", method_desc)
-        if w.lower() not in _STOPWORDS
-    ]
-
-    if not key_terms:
-        return GateResult(True, "Certified method has no extractable key terms — gate skipped")
-
-    output_lower = output.lower()
-    matched = [t for t in key_terms if t in output_lower]
-    coverage = len(matched) / len(key_terms)
-
-    # Require at least 30% of key terms to appear in the output
-    if coverage >= 0.3:
-        return GateResult(
-            True,
-            f"Certified method consistency: {len(matched)}/{len(key_terms)} key terms present"
-        )
-
-    missing = [t for t in key_terms if t not in output_lower][:5]
-    return GateResult(
-        False,
-        f"Certified method consistency: only {len(matched)}/{len(key_terms)} key terms present",
-        f"Output may not reference the certified method. "
-        f"Missing key terms: {missing}. "
-        f"Ensure the output addresses: {method_desc[:200]}"
     )
 
 
@@ -276,6 +234,7 @@ _GATES = {
     "math-result":        gate_math_result,
     "nonempty":           gate_nonempty,
     "exec-success":       gate_exec_success,
+    "research-quality":   gate_research_quality,
     "task-consistency":   gate_task_consistency,
     "passthrough":        gate_passthrough,
 }
@@ -287,6 +246,9 @@ def run_gate(gate_name: str, output: str, task: str, criteria: str = "") -> Gate
     Unknown gate names return a failed GateResult so the caller knows
     the intended gate never ran — prevents silent wrong-gate admission.
     """
+    if str(output).lstrip().startswith("MODULE_ERROR:"):
+        return GateResult(False, "Module execution failed", str(output)[:300])
+
     fn = _GATES.get(gate_name)
     if fn is None:
         known = ", ".join(_GATES.keys())
@@ -296,26 +258,6 @@ def run_gate(gate_name: str, output: str, task: str, criteria: str = "") -> Gate
             f"Unknown gate '{gate_name}'. Available: {known}"
         )
     return fn(output, task, criteria)
-
-
-def infer_gate(task: str, target: str) -> str:
-    """Infer the appropriate gate from task and target when not explicitly set."""
-    task_lower = task.lower()
-    target_lower = target.lower()
-
-    if "executor" in target_lower:
-        return "exec-success"
-    if "python" in target_lower:
-        return "python-syntax"
-    if "metta" in target_lower:
-        return "metta-syntax"
-    if task_lower == "execute":
-        return "exec-success"
-    if "math" in task_lower or "arithmetic" in task_lower or "calculate" in task_lower:
-        return "math-result"
-    if task_lower in {"critique", "evaluate"}:
-        return "task-consistency"
-    return "nonempty"
 
 
 def run_gate_from_metta(gate: str, output: str, task: str, criteria: str) -> str:
@@ -328,8 +270,3 @@ def run_gate_from_metta(gate: str, output: str, task: str, criteria: str) -> str
     )
     passed = "True" if result.passed else "False"
     return f"{passed}|||{result.reason}|||{result.detail}"
-
-
-def infer_gate_from_metta(task: str, target: str) -> str:
-    """Bridge: infer gate name from task and target strings."""
-    return infer_gate(strip_metta(task), strip_metta(target))
