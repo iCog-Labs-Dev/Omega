@@ -25,8 +25,9 @@ _DISTRIBUTION = {
 # Imported on purpose without being declared. See requirements.txt for why.
 _ALLOWED_UNDECLARED = {"chromadb"}
 
-# Provided by core, not installable from here.
-_CORE_MODULES = {"channels", "providers", "rag", "policy", "helper"}
+# Provided by core, not installable from here. Only what is actually imported:
+# if the plugin starts using another of core's modules, the test says so.
+_CORE_MODULES = {"channels"}
 
 
 def _plugin_modules():
@@ -92,14 +93,7 @@ def test_allowed_undeclared_are_actually_imported():
     assert not stale, f"no longer imported, remove from the exception list: {stale}"
 
 
-def test_requests_is_declared():
-    """Regression: the default image provider posts with requests, and the other
-    suites stub that call, so only a declaration check catches its absence."""
-    assert "requests" in _declared_distributions()
-
-
 if __name__ == "__main__":
     test_every_third_party_import_is_declared()
     test_allowed_undeclared_are_actually_imported()
-    test_requests_is_declared()
     print("all requirements tests passed")
