@@ -338,10 +338,10 @@ cat <<EOF
 ============================================
 
 Stop OmegaClaw:
-  docker stop omegaclaw
+  ./scripts/omegaclaw stop
 
 Restart OmegaClaw:
-  docker start omegaclaw
+  ./scripts/omegaclaw resume
 
 To switch to a different channel or token:
   Rerun this script
@@ -468,7 +468,8 @@ help() {
     echo
     echo -e "Commands:"
     echo -e "\tstart start new docker container"
-    echo -e "\tstop stop docker container"
+    echo -e "\tresume start an existing OmegaClaw deployment"
+    echo -e "\tstop stop OmegaClaw and SearXNG"
     echo -e "\tclean remove container and clean up memory"
     echo
     echo -e "Options:"
@@ -567,25 +568,107 @@ options() {
     fi
 }
 
-start() {
-    docker rm -f omegaclaw 2>/dev/null || true
-    docker pull "${image}" 2>/dev/null || true
+_omegaclaw_dir="${HOME}/.omegaclaw"
+_searxng_env="${_omegaclaw_dir}/searxng.env"
+_searxng_compose_file=""
+_searxng_network="omegaclaw_internal"
+_use_searxng_compose=0
+if [ -f "${BASH_SOURCE[0]}" ]; then
+    _script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+    _checkout_searxng_compose_file="${_script_dir}/../docker-compose.yml"
+    if [ -f "${_checkout_searxng_compose_file}" ]; then
+        _searxng_compose_file="${_checkout_searxng_compose_file}"
+    fi
+fi
 
+_searxng_secret() {
+    local secret=""
+    if [ -f "${_searxng_env}" ]; then
+        secret="$(sed -n 's/^SEARXNG_SECRET=//p' "${_searxng_env}" | head -n 1)"
+    fi
+    if [ -z "${secret}" ]; then
+        mkdir -p "${_omegaclaw_dir}"
+        chmod 0700 "${_omegaclaw_dir}"
+        secret="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+        umask 077
+        printf 'SEARXNG_SECRET=%s\n' "${secret}" > "${_searxng_env}"
+    fi
+    printf '%s' "${secret}"
+}
+
+_searxng_compose() {
+    if [ -z "${_searxng_compose_file}" ]; then
+        return 1
+    fi
+    local secret
+    secret="$(_searxng_secret)"
+    SEARXNG_SECRET="${secret}" docker compose -f "${_searxng_compose_file}" "$@"
+}
+
+_start_searxng() {
+    if [ -z "${_searxng_compose_file}" ]; then
+        echo "SearXNG requires running OmegaClaw from a repository checkout." >&2
+        return 1
+    fi
+    _searxng_compose up -d searxng
+
+    local container status
+    for _ in $(seq 1 60); do
+        container="$(_searxng_compose ps -q searxng)"
+        status="$(docker inspect --format '{{.State.Health.Status}}' "${container}" 2>/dev/null || true)"
+        if [ "${status}" = "healthy" ]; then
+            return 0
+        fi
+        sleep 1
+    done
+    echo "SearXNG did not become healthy within 60 seconds." >&2
+    return 1
+}
+
+start() {
     container_log_config_path=""
-    log_config_volume=()
 
     if [ -n "${log_config_path}" ]; then
         if [ ! -f "${log_config_path}" ]; then
             echo "Logging config file not found: ${log_config_path}" >&2
             return 1
         fi
-
         log_config_abs="$(cd -- "$(dirname -- "${log_config_path}")" && pwd)/$(basename -- "${log_config_path}")"
         container_log_config_path="/tmp/omegaclaw-logging.conf"
-        log_config_volume=(--volume "${log_config_abs}:${container_log_config_path}:ro")
     fi
 
-    docker_cmd=(
+    if [ "${provider}" = "Test" ]; then
+        # Test provider keeps the existing direct Docker lifecycle.
+        _searxng_compose down 2>/dev/null || true
+        _start_direct
+    else
+        _start_searxng
+        _use_searxng_compose=1
+        SEARXNG_URL="http://searxng:8080" _start_direct
+    fi
+}
+
+_start_direct() {
+    docker rm -f omegaclaw 2>/dev/null || true
+    docker pull "${image}" 2>/dev/null || true
+
+    local log_config_volume=()
+    local searxng_url_env=()
+    local searxng_network=()
+    local searxng_label=()
+    if [ -n "${container_log_config_path}" ]; then
+        log_config_volume=(--volume "${log_config_abs}:${container_log_config_path}:ro")
+    fi
+    # CI may provide a local SearXNG sidecar for the direct Test-provider mode.
+    if [ -n "${SEARXNG_URL:-}" ]; then
+        searxng_url_env=(-e "SEARXNG_URL=${SEARXNG_URL}")
+    fi
+    if [ "${_use_searxng_compose}" -eq 1 ]; then
+        searxng_network=(--network "${_searxng_network}")
+        searxng_label=(--label omegaclaw.searxng=true)
+    fi
+
+    local docker_cmd=(
         docker run -d -it
             --name omegaclaw
             --security-opt no-new-privileges:true
@@ -596,6 +679,9 @@ start() {
             --tmpfs /run:size=16m,mode=755
             --volume omegaclaw-memory:/PeTTa/repos/OmegaClaw-Core/memory
             ${log_config_volume[@]+"${log_config_volume[@]}"}
+            ${searxng_url_env[@]+"${searxng_url_env[@]}"}
+            ${searxng_network[@]+"${searxng_network[@]}"}
+            ${searxng_label[@]+"${searxng_label[@]}"}
             -e "${api_token_var}"="${api_token}"
             -e "TG_BOT_TOKEN=${TG_BOT_TOKEN:-}"
             -e "SL_BOT_TOKEN=${SL_BOT_TOKEN:-}"
@@ -642,18 +728,40 @@ start() {
 }
 
 stop() {
-    docker stop omegaclaw
+    docker stop omegaclaw 2>/dev/null || true
+    _searxng_compose stop 2>/dev/null || true
+}
+
+resume() {
+    local uses_searxng omegaclaw_running
+    if ! docker inspect omegaclaw >/dev/null 2>&1; then
+        echo "No OmegaClaw container exists. Run the launcher for initial setup." >&2
+        return 1
+    fi
+
+    uses_searxng="$(docker inspect omegaclaw --format '{{index .Config.Labels "omegaclaw.searxng"}}')"
+    if [ "${uses_searxng}" = "true" ]; then
+        _start_searxng
+    fi
+
+    omegaclaw_running="$(docker inspect omegaclaw --format '{{.State.Running}}')"
+    if [ "${omegaclaw_running}" != "true" ]; then
+        docker start omegaclaw
+    fi
 }
 
 clean() {
-    docker rm -f omegaclaw
-    docker volume rm omegaclaw-memory
+    docker rm -f omegaclaw 2>/dev/null || true
+    _searxng_compose down -v 2>/dev/null || true
+    docker volume rm omegaclaw-memory 2>/dev/null || true
+    rm -rf "${_omegaclaw_dir}"
 }
 
 set -euo pipefail
 options "$@"
 case "${command}" in
     start) start ;;
+    resume) resume ;;
     stop) stop ;;
     clean) clean ;;
     -h) help ;;

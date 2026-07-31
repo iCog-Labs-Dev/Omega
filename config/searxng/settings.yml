@@ -1,0 +1,11 @@
+use_default_settings: true
+
+server:
+  secret_key: "change-me"  # overridden at runtime by SEARXNG_SECRET env var
+  limiter: false            # no Valkey needed for private local use
+  public_instance: false
+
+search:
+  formats:
+    - html
+    - json                  # required — without this all JSON API calls return 403

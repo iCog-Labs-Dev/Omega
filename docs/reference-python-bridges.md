@@ -105,12 +105,12 @@ Prolog helpers imported via `import_prolog_functions_from_file`.
 
 ## `src/websearch.py`
 
-A python helper for using ddgs to expose websearch to the agent.
+Web search bridge backed by a self-hosted SearXNG instance. Queries are sent
+to `${SEARXNG_URL}/search?q=...&format=json` over HTTP. No API key required.
 
 | Function | Purpose |
 |---|---|
-| `search_(query, max_results=10)` | Performs a DuckDuckGo text search using `DDGS` and returns a list of result dictionaries containing `title`, `url`, and `snippet`.                                             |
-| `search(query, max_results=10)`  | Wraps `search_` and formats the search results into a MeTTa-like parenthesized string containing each result’s title and snippet. Returns an empty string if the search fails. |
+| `search(query, max_results=10)` | Send `query` to SearXNG and return results as a MeTTa parenthesized string: `(TITLE: … SNIPPET: …) ` per result. Returns `""` if `SEARXNG_URL` is unset or the request fails. |
 
 ## Calling conventions
 
