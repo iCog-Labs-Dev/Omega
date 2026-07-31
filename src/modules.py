@@ -23,8 +23,8 @@ import os
 import resource
 from typing import Callable, Dict
 
-from providers.lib_llm_ext import callActiveProvider
-from src.helper import strip_code_fences, strip_metta, _field, _extract_current_frame
+from lib_llm_ext import callActiveProvider
+from src.helper import strip_code_fences, strip_metta, _field
 from src.gates import run_gate
 
 class ModuleResult:

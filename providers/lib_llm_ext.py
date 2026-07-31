@@ -167,23 +167,6 @@ def useLocalEmbedding(atom):
     ).tolist()
 
 
-
-# Active provider tracking — set once by the loop via setActiveProvider,
-# read by modules and any internal component that needs to call the LLM
-# without knowing which provider the loop is configured to use.
-_active_provider_name: str = "Anthropic"
-
-def setActiveProvider(provider_name: str, model_name: str = "") -> None:
-    """Called by the loop when it initializes to register the active provider.
-    Only overrides the model name for OpenAI, since (LLM) in loop.metta is
-    OpenAI-specific. Other providers use their registered model names."""
-    global _active_provider_name
-    _active_provider_name = str(provider_name).strip().strip("'\"")
-    if model_name and provider_name == "OpenAI":
-        provider = _get_provider(provider_name)
-        if provider and isinstance(provider, AIProvider):
-            provider._model_name = str(model_name)
-
 def callActiveProvider(content: str, max_tokens: int = 512) -> str:
-    """Call whichever provider the loop is currently configured to use."""
-    return callProvider(_active_provider_name, content, max_tokens)
+    import providers
+    return providers.llmProviderChat(content, max_tokens, "medium")

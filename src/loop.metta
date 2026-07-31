@@ -19,7 +19,6 @@
           (change-state! &prevmsg "")
           (change-state! &lastresults "")
           (change-state! &loops (maxNewInputLoops))
-          (py-call (providers.lib_llm_ext.setActiveProvider (provider) (LLM)))
           ))
 
 (= (initKnowledge)
