@@ -10,7 +10,6 @@ from io import BytesIO
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import BufferedInputFile
 from aiogram.filters import Command
-from aiogram.exceptions import TelegramBadRequest
 
 try:
     from telegramify_markdown import markdownify
@@ -650,7 +649,7 @@ class _TelegramChannel:
                     if admin.user.id not in self.admin_ids:
                         self.admin_ids.append(int(admin.user.id))
                 logging.info(f"Loaded admins from group {eval_chat_id}. Total admins: {len(self.admin_ids)}")
-            except TelegramBadRequest as e:
+            except Exception as e:
                 # A one-to-one chat has no administrators to load, and Telegram
                 # reports asking for them as a bad request. Expected, not a
                 # fault: logging it as an error made a healthy start look broken.
@@ -658,8 +657,6 @@ class _TelegramChannel:
                     logging.info(f"Chat {eval_chat_id} is a private chat; no admins to load.")
                 else:
                     logging.error(f"Failed to fetch administrators for chat {eval_chat_id}: {e}")
-            except Exception as e:
-                logging.error(f"Failed to fetch administrators for chat {eval_chat_id}: {e}")
 
     async def _runner(self, token):
         """Build the aiogram bot, start polling, and run until stopped."""
