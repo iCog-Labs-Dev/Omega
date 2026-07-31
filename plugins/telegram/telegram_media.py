@@ -10,6 +10,7 @@ from io import BytesIO
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import BufferedInputFile
 from aiogram.filters import Command
+from aiogram.exceptions import TelegramBadRequest
 
 try:
     from telegramify_markdown import markdownify
@@ -640,6 +641,26 @@ class _TelegramChannel:
                 "I can process text, images, PDF files, and voice/audio messages. Video and other file types are not supported."
             )
 
+    async def _load_chat_admins(self, chat_ids):
+        """Add each chat's administrators to the admin list."""
+        for eval_chat_id in dict.fromkeys(chat_ids):
+            try:
+                admins = await self.bot.get_chat_administrators(eval_chat_id)
+                for admin in admins:
+                    if admin.user.id not in self.admin_ids:
+                        self.admin_ids.append(int(admin.user.id))
+                logging.info(f"Loaded admins from group {eval_chat_id}. Total admins: {len(self.admin_ids)}")
+            except TelegramBadRequest as e:
+                # A one-to-one chat has no administrators to load, and Telegram
+                # reports asking for them as a bad request. Expected, not a
+                # fault: logging it as an error made a healthy start look broken.
+                if "no administrators in the private chat" in str(e):
+                    logging.info(f"Chat {eval_chat_id} is a private chat; no admins to load.")
+                else:
+                    logging.error(f"Failed to fetch administrators for chat {eval_chat_id}: {e}")
+            except Exception as e:
+                logging.error(f"Failed to fetch administrators for chat {eval_chat_id}: {e}")
+
     async def _runner(self, token):
         """Build the aiogram bot, start polling, and run until stopped."""
         self.bot = Bot(token=token)
@@ -657,15 +678,7 @@ class _TelegramChannel:
                 if normalized_chat_id:
                     chat_ids_for_admin_scan.append(normalized_chat_id)
 
-            for eval_chat_id in dict.fromkeys(chat_ids_for_admin_scan):
-                try:
-                    admins = await self.bot.get_chat_administrators(eval_chat_id)
-                    for admin in admins:
-                        if admin.user.id not in self.admin_ids:
-                            self.admin_ids.append(int(admin.user.id))
-                    logging.info(f"Loaded admins from group {eval_chat_id}. Total admins: {len(self.admin_ids)}")
-                except Exception as e:
-                    logging.error(f"Failed to fetch administrators for chat {eval_chat_id}: {e}")
+            await self._load_chat_admins(chat_ids_for_admin_scan)
             
             self.dp.message.register(self._start_cmd, Command("start"))
             self.dp.message.register(self._about_cmd, Command("about"))

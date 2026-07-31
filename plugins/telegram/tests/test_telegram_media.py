@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import sys
 import threading
@@ -353,6 +354,68 @@ def test_plugin_registration_exposes_comm_channel():
     assert hasattr(channel, "config") and hasattr(channel, "receive") and hasattr(channel, "send")
 
 
+def _admin_scan_levels(raised, admin_ids=()):
+    """Run the real admin scan against a bot that raises `raised`, and return
+    (log level numbers emitted, resulting admin_ids)."""
+    ch = _new_channel(admin_ids=admin_ids)
+
+    class _Bot:
+        async def get_chat_administrators(self, chat_id):
+            if isinstance(raised, BaseException):
+                raise raised
+            return raised
+
+    ch.bot = _Bot()
+    levels = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            levels.append(record.levelno)
+
+    handler = _Capture()
+    root = logging.getLogger()
+    prior = root.level
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    try:
+        asyncio.run(ch._load_chat_admins([777]))
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(prior)
+    return levels, ch.admin_ids
+
+
+def test_private_chat_admin_scan_is_not_an_error():
+    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.methods import GetChatAdministrators
+
+    exc = TelegramBadRequest(
+        method=GetChatAdministrators(chat_id=777),
+        message="Bad Request: there are no administrators in the private chat")
+    levels, _ = _admin_scan_levels(exc)
+    assert logging.ERROR not in levels, levels
+    assert logging.INFO in levels, levels
+
+
+def test_other_admin_scan_failures_still_log_errors():
+    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.methods import GetChatAdministrators
+
+    exc = TelegramBadRequest(
+        method=GetChatAdministrators(chat_id=777),
+        message="Bad Request: chat not found")
+    levels, _ = _admin_scan_levels(exc)
+    assert logging.ERROR in levels, levels
+
+
+def test_admin_scan_collects_admin_ids():
+    admins = [SimpleNamespace(user=SimpleNamespace(id=5)),
+              SimpleNamespace(user=SimpleNamespace(id=6))]
+    levels, admin_ids = _admin_scan_levels(admins)
+    assert admin_ids == [5, 6], admin_ids
+    assert logging.ERROR not in levels, levels
+
+
 if __name__ == "__main__":
     test_photo_handler_buffers_image_and_queues_marker()
     test_pdf_handler_extracts_text()
@@ -365,4 +428,7 @@ if __name__ == "__main__":
     test_group_message_requires_tag_or_reply()
     test_dm_authorization_gates_non_admin_allows_admin()
     test_plugin_registration_exposes_comm_channel()
+    test_private_chat_admin_scan_is_not_an_error()
+    test_other_admin_scan_failures_still_log_errors()
+    test_admin_scan_collects_admin_ids()
     print("all telegram_media tests passed")
