@@ -1,6 +1,12 @@
-# omegaclaw-telegram plugin dependencies not already in core.
-# openai is already a core dependency (used for the OpenRouter vision + Whisper calls).
+# omegaclaw-telegram plugin dependencies.
+#
+# Everything the plugin imports is listed, including openai and PyYAML, which a
+# core image already provides. Leaving those out made the plugin installable
+# only inside a core image: on any other machine the test suites stopped at
+# ModuleNotFoundError.
 Pillow>=10.0.0
 pypdf>=4.0.0
 aiogram>=3.0.0
 telegramify-markdown>=0.1.0
+openai>=1.0.0
+PyYAML>=6.0
