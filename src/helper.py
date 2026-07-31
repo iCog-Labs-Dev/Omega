@@ -31,6 +31,7 @@ LLM_COMMANDS = {
     "write-file",
     "get-io-policy",
     "write-file-b64",
+    "version",
 }
 TWO_ARG_COMMANDS = {
     "write-file",
@@ -275,6 +276,8 @@ def test_balance_parenthesis():
     assert balance_parentheses('(- Found a bug)') == '((pin "Found a bug"))'
     assert balance_parentheses('- Found\na\nbug') == '((pin "Found\\na\\nbug"))'
     assert balance_parentheses('(- Found a bug') == '((pin "Found a bug"))'
+    assert balance_parentheses('(version)\n(send "done")') == '((version) (send "done"))'
+    assert balance_parentheses('(send "checking")\n(version)') == '((send "checking") (version))'
 
 if __name__ == "__main__":
     test_omegaclaw_version()
