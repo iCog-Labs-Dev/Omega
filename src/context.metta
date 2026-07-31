@@ -881,10 +881,14 @@
    (cfv2-add-deliverable $artifact))
 
 (= (complete-goals-stm $summary)
-   (cfv2-complete-current-frame-to-stm $summary))
+   (progn
+      (ad-clear-last-directive)
+      (cfv2-complete-current-frame-to-stm $summary)))
 
 (= (complete-goals-ltm $summary)
-   (cfv2-complete-current-frame-to-ltm $summary))
+   (progn
+      (ad-clear-last-directive)
+      (cfv2-complete-current-frame-to-ltm $summary)))
 
 (= (clear-frame-junk $summary)
    (cfv2-clear-current-frame-junk $summary))

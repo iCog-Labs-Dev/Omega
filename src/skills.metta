@@ -158,16 +158,6 @@
 (= (pin $x)
    PIN-SUCCESS)
 
-(= (complete-goals-stm $summary)
-   (progn
-      (ad-clear-last-directive)
-      (ctx-complete-goals-to-stm $summary)))
-
-(= (complete-goals-ltm $summary)
-   (progn
-      (ad-clear-last-directive)
-      (ctx-complete-goals-to-ltm $summary)))
-
 (= (compact-frame $summary)
    (progn
       (ctx-record-history FrameCompacted $summary)
