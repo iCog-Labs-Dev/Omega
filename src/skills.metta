@@ -110,8 +110,9 @@
 
 ; Media skills, backed by the media_handler module of the telegram_media plugin
 ; (plugins/telegram). Registered here rather than by the plugin itself: skills
-; added from a MeTTa plugin's loadOmegaClawPlugin are not visible in getSkills
-; (see tests/smoke_telegram_plugin.metta).
+; added from a MeTTa plugin's loadOmegaClawPlugin are not visible in getSkills,
+; verified on SWI-Prolog 10.0.2 with PeTTa v1.0.4. Move them into the plugin
+; once that is fixed upstream.
 (= (describe-image $query)
    (py-call (media_handler.describe_image $query)))
 
