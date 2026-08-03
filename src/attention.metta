@@ -53,6 +53,12 @@
            (cfv2-record-frame-note DirectiveRejected $note))
        _))
 
+;; Task values follow the lowercase task names advertised in the prompt.
+(= (ad-execution-eligible $task $gate $admitted)
+   (and (== $task "generate")
+        (and (== $gate "python-syntax")
+             (== $admitted True))))
+
 (= (execute-last-code)
    (if (== (get-state &ad-last-target) "")
        (progn
@@ -62,12 +68,10 @@
              "output= attempts=0"
              False)
           (DirectiveResult (admitted False) (output "") (reason "no code to execute") (attempts 0)))
-   (let $eligible-flag
-        (py-call (modules.directive_execution_eligible
-                    (repr (get-state &ad-last-task))
-                    (repr (get-state &ad-last-gate))
-                    (repr (get-state &ad-last-admitted))))
-   (if (== $eligible-flag 1)
+   (if (== (ad-execution-eligible
+               (get-state &ad-last-task)
+               (get-state &ad-last-gate)
+               (get-state &ad-last-admitted)) True)
    (let* (($raw      (get-state &ad-last-output))
           ($code     (py-call (helper.strip_code_fences (repr $raw))))
           ($result   (py-call (modules.execute_directive_from_metta
@@ -107,17 +111,20 @@
              "output= attempts=0"
              False)
           (DirectiveResult (admitted False) (output "")
-                           (reason "last directive is not admitted Python code") (attempts 0)))))))
+                           (reason "last directive is not admitted Python code") (attempts 0))))))
 
-(= (dispatch-directive $args)
-   (let* (($args_str (py-call (modules.dispatch_directive_args_from_metta (repr $args))))
-          ($target   (py-call (modules.directive_args_field $args_str "target")))
-          ($task     (py-call (modules.directive_args_field $args_str "task")))
-          ($gate     (py-call (modules.directive_args_field $args_str "gate")))
-          ($criteria (py-call (modules.directive_args_field $args_str "criteria")))
-          ($priority (py-call (modules.directive_args_field $args_str "priority")))
-          ($result   (py-call (modules.dispatch_directive_from_metta
-                                 (repr $args)
+;; Internal parser-recovery function — not exposed in SKILL_SET.
+;; Emitted by balance_parentheses when dispatch-directive receives wrong arity.
+(= (directive-format-error $reason)
+   (DirectiveResult
+      (admitted False)
+      (output   "")
+      (reason   $reason)
+      (attempts 0)))
+
+(= (dispatch-directive $target $task $gate $criteria $priority $slice)
+   (let* (($result   (py-call (modules.dispatch_directive_from_metta
+                                 $target $task $gate $criteria $priority $slice
                                  (contextFrameForPrompt))))
           ($output   (py-call (modules.directive_result_field $result "output")))
           ($admitted-flag (py-call (modules.directive_result_admitted_flag $result)))
@@ -152,7 +159,7 @@
       ("AVAILABLE_DIRECTIVE_MODULES:" (newline)
        (ad-list-modules) (newline)
        "AVAILABLE_GATES: python-syntax | metta-syntax | math-result | nonempty | exec-success | research-quality | task-consistency | passthrough" (newline)
-       "AVAILABLE_TASKS: Generate | Critique | Revise | Execute | Evaluate" (newline)
+       "AVAILABLE_TASKS: generate | critique | revise | execute | evaluate" (newline)
        "FORMAT: dispatch-directive target task gate \"criteria\" priority slice  (criteria must be quoted, use \"\" for none)")))
 (= (show-last-directive)
    (ad-last-directive))
@@ -179,7 +186,7 @@
 (= (ad-init)
    (progn
       (ad-clear-last-directive)
-      (println! "Initializing attention directives")
+      (log INFO "attention" "Initializing attention directives")
       ATTENTION-DIRECTIVES-INITIALIZED))
 
 (= (initAttentionDirectives)
