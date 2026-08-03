@@ -2,6 +2,7 @@ from collections import deque
 import json
 import re
 import hashlib
+import shlex
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 import os
@@ -47,6 +48,7 @@ LLM_COMMANDS = {
     "write-file",
     "get-io-policy",
     "write-file-b64",
+    "dispatch-directive",
 }
 TWO_ARG_COMMANDS = {
     "write-file",
@@ -54,6 +56,13 @@ TWO_ARG_COMMANDS = {
     "write-file-b64",
     "ctx-add-hypothesis",
     "ctx-add-result",
+}
+
+# Commands with a fixed arity that must be passed as separate MeTTa atoms.
+# Each value is the expected number of arguments.
+# balance_parentheses emits directive-format-error for wrong arity.
+STRUCTURED_COMMAND_ARITY = {
+    "dispatch-directive": 6,
 }
 
 def compact_plain(value, limit=1200):
@@ -173,6 +182,25 @@ def balance_parentheses(s):
             continue
         cmd = parts[0]
         rest = parts[1].strip() if len(parts) > 1 else ""
+        if cmd in STRUCTURED_COMMAND_ARITY:
+            expected = STRUCTURED_COMMAND_ARITY[cmd]
+            try:
+                parts = shlex.split(rest) if rest else []
+            except ValueError:
+                sexprs.append(f'(directive-format-error "{cmd} has malformed quoted arguments")')
+                continue
+            if len(parts) != expected:
+                got = len(parts)
+                msg = f"{cmd} expects {expected} arguments; received {got}"
+                sexprs.append(f'(directive-format-error "{msg}")')
+            else:
+                # target task gate: plain atoms (0,1,2)
+                # criteria: emit as quoted string (3)
+                # priority: numeric atom (4)
+                # slice: plain atom (5)
+                args = [*parts[:3], json.dumps(parts[3]), *parts[4:]]
+                sexprs.append(f"({cmd} {' '.join(args)})")
+            continue
         if cmd in TWO_ARG_COMMANDS:
             if not rest:
                 sexprs.append(f"({cmd})")
