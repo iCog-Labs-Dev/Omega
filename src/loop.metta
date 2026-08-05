@@ -33,6 +33,8 @@
                          "CURRENT_CONTEXT_FRAME_S_EXPR: " (contextFrameForPrompt) (newline)
                          "SKILLS: " (getSkills) (newline)
                          "CONTEXT_FRAME_SKILLS: " (contextFramesSkills) (newline)
+                         "DIRECTIVE_SKILLS: " (getDirectiveSkills) (newline)
+                         "DIRECTIVE_MODULES: " (getDirectiveModules) (newline)
                          (getPromptExtensions) (newline)
                          "OUTPUT_FORMAT: Up to 5 lines, do not wrap quotes around args, do not use variables:" (newline)
                          "toolName1 arg1" (newline)
@@ -72,6 +74,7 @@
                                (initPlugins)
                                (initChannels)
                                (initContextFrame)
+                               (initAttentionDirectives)
                                (llmProviderStart (provider)))
           (change-state! &loops (- (get-state &loops) 1)))
 

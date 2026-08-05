@@ -95,6 +95,22 @@
        "- Complete with durable reusable memory: complete-goals-ltm summary" (newline)
        "- Clear transient frame data: clear-frame-junk summary"))
 
+(= (getDirectiveSkills)
+      ("ATTENTION_DIRECTIVE_SKILLS:"
+       "- Delegate a task to a sub-agent module: dispatch-directive target task gate \"criteria\" priority slice" (newline)
+       "  target: module name from DIRECTIVE_MODULES" (newline)
+       "  task: generate=produce new content | critique=identify issues | revise=improve existing | execute=run code | evaluate=assess quality" (newline)
+       "  gate: python-syntax | metta-syntax | math-result | nonempty | exec-success | research-quality | task-consistency | passthrough" (newline)
+       "  criteria: use \"\" unless the directive needs explicit requirements" (newline)
+       "  slice: comma-separated frame fields to pass as context (deliverables | results | history-summary)" (newline)
+       "  Example: dispatch-directive [critic | researcher | general] [generate | critique | evaluate | revise] [research-quality | task-consistency | python-syntax] \"\" 1.0 [deliverables | results | results,deliverables]" (newline)
+       "  Researcher uses the current deliverables only and performs one focused synthesis pass." (newline)
+       "- Deliver the exact admitted result of the most recent directive: send-directive-result intro" (newline)
+       "  Use this helper when a directive-owned artifact must be sent to the user. It formats and sends the cached admitted result; use send only for a separate agent-authored message." (newline)
+       "- Execute the last admitted Python generation: execute-last-code" (newline)
+       "- Show the last executed directive and its result: show-last-directive" (newline)
+       "- Check if the last directive was admitted by its gate (True/False): last-directive-admitted"))
+
 (= (read-file $file)
    (progn (translatePredicate (exists_file $file))
           (translatePredicate (read_file_to_string $file $content ()))
