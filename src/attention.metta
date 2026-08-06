@@ -43,6 +43,22 @@
       (reason    (get-state &ad-last-reason))
       (attempts  (get-state &ad-last-attempts))))
 
+(= (ad-result-output
+      (DirectiveResult (output $output) (admitted $admitted) (reason $reason) (attempts $attempts)))
+   $output)
+
+(= (ad-result-admitted
+      (DirectiveResult (output $output) (admitted $admitted) (reason $reason) (attempts $attempts)))
+   $admitted)
+
+(= (ad-result-reason
+      (DirectiveResult (output $output) (admitted $admitted) (reason $reason) (attempts $attempts)))
+   $reason)
+
+(= (ad-result-attempts
+      (DirectiveResult (output $output) (admitted $admitted) (reason $reason) (attempts $attempts)))
+   $attempts)
+
 ;; Execution
 (= (ad-record-to-frame $note $variant $metrics $admitted)
    (if (== (cfv2-has-current-frame) True)
@@ -59,11 +75,36 @@
         (and (== $gate "python-syntax")
              (== $admitted True))))
 
+;; Directive policy owns which frame data a module may receive.
+(= (ad-context-for-slice deliverables)
+   (py-str ("deliverables: " (get-state &cfv2-current-deliverables))))
+
+(= (ad-context-for-slice results)
+   (py-str ("results: " (get-state &cfv2-current-results))))
+
+(= (ad-context-for-slice history-summary)
+   (py-str ("history-summary: " (get-state &cfv2-current-history-summary))))
+
+(= (ad-context-for-slice results,deliverables)
+   (py-str ("results: " (get-state &cfv2-current-results) (newline)
+            "deliverables: " (get-state &cfv2-current-deliverables))))
+
+(= (ad-context-for-slice deliverables,results)
+   (py-str ("deliverables: " (get-state &cfv2-current-deliverables) (newline)
+            "results: " (get-state &cfv2-current-results))))
+
+(= (ad-effective-slice $target $slice)
+   (if (== $target "researcher") deliverables $slice))
+
+(= (ad-max-attempts $target $priority)
+   (if (== $target "researcher") 1
+       (if (>= $priority 1.0) 3 1)))
+
 (= (execute-last-code)
    (if (== (get-state &ad-last-target) "")
        (progn
           (ad-record-to-frame
-             "target=python-executor task=Execute admitted=False attempts=0 reason=no code to execute"
+             "target=python-executor task=execute admitted=False attempts=0 reason=no code to execute"
              ExecutionOutput
              "output= attempts=0"
              False)
@@ -74,25 +115,24 @@
                (get-state &ad-last-admitted)) True)
    (let* (($raw      (get-state &ad-last-output))
           ($code     (py-call (helper.strip_code_fences (repr $raw))))
-          ($result   (py-call (modules.execute_directive_from_metta
+          ($result   (sread (py-call (modules.run_directive
                                  (repr "python-executor")
                                  (repr $code)
-                                 (repr "Execute")
+                                 (repr "execute")
                                  (repr "exec-success")
                                  (repr "")
-                                 (repr 1))))
-          ($output   (py-call (modules.directive_result_field $result "output")))
-          ($admitted-flag (py-call (modules.directive_result_admitted_flag $result)))
-          ($admitted (if (== $admitted-flag 1) True False))
-          ($reason   (py-call (modules.directive_result_field $result "gate_reason")))
-          ($attempts (py-call (modules.directive_result_field $result "attempts"))))
+                                 (repr 1)))))
+          ($output   (ad-result-output $result))
+          ($admitted (ad-result-admitted $result))
+          ($reason   (ad-result-reason $result))
+          ($attempts (ad-result-attempts $result)))
       (progn
          (change-state! &ad-last-code $code)
          (ad-record-last-directive
-            "python-executor" "Execute" "exec-success" "" 1.0
+            "python-executor" "execute" "exec-success" "" 1.0
             $output $admitted $reason $attempts)
          (ad-record-to-frame
-            (py-str ("target=python-executor task=Execute"
+            (py-str ("target=python-executor task=execute"
                      " admitted=" $admitted
                      " attempts=" $attempts
                      " reason=" $reason))
@@ -106,7 +146,7 @@
             (attempts $attempts))))
        (progn
           (ad-record-to-frame
-             "target=python-executor task=Execute admitted=False attempts=0 reason=last directive is not admitted Python code"
+             "target=python-executor task=execute admitted=False attempts=0 reason=last directive is not admitted Python code"
              ExecutionOutput
              "output= attempts=0"
              False)
@@ -123,14 +163,15 @@
       (attempts 0)))
 
 (= (dispatch-directive $target $task $gate $criteria $priority $slice)
-   (let* (($result   (py-call (modules.dispatch_directive_from_metta
-                                 $target $task $gate $criteria $priority $slice
-                                 (contextFrameForPrompt))))
-          ($output   (py-call (modules.directive_result_field $result "output")))
-          ($admitted-flag (py-call (modules.directive_result_admitted_flag $result)))
-          ($admitted (if (== $admitted-flag 1) True False))
-          ($reason   (py-call (modules.directive_result_field $result "gate_reason")))
-          ($attempts (py-call (modules.directive_result_field $result "attempts"))))
+   (let* (($effective-slice (ad-effective-slice $target $slice))
+          ($context  (ad-context-for-slice $effective-slice))
+          ($attempts (ad-max-attempts $target $priority))
+          ($result   (sread (py-call (modules.run_directive
+                                 $target $context $task $gate $criteria $attempts))))
+          ($output   (ad-result-output $result))
+          ($admitted (ad-result-admitted $result))
+          ($reason   (ad-result-reason $result))
+          ($attempts (ad-result-attempts $result)))
       (progn
          (change-state! &ad-last-code "")
          (ad-record-last-directive
@@ -160,7 +201,7 @@
        (ad-list-modules) (newline)
        "AVAILABLE_GATES: python-syntax | metta-syntax | math-result | nonempty | exec-success | research-quality | task-consistency | passthrough" (newline)
        "AVAILABLE_TASKS: generate | critique | revise | execute | evaluate" (newline)
-       "FORMAT: dispatch-directive target task gate \"criteria\" priority slice  (criteria must be quoted, use \"\" for none)")))
+       "FORMAT: dispatch-directive target task gate \"criteria\" priority slice  (criteria must be quoted; slice is deliverables, results, history-summary, or results,deliverables)")))
 (= (show-last-directive)
    (ad-last-directive))
 

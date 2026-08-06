@@ -102,7 +102,7 @@
        "  task: generate=produce new content | critique=identify issues | revise=improve existing | execute=run code | evaluate=assess quality" (newline)
        "  gate: python-syntax | metta-syntax | math-result | nonempty | exec-success | research-quality | task-consistency | passthrough" (newline)
        "  criteria: use \"\" unless the directive needs explicit requirements" (newline)
-       "  slice: comma-separated frame fields to pass as context (deliverables | results | history-summary)" (newline)
+       "  slice: one supported frame-context shape: deliverables | results | history-summary | results,deliverables" (newline)
        "  Example: dispatch-directive [critic | researcher | general] [generate | critique | evaluate | revise] [research-quality | task-consistency | python-syntax] \"\" 1.0 [deliverables | results | results,deliverables]" (newline)
        "  Researcher uses the current deliverables only and performs one focused synthesis pass." (newline)
        "- Deliver the exact admitted result of the most recent directive: send-directive-result intro" (newline)
