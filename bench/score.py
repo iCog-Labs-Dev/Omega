@@ -174,8 +174,13 @@ def critique_closure(messages):
             "raised_at": raised}
 
 
-def channel_discipline(messages, collaborators, main=runner.MAIN_NAME):
-    """Metric 7.7. Every way the channel can be abused, counted."""
+def channel_discipline(messages, collaborators, main=runner.MAIN_NAME, puppets=()):
+    """Metric 7.7. Every way the channel can be abused, counted.
+
+    A puppet is scripted by the harness and answers with the same fixed text every time it
+    is addressed, so its repeats are the fixture talking, not an agent misbehaving. They
+    are excluded from the repeat count; everything a real agent does still counts.
+    """
     finals = [m for m in messages
               if m["agent"] == main and m["text"].strip().upper().startswith("FINAL ANSWER")]
     results = [m for m in messages if m["agent"] in collaborators]
@@ -189,9 +194,10 @@ def channel_discipline(messages, collaborators, main=runner.MAIN_NAME):
                    for m in earlier if m["seq"] > last_own):
             unprompted.append(message["seq"])
 
+    real = [m for m in messages if m["agent"] not in puppets]
     repeats = []
-    for index, first in enumerate(messages):
-        for second in messages[index + 1:]:
+    for index, first in enumerate(real):
+        for second in real[index + 1:]:
             if first["agent"] == second["agent"] and \
                     _similarity(first["text"], second["text"]) >= REPEAT_FLAG:
                 repeats.append([first["seq"], second["seq"]])
@@ -292,7 +298,9 @@ def score_trial(trial_dir):
                 "ratio": round(len(contributed) / len(collaborators), 3) if collaborators else None},
             "context_selectivity": context_selectivity(task, delegations),
             "critique_closure": critique_closure(messages),
-            "channel_discipline": channel_discipline(messages, collaborators),
+            "channel_discipline": channel_discipline(
+                messages, collaborators,
+                puppets={a["name"] for a in run["agents"] if a["puppet"]}),
             "frame_continuity": frame_continuity(trial_dir),
             "efficiency": efficiency(trial_dir, messages,
                                      [a["name"] for a in run["agents"] if not a["puppet"]],

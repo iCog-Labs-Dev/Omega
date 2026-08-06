@@ -16,8 +16,11 @@ so `bench/` is kept out of `Autotests/`.
 | `roles/` | Role prompts. The framed main agent is `main_plain.txt` + `frame.txt`, so configurations differ by the frame and nothing else. |
 | `tasks/` | One YAML per task: prompt, deliverables, work packages, deterministic checks, evaluator key, perturbation. |
 | `runner.py` | Runs trials: renders roles, launches containers, posts the task, watches for the final answer, writes `run.json`. |
+| `score.py` | Deterministic scoring: the task's checks against the published answer, plus the log-derived orchestration metrics. Writes `score.json`. |
+| `judge.py` | One model call per trial for the rubric lines that need reading, with the evaluator key and the deterministic results supplied as authoritative. Writes `judge.json`. |
+| `report.py` | Medians the trials of each configuration, compares orchestration against the single-agent baseline, and applies the retention bands. Writes `report.md`. |
 | `smoke.sh` | Two agents, one exchange. Run this first when anything in the plumbing changes. |
-| `test_bus.py`, `test_runner.py` | Host-only tests. No Docker, no LLM. |
+| `test_*.py` | Host-only tests. No Docker, no LLM, no API key.
 
 ## Setup
 
@@ -44,11 +47,22 @@ bench/runner.py --full                                  # every task, every conf
 Configurations: `framed` (main agent keeps a context frame via `pin`), `plain` (same
 agents, no frame), `solo` (one agent, no collaborators).
 
+Then score, judge, and report:
+
+```sh
+bench/score.py --all                                    # free, no model calls
+bench/judge.py --all                                    # one model call per trial
+bench/judge.py --dry-run bench/runs/qr1/framed/trial-1   # see the judge's prompt
+bench/report.py --json bench/runs/results.json
+```
+
 Results land in `bench/runs/<task>/<config>/trial-<n>/`:
 
 ```
 transcript.jsonl        every message, ordered, with its author — the scoring artifact
 run.json                metadata, stop reason, final answer, message count, timings
+score.json              per-check results, orchestration metrics, flags
+judge.json              per-rubric-line points with justifications
 agents/<name>/memory/   that agent's role prompt, history, vector store
 agents/<name>/docker.log
 ```
@@ -71,7 +85,23 @@ message cap (default 24), the wall clock (default 900 s), or an agent dying.
 - **The task is posted before the containers start**, so the first receive returns it.
   Posting later costs the main agent a turn answering an empty channel.
 
-## Still to build
+## Known ceilings
 
-The scorer (deterministic metrics, task checks, LLM judge) and the report. Until then a
-run produces a transcript and metadata, not a score.
+Each is marked in the code with a `ponytail:` comment naming the upgrade path.
+
+- **Token counts are estimates.** The provider's real usage never reaches the log, so
+  efficiency uses the `CHARS_SENT:` byte counts in the container logs, divided by four.
+  Good for comparing configurations under one provider; not a bill. Measured runs use
+  roughly 60,000 estimated prompt tokens for three agents against 5,000 for one — well
+  above the source's 3,000-10,000 envelope, because the loop rebuilds the whole prompt
+  every iteration.
+- **Frames are prompted, not enforced.** The framed configuration asks the main agent to
+  keep a `FRAME` block via `pin`; nothing in the runtime makes it. So config 1 versus
+  config 2 measures frame discipline, which is a weaker claim than measuring a frame layer
+  the loop maintains.
+- **Delegation coverage is keyword overlap**, not meaning. The judge confirms it.
+- **Role distinctness is lexical** (`difflib`), where the source suggests semantic
+  similarity. Borderline cases want a human look, as the source itself says.
+- **The judge is a single pass.** No panel, no adversarial second opinion.
+- **Position-blind checks.** A `set` check passes if the group appears anywhere in the
+  answer, so a right value in the wrong list still passes; the judge catches those.

@@ -159,3 +159,34 @@ def test_a_word_limit_is_counted_inside_its_marker():
     assert score._check_words(check, "<PLAQUE>one two three</PLAQUE>")[0]
     assert not score._check_words(check, "<PLAQUE>one two three four five six</PLAQUE>")[0]
     assert not score._check_words(check, "no marker at all")[0]
+
+
+def test_a_puppets_scripted_repeats_are_not_blamed_on_the_run(tmp_path):
+    """A puppet answers with fixed text every time; that is the fixture, not an agent."""
+    canned = "[RESULT QR1-A-1] Finding: A+B+D is optimal with value 147."
+    trial = build_trial(
+        tmp_path,
+        [("User", "@Main go"), ("Main", "@Agent-A enumerate"), ("Agent-A", canned),
+         ("Main", "@Agent-A are you sure?"), ("Agent-A", canned),
+         ("Main", GOOD_ANSWER)],
+        GOOD_ANSWER, [runner.MAIN_NAME, "Agent-A", "Wren"])
+    run = json.loads((trial / "run.json").read_text())
+    run["agents"][1]["puppet"] = True
+    run["puppet_reply"] = canned
+    (trial / "run.json").write_text(json.dumps(run))
+
+    result = score.score_trial(trial)
+    assert result["metrics"]["channel_discipline"]["near_identical_pairs"] == []
+    assert result["perturbed"] is True
+
+
+def test_a_real_agents_repeats_still_count(tmp_path):
+    repeated = "I have nothing further to add at this time, nothing further."
+    trial = build_trial(
+        tmp_path,
+        [("User", "@Main go"), ("Main", "@Agent-A enumerate"), ("Agent-A", repeated),
+         ("Main", "@Agent-A again?"), ("Agent-A", repeated), ("Main", GOOD_ANSWER)],
+        GOOD_ANSWER, [runner.MAIN_NAME, "Agent-A", "Wren"])
+
+    result = score.score_trial(trial)
+    assert result["metrics"]["channel_discipline"]["near_identical_pairs"] == [[3, 5]]
