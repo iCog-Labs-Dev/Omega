@@ -35,6 +35,10 @@
   loader: python
   location: "{REPO}/channels"
 
+- name: benchchannel
+  loader: python
+  location: "{REPO}/bench"
+
 - name: openaiapi
   loader: python
   location: "{REPO}/providers"
