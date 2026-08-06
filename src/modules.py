@@ -223,6 +223,12 @@ def _run_directive_cycle(
     gate: str, criteria: str, max_attempts: int
 ) -> str:
     """Core directive execution cycle: invoke module, run gate, retry on failure."""
+    if gate == "math-result":
+        context = (
+            f"{context}\n\n"
+            f"Solve this arithmetic criterion: {criteria}\n"
+            "End the response with exactly one line in this form: FINAL_ANSWER: <number>"
+        )
     attempts    = 0
     last_reason = ""
     best_output = ""

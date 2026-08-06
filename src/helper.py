@@ -23,7 +23,10 @@ LLM_COMMANDS = {
     "complete-goals-stm",
     "ctx-add-hypothesis",
     "ctx-add-result",
+    "dispatch-directive",
     "episodes",
+    "execute-last-code",
+    "last-directive-admitted",
     "metta",
     "new-autonomous-frame",
     "new-frame",
@@ -41,6 +44,7 @@ LLM_COMMANDS = {
     "show-current-frame",
     "show-frame-index",
     "show-frame-relation",
+    "show-last-directive",
     "show-root-frame",
     "switch-frame",
     "switch-mode",
@@ -49,7 +53,6 @@ LLM_COMMANDS = {
     "write-file",
     "get-io-policy",
     "write-file-b64",
-    "dispatch-directive",
 }
 TWO_ARG_COMMANDS = {
     "write-file",

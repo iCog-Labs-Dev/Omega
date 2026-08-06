@@ -201,6 +201,7 @@
        (ad-list-modules) (newline)
        "AVAILABLE_GATES: python-syntax | metta-syntax | math-result | nonempty | exec-success | research-quality | task-consistency | passthrough" (newline)
        "AVAILABLE_TASKS: generate | critique | revise | execute | evaluate" (newline)
+       "MATH_RESULT: criteria is a quoted arithmetic expression; output must end with FINAL_ANSWER: <number>" (newline)
        "FORMAT: dispatch-directive target task gate \"criteria\" priority slice  (criteria must be quoted; slice is deliverables, results, history-summary, or results,deliverables)")))
 (= (show-last-directive)
    (ad-last-directive))

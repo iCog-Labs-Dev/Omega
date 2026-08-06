@@ -4,11 +4,12 @@ Admission gates for HyperClaw attention directives.
 Each gate is a function: (output, task, criteria) -> GateResult
 - Structural validation:    python-syntax, metta-syntax
 - Execution:               exec-success
-- Numerical plausibility:  math-result  (range-aware via criteria)
+- Numerical validation:   math-result  (matches a safe arithmetic criterion)
 - Task-consistency:        task-consistency (output structure matches task type)
 - Minimal:                 nonempty, passthrough
 """
 import ast
+import math
 import re
 from src.helper import strip_code_fences
 
@@ -89,7 +90,9 @@ def gate_metta_syntax(output: str, task: str, criteria: str) -> GateResult:
 
 
 _NUMBER_LITERAL = r"-?(?:(?:\d{1,3}(?:,\d{3})+)|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?"
-_OUTPUT_NUMBER_RE = re.compile(rf"(?<![\w,.-])({_NUMBER_LITERAL})(?![\w,]|\.\d)")
+_FINAL_ANSWER_RE = re.compile(rf"^\s*FINAL_ANSWER\s*:\s*({_NUMBER_LITERAL})\s*$", re.MULTILINE)
+_MAX_MATH_CRITERIA_LENGTH = 200
+_MAX_MATH_AST_NODES = 64
 
 
 def _parse_number(value: str) -> float | None:
@@ -99,73 +102,81 @@ def _parse_number(value: str) -> float | None:
         return None
 
 
-def gate_math_result(output: str, task: str, criteria: str) -> GateResult:
-    """
-    Check that the output contains a standalone numerical result and that it
-    falls within any range specified in the criteria string.
+def _evaluate_math_criterion(criteria: str) -> float:
+    """Evaluate a bounded arithmetic expression without executing Python code."""
+    expression = criteria.strip()
+    if not expression:
+        raise ValueError("Math criterion must be an arithmetic expression")
+    if len(expression) > _MAX_MATH_CRITERIA_LENGTH:
+        raise ValueError("Math criterion is too long")
 
-    Criteria examples (all optional):
-      "between 0 and 1"   -> 0 <= value <= 1
-      "> 0"               -> value > 0
-      ">= 0.5"            -> value >= 0.5
-      "< 100"             -> value < 100
-      "<= 10"             -> value <= 10
-    If no range is specified in criteria, only presence is checked.
-    """
-    matches = _OUTPUT_NUMBER_RE.findall(output.strip())
-    if not matches:
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError as error:
+        raise ValueError("Math criterion is not a valid arithmetic expression") from error
+    if sum(1 for _ in ast.walk(tree)) > _MAX_MATH_AST_NODES:
+        raise ValueError("Math criterion is too complex")
+
+    def evaluate(node: ast.AST) -> float:
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            return float(node.value)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = evaluate(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.BinOp):
+            left, right = evaluate(node.left), evaluate(node.right)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Div):
+                return left / right
+            if isinstance(node.op, ast.FloorDiv):
+                return left // right
+            if isinstance(node.op, ast.Mod):
+                return left % right
+            if isinstance(node.op, ast.Pow):
+                if abs(right) > 100:
+                    raise ValueError("Exponent is too large")
+                return left ** right
+        raise ValueError("Math criterion contains an unsupported operation")
+
+    try:
+        value = evaluate(tree.body)
+    except (ArithmeticError, OverflowError, ValueError) as error:
+        raise ValueError(f"Could not evaluate math criterion: {error}") from error
+    if not math.isfinite(value):
+        raise ValueError("Math criterion must produce a finite number")
+    return value
+
+
+def gate_math_result(output: str, task: str, criteria: str) -> GateResult:
+    """Validate a marked final answer against a safe arithmetic criterion."""
+    try:
+        expected = _evaluate_math_criterion(criteria)
+    except ValueError as error:
+        return GateResult(False, "Invalid math criterion", str(error))
+
+    answers = _FINAL_ANSWER_RE.findall(output)
+    answer_match = _FINAL_ANSWER_RE.search(output)
+    if len(answers) != 1 or answer_match is None or output[answer_match.end():].strip():
         return GateResult(
             False,
-            "No numerical result found",
-            f"Expected a number in the response but got: '{output[:100]}'"
+            "Missing unambiguous final answer",
+            "End the response with exactly one line: FINAL_ANSWER: <number>",
         )
-
-    value = _parse_number(matches[0])
-    if value is None:
-        return GateResult(False, "Invalid numerical result", f"Could not parse '{matches[0]}' as a number")
-
-    # Range check from criteria
-    if criteria and criteria.strip():
-        c = criteria.strip().lower()
-
-        # "between X and Y"
-        if "between" in c:
-            m = re.search(rf"between\s+({_NUMBER_LITERAL})\s+and\s+({_NUMBER_LITERAL})(?![\d.])", c)
-            if not m:
-                return GateResult(False, "Invalid numeric criteria", "Expected 'between <number> and <number>'")
-            lo, hi = _parse_number(m.group(1)), _parse_number(m.group(2))
-            if lo is None or hi is None:
-                return GateResult(False, "Invalid numeric criteria", "Could not parse range bounds")
-            if not (lo <= value <= hi):
-                return GateResult(
-                    False,
-                    f"Value {value} outside range [{lo}, {hi}]",
-                    f"Expected a value between {lo} and {hi} but got {value}"
-                )
-            return GateResult(True, f"Numerical result {value} within [{lo}, {hi}]")
-
-        # ">= X", "> X", "<= X", "< X"
-        operators = [(">=", r">="), ("<=", r"<="), (">", r"(?<![<>=])>"), ("<", r"(?<![<>=])<")]
-        for op_str, op_re in operators:
-            m = re.search(rf"{op_re}\s*({_NUMBER_LITERAL})(?![\d.])", c)
-            if m:
-                bound = _parse_number(m.group(1))
-                if bound is None:
-                    return GateResult(False, "Invalid numeric criteria", f"Could not parse bound for {op_str}")
-                ops = {">=": value >= bound, ">": value > bound,
-                       "<=": value <= bound, "<": value < bound}
-                if not ops[op_str]:
-                    return GateResult(
-                        False,
-                        f"Value {value} does not satisfy {op_str} {bound}",
-                        f"Expected value {op_str} {bound} but got {value}"
-                )
-                return GateResult(True, f"Numerical result {value} satisfies {op_str} {bound}")
-
-        if re.search(r"(?:>=|<=|>|<)", c):
-            return GateResult(False, "Invalid numeric criteria", "Expected a comparison operator followed by a number")
-
-    return GateResult(True, f"Numerical result found: {matches[0]}")
+    actual = _parse_number(answers[0])
+    if actual is None or not math.isfinite(actual):
+        return GateResult(False, "Invalid final answer", "FINAL_ANSWER must be a finite number")
+    if not math.isclose(actual, expected, rel_tol=1e-9, abs_tol=1e-9):
+        return GateResult(
+            False,
+            "Final answer does not match criterion",
+            f"Expected {expected:g} from '{criteria}', got {actual:g}",
+        )
+    return GateResult(True, f"Final answer matches criterion: {expected:g}")
 
 
 def gate_nonempty(output: str, task: str, criteria: str) -> GateResult:
