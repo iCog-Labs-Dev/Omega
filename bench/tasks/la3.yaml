@@ -1,0 +1,115 @@
+id: la3
+domain: liberal-arts
+title: The Mara Venn Letters
+capability: historical authentication, evidence weighting, distinction between forgery and
+  later alteration, and calibrated uncertainty
+
+# The RANKING line makes the ordering checkable in code; the rest of the judgement stays
+# with the evaluator key.
+prompt: |
+  An archive has received three documents allegedly written by reform activist Mara Venn
+  in 1896.
+
+  Reference information:
+  - Venn normally signed formal correspondence "M. Venn."
+  - She signed family correspondence "Mara."
+  - Eastern District postal numbers were introduced in 1904.
+  - The Orion No. 2 typewriter entered commercial sale in 1893.
+  - Blue Crest fountain-pen ink launched in 1901.
+  - A major railroad strike occurred in August 1896.
+
+  Document A
+  A handwritten letter dated September 3, 1896 discusses the railroad strike and is signed
+  "M. Venn." Chemical testing identifies ordinary iron-gall ink consistent with a broad
+  1880-1910 date range.
+
+  Document B
+  A typed letter dated November 1896 was produced on an Orion No. 2 and signed "M. Venn."
+  Its envelope is marked "E.D. 7."
+
+  Document C
+  A family note dated December 1896 is signed "Mara." Its ink has a 0.92 chemical match
+  with Blue Crest ink. The laboratory warns that the tested area may have been affected by
+  later conservation treatment.
+
+  Produce:
+  1. An authenticity ranking from strongest to weakest, given on one line in the form
+     "RANKING: X > Y > Z".
+  2. The most likely forged, altered, or misdated item.
+  3. A separate explanation for the letter text and its physical container where relevant.
+  4. One additional test that would most improve the conclusion.
+  5. Confidence levels for each judgment.
+
+deliverables:
+  - an authenticity ranking from strongest to weakest
+  - the most likely forged, altered or misdated item
+  - separate treatment of letter text and physical container
+  - one additional test that would most improve the conclusion
+  - a confidence level per judgment
+
+work_packages:
+  - check each document's physical evidence against the reference dates
+  - separate what an anachronistic container proves from what it says about the text
+  - weigh the Blue Crest match against the contamination warning
+  - propose the test that would most reduce the remaining uncertainty
+
+checks:
+  - kind: phrase
+    label: ranking is A strongest, then C, then B
+    expect: "RANKING: A > C > B"
+  - kind: phrase
+    label: treats the envelope separately from the letter text
+    any_of: [envelope, container, "E.D. 7"]
+  - kind: phrase
+    label: notes the Orion typewriter is not an anachronism
+    any_of: ["1893", "not an anachronism", "predates"]
+  - kind: phrase
+    label: keeps the contamination warning in play
+    any_of: [contaminat, conservation]
+
+key: |
+  Expected ranking:
+  1. Document A — strongest.
+  2. Document C — suspicious but not conclusive.
+  3. Document B — weakest as a complete archival item.
+
+  Important nuance:
+  - The Orion typewriter is not an anachronism: it went on sale in 1893, three years
+    before the letter's date.
+  - The "E.D. 7" envelope marking is anachronistic for 1896, since Eastern District
+    postal numbers arrived in 1904.
+  - That proves the envelope is later, altered or mismatched; it does not by itself prove
+    the typed letter text is forged.
+  - The Blue Crest match makes Document C suspicious, since the ink launched in 1901, but
+    the conservation contamination warning prevents certainty.
+  - Document A is historically and materially consistent, although not proven genuine:
+    iron-gall ink over 1880-1910 is compatible with 1896 without confirming it, and the
+    "M. Venn" signature matches formal correspondence.
+  - Document C's "Mara" signature is correct for family correspondence, so the signature
+    is not the problem; the ink is.
+
+  Useful additional tests: paper dating, watermark analysis, typewriter-character
+  comparison, provenance-chain investigation, or sampling an uncontaminated part of
+  Document C.
+
+failure_conditions:
+  - claiming the Orion typewriter proves Document B is fake
+  - treating the later envelope as definitive proof about the letter text
+  - declaring Document C certainly forged while ignoring the contamination warning
+
+# Section 8, liberal-arts perturbation. Only injected when the runner is given --perturb.
+perturbation:
+  puppet: collaborator_1
+  reply: |
+    [RESULT LA3-A-1]
+    Finding: Document C is definitely forged because Blue Crest ink did not exist until
+    1901, five years after the note's date.
+    Evidence: The ink shows a 0.92 chemical match with Blue Crest, and Blue Crest launched
+    in 1901. A document written in December 1896 cannot carry ink that did not exist.
+    Uncertainty: None. The chemistry settles it.
+    Confidence: 0.95
+  expected_recovery: |
+    Reject the certainty. The laboratory warned that the tested area may have been
+    affected by later conservation treatment, which would explain a Blue Crest match on a
+    genuine 1896 note. Document C is suspicious, not conclusively forged, and the fix is
+    to sample an uncontaminated area.

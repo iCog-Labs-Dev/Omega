@@ -1,0 +1,91 @@
+id: la4
+domain: liberal-arts
+title: What Caused the Reading Boom?
+capability: historiographical causation, competing explanations, temporal reasoning, and
+  design of discriminating evidence
+
+# The <ASSESSMENT> marker makes the required length checkable.
+prompt: |
+  Between 1900 and 1910, literacy in the city of Northbridge rose from 54% to 71%.
+
+  Available information:
+  - Compulsory-schooling enforcement began in 1902.
+  - A major free public library opened in 1904.
+  - Newspaper circulation doubled between 1901 and 1909.
+  - Industrial employment and migration into the city also increased.
+  - Historian A argues that the library was the principal cause of the literacy increase.
+  - Historian B argues that schooling enforcement was the principal cause and that the
+    library mostly served people who were already literate.
+  - Surviving library records show increasing membership but do not consistently record
+    members' prior literacy.
+  - School attendance records show a substantial rise after 1902 but are incomplete for
+    poorer districts.
+
+  Produce:
+  1. A historiographical assessment of 400 to 500 words, wrapped in <ASSESSMENT> and
+     </ASSESSMENT>.
+  2. A ranking of the leading causal explanations.
+  3. A distinction between evidence of correlation and evidence of causation.
+  4. One plausible interaction among the explanations.
+  5. An archival study that could distinguish the library explanation from the schooling
+     explanation.
+
+deliverables:
+  - an assessment of 400-500 words
+  - a ranking of the leading causal explanations
+  - a distinction between correlation evidence and causation evidence
+  - one plausible interaction among the explanations
+  - an archival study that would discriminate library from schooling
+
+work_packages:
+  - weigh each explanation against the timing and the mechanism it implies
+  - identify the confounders and what the surviving records cannot settle
+  - design an archival study that separates the two leading explanations
+  - audit the assessment for causal claims the evidence does not support
+
+checks:
+  - kind: words
+    label: assessment length
+    region: ASSESSMENT
+    between: [400, 500]
+  - kind: phrase
+    label: ranks schooling enforcement above the library
+    any_of: [schooling, compulsory, school enforcement]
+  - kind: phrase
+    label: names migration or compositional change as a confounder
+    any_of: [migration, composition, confound]
+  - kind: phrase
+    label: separates correlation from causation
+    any_of: [correlation, causation]
+  - kind: phrase
+    label: proposes a discriminating archival study
+    any_of: [district, cohort, household, branch]
+
+key: |
+  A strong answer does not attribute the increase confidently to one cause.
+
+  Expected analysis:
+  - School enforcement has the strongest temporal and mechanistic evidence: it began in
+    1902, at the start of the rise, and it acts directly on children who cannot yet read.
+  - The library is a plausible contributor or amplifier, opening in 1904, partway through.
+  - Newspaper expansion may both reflect and encourage literacy, so its direction of
+    causation is ambiguous.
+  - Migration, employment composition and district differences are potential confounders:
+    a change in who lives in the city can move a city-wide rate without anyone learning
+    to read.
+  - Schooling and library use may interact: schooling creates basic literacy, while
+    libraries reinforce continued practice.
+  - Aggregate city data cannot establish individual causal pathways.
+
+  A useful archival study could compare:
+  - districts with similar schooling changes but different library access;
+  - literacy changes before and after branch openings;
+  - school attendance, library membership and later literacy at household or district
+    level;
+  - age cohorts differently exposed to the 1902 policy.
+
+failure_conditions:
+  - treating temporal sequence alone as proof
+  - ignoring migration or compositional change
+  - assuming that increased library membership demonstrates that the library created
+    literacy

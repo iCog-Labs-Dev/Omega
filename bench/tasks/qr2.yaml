@@ -1,0 +1,123 @@
+id: qr2
+domain: quantitative
+title: Fault Diagnosis Under Uncertainty
+capability: Bayesian updating, decision analysis, assumption tracking, and calculation
+  review
+
+prompt: |
+  A machine failure has exactly one of three causes:
+
+  Cause  Prior probability
+  C1     0.50
+  C2     0.30
+  C3     0.20
+
+  Two diagnostic tests have these positive-test probabilities:
+
+  Cause  P(T1 positive | cause)  P(T2 positive | cause)
+  C1     0.80                    0.30
+  C2     0.40                    0.70
+  C3     0.10                    0.90
+
+  Assume the tests are conditionally independent given the true cause.
+
+  The observed results are:
+  - T1 positive.
+  - T2 negative.
+
+  Available actions have the following total losses:
+
+  Action                            Loss if C1  Loss if C2  Loss if C3
+  Repair R1                         35          125         125
+  Repair R2                         115         25          115
+  Full diagnostic and correct repair 53          43          63
+
+  Produce:
+  1. The posterior probability of each cause.
+  2. The expected loss of each action.
+  3. The recommended action, on one line beginning "RECOMMENDED ACTION:".
+  4. The assumption most likely to invalidate the calculation.
+  5. A description of what new evidence should cause the decision to be reconsidered.
+
+deliverables:
+  - the posterior probability of each cause
+  - the expected loss of each action
+  - the recommended action
+  - the assumption most likely to invalidate the calculation
+  - what new evidence should reopen the decision
+
+work_packages:
+  - compute the unnormalized posterior weights from the priors and the observed results
+  - normalize and report the posteriors
+  - compute the expected loss of each action and rank them
+  - independently review the arithmetic and the structural assumptions
+
+checks:
+  - kind: number
+    label: posterior C1
+    expect: 0.8805
+    tolerance: 0.002
+  - kind: number
+    label: posterior C2
+    expect: 0.1132
+    tolerance: 0.002
+  - kind: number
+    label: posterior C3
+    expect: 0.0063
+    tolerance: 0.002
+  - kind: number
+    label: normalization constant
+    expect: 0.318
+    tolerance: 0.002
+  - kind: number
+    label: expected loss R1
+    expect: 45.75
+    tolerance: 0.3
+  - kind: number
+    label: expected loss R2
+    expect: 104.81
+    tolerance: 0.3
+  - kind: number
+    label: expected loss of the full diagnostic
+    expect: 51.92
+    tolerance: 0.3
+  - kind: phrase
+    label: recommends Repair R1
+    expect: "RECOMMENDED ACTION: Repair R1"
+  - kind: phrase
+    label: names conditional independence as the fragile assumption
+    any_of: [conditional independence, conditionally independent]
+
+key: |
+  T2 was negative, so the second factor is P(T2 negative | cause) = 1 - P(T2 positive).
+
+  Unnormalized posterior weights:
+  - C1: 0.50 x 0.80 x 0.70 = 0.280
+  - C2: 0.30 x 0.40 x 0.30 = 0.036
+  - C3: 0.20 x 0.10 x 0.10 = 0.002
+  Normalization constant: 0.318.
+
+  Posterior:
+  - C1 = 0.280 / 0.318 = 0.8805
+  - C2 = 0.036 / 0.318 = 0.1132
+  - C3 = 0.002 / 0.318 = 0.0063
+
+  Expected losses:
+  - R1 = 35(0.8805) + 125(0.1132) + 125(0.0063) = 45.75
+  - R2 = 115(0.8805) + 25(0.1132) + 115(0.0063) = 104.81
+  - Full diagnostic = 53(0.8805) + 43(0.1132) + 63(0.0063) = 51.92
+
+  Recommended action: Repair R1. It is cheapest in expectation, and the full diagnostic
+  costs more than simply repairing the cause that is almost certainly present.
+
+  The main structural vulnerability is the conditional-independence assumption. Shared
+  sensors or mechanisms could make the two tests correlated, which would change the
+  posteriors and could change the decision. The decision should be reopened if the tests
+  turn out to share a failure mode, if the priors are revised, or if a cheaper or more
+  reliable diagnostic becomes available.
+
+failure_conditions:
+  - using P(T2 positive) instead of P(T2 negative)
+  - failing to normalize
+  - choosing the most likely cause without evaluating action losses
+  - recommending the full diagnostic merely because it provides certainty
