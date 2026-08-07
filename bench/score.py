@@ -58,12 +58,19 @@ def _check_number(check, answer):
     return False, f"no number within {tolerance} of {expect}"
 
 
+# Ways an answer joins project letters: "A+B+E", "A, B, E", "A, B, and E", "A and B".
+# The Oxford form comes first so "and" is eaten with its comma rather than read as an item.
+_SEPARATOR = r"\s*(?:,\s*and\b|,|\+|&|/|and\b)\s*"
+# A lone letter, so the "a" starting "and" and the "t" ending "cost" are not items.
+_ITEM = r"\b[A-Za-z]\b"
+
+
 def _check_set(check, answer):
     """Pass when the answer lists exactly this group somewhere, e.g. {A, B, E} or A+B+E."""
     expect = {str(item).upper() for item in check["expect"]}
-    for match in re.finditer(r"[A-Za-z](?:\s*(?:,|\+|&|and|/)\s*[A-Za-z])+", answer):
+    for match in re.finditer(rf"{_ITEM}(?:{_SEPARATOR}{_ITEM})+", answer):
         group = {part.strip().upper() for part in
-                 re.split(r"\s*(?:,|\+|&|and|/)\s*", match.group()) if part.strip()}
+                 re.split(_SEPARATOR, match.group()) if part.strip()}
         if group == expect:
             return True, f"found {match.group().strip()}"
     return False, f"no group equal to {sorted(expect)}"
@@ -223,7 +230,9 @@ def frame_continuity(trial_dir, main=runner.MAIN_NAME):
     if not history.exists():
         return {"frames": 0, "note": "no history file"}
     text = history.read_text(errors="ignore")
-    frames = re.findall(r"FRAME(.{0,2000}?)(?=FRAME|$)", text, re.S)
+    # Split rather than match: a bounded lookahead pattern finds nothing at all once the
+    # text after the last FRAME outgrows the bound, which reads as "kept no frame".
+    frames = text.split("FRAME")[1:]
     fields = ["goal", "subgoals", "constraints", "hypotheses", "results", "rejected",
               "budget", "deliverables", "state"]
     last = frames[-1] if frames else ""
