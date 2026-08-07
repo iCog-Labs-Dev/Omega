@@ -61,9 +61,16 @@ def median(values):
 
 
 def by_config(rows):
-    """Median score and message count per (task, config)."""
+    """Median score and message count per (task, config).
+
+    Perturbed trials are excluded: a perturbed run's score reflects recovery credit on
+    top of the rubric, not the same thing a base trial measures, so mixing them into one
+    median would corrupt the framed/plain/solo comparison the benchmark exists to make.
+    """
     grouped = {}
     for row in rows:
+        if row["perturbed"]:
+            continue
         grouped.setdefault((row["task"], row["config"]), []).append(row)
     return {key: {"trials": len(group),
                   "judge_median": median([r["judge_total"] for r in group]),
@@ -130,6 +137,20 @@ def markdown(rows, medians):
                    f"| {row['trial']} | {score} | "
                    f"{row['checks'] or '-'} | {row['messages']} | {row['duration_s']} | "
                    f"{row['stop_reason']} |")
+
+    perturbed = [row for row in rows if row["perturbed"]]
+    if perturbed:
+        out += ["", "## Perturbation runs (section 8)", "",
+                "Excluded from the medians above — a perturbed run is scored for recovery, "
+                "not for the same thing a base trial measures.", "",
+                "| task | config | rubric | perturbation (/6) | recovered |",
+                "|---|---|---|---|---|"]
+        for row in perturbed:
+            rubric = row["judge_total"] if row["judge_total"] is not None else "unjudged"
+            points = row["perturbation_points"]
+            recovered = "yes" if points == 6 else "partial" if points else "unjudged"
+            out.append(f"| {row['task']} | {row['config']} | {rubric} | "
+                       f"{points if points is not None else '-'} | {recovered} |")
 
     flagged = [row for row in rows if row["flags"]]
     if flagged:
