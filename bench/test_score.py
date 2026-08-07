@@ -101,6 +101,26 @@ def test_a_clean_trial_records_its_frame(clean):
     assert frame["missing_from_last_frame"] == []
 
 
+def test_a_frame_is_still_found_under_a_long_history(tmp_path):
+    """A real history keeps growing after the frame; the frame must not vanish with it."""
+    trial = build_trial(tmp_path, [("Main", GOOD_ANSWER)], GOOD_ANSWER, [runner.MAIN_NAME],
+                        history="pin FRAME goal: portfolio subgoals: done constraints: none "
+                                "hypotheses: ABE results: QR1-A-1 rejected: none budget: 6/24 "
+                                "deliverables: done state: done\n" + "later turns\n" * 500)
+
+    frame = score.score_trial(trial)["metrics"]["frame_continuity"]
+    assert frame["frames"] == 1
+    assert frame["missing_from_last_frame"] == []
+
+
+def test_a_letter_group_is_read_however_the_answer_punctuates_it():
+    check = {"expect": ["A", "B", "E"]}
+    for written in ["A+B+E", "A, B, E", "A, B, and E", "portfolio {A, B and E}"]:
+        assert score._check_set(check, f"The answer is {written}.")[0], written
+    # Prose that happens to hold single letters is not a group.
+    assert not score._check_set(check, "total cost and value, B and E only")[0]
+
+
 def test_the_sloppy_trial_fails_the_task_checks(sloppy):
     assert sloppy["checks_passed"] == 0
 
