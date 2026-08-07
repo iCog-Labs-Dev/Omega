@@ -23,7 +23,10 @@ LLM_COMMANDS = {
     "complete-goals-stm",
     "ctx-add-hypothesis",
     "ctx-add-result",
+    "dispatch-directive",
     "episodes",
+    "execute-last-code",
+    "last-directive-admitted",
     "metta",
     "new-autonomous-frame",
     "new-frame",
@@ -33,6 +36,7 @@ LLM_COMMANDS = {
     "remember",
     "websearch",
     "send",
+    "send-directive-result",
     "send_probe",
     "shell",
     "show-active-framespace",
@@ -40,6 +44,7 @@ LLM_COMMANDS = {
     "show-current-frame",
     "show-frame-index",
     "show-frame-relation",
+    "show-last-directive",
     "show-root-frame",
     "switch-frame",
     "switch-mode",
@@ -48,7 +53,6 @@ LLM_COMMANDS = {
     "write-file",
     "get-io-policy",
     "write-file-b64",
-    "dispatch-directive",
 }
 TWO_ARG_COMMANDS = {
     "write-file",
@@ -253,6 +257,46 @@ def joinPath(parts):
 
 def projectRootDirectory():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+_PYTHON_FENCE_TAGS = {"", "py", "python", "python3"}
+
+def strip_code_fences(code: str) -> str:
+    """Return Python or untagged fenced blocks, otherwise plain input."""
+    code = code.strip()
+    blocks = []
+    block = None
+    saw_fence = False
+    previous_text = ""
+    for line in code.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            saw_fence = True
+            if block is None:
+                tag = stripped[3:].strip().lower().split(maxsplit=1)[0] if stripped[3:].strip() else ""
+                block = [] if tag in _PYTHON_FENCE_TAGS and previous_text.lower() != "output:" else False
+            else:
+                if block is not False:
+                    blocks.append("\n".join(block).strip())
+                block = None
+        elif block is not None and block is not False:
+            block.append(line)
+        elif stripped:
+            previous_text = stripped
+    if blocks:
+        return "\n\n".join(block for block in blocks if block)
+    if saw_fence:
+        return ""
+    return code
+
+def strip_metta(s: str) -> str:
+    """Strip whitespace and any wrapping MeTTa repr quote pairs (handles nested layers)."""
+    s = str(s).strip()
+    while len(s) >= 2 and (
+        (s.startswith("'") and s.endswith("'")) or
+        (s.startswith('"') and s.endswith('"'))
+    ):
+        s = s[1:-1].strip()
+    return s
 
 # ---- HyperClaw Context Frames V2 helper additions ----
 

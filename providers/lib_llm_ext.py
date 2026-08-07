@@ -167,3 +167,7 @@ def useLocalEmbedding(atom):
     ).tolist()
 
 
+def callActiveProvider(content: str, max_tokens: int = 512) -> str:
+    import providers
+    reasoning = config_get_by_key("reasoningMode", "medium")
+    return providers.llmProviderChat(content, max_tokens, reasoning)

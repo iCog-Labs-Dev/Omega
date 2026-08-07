@@ -26,6 +26,7 @@
 !(import! &self (library OmegaClaw-Core ./src/memory))
 !(import! &self (library OmegaClaw-Core ./src/frame_relation.py))
 !(import! &self (library OmegaClaw-Core ./src/context))
+!(import! &self (library OmegaClaw-Core ./src/modules.py))
 !(import! &self (library OmegaClaw-Core ./src/attention))
 !(import! &self (library OmegaClaw-Core ./src/loop))
 !(import! &self (library OmegaClaw-Core ./src/rag.py))
