@@ -75,3 +75,23 @@ def test_the_http_layer_carries_a_round_trip(tmp_path):
         assert [m["text"] for m in bus.transcript(address)] == ["@Main the task"]
     finally:
         server.shutdown()
+
+
+def test_an_agent_that_leaves_mid_poll_does_not_raise(tmp_path):
+    """Trial teardown kills containers parked in a long-poll; the reply must not blow up."""
+    import socket
+
+    channel = bus.Bus(tmp_path / "t.jsonl")
+    server, _ = bus.serve(channel, 0, host="127.0.0.1")
+    address = ("127.0.0.1", server.server_address[1])
+    try:
+        # Send a request, then hang up before the reply can be written.
+        raw = socket.create_connection(address)
+        raw.sendall(b"GET /transcript HTTP/1.1\r\nHost: x\r\n\r\n")
+        raw.close()
+
+        # The server survives: the next request is answered normally.
+        bus.post(address, "User", "still alive")
+        assert [m["text"] for m in bus.transcript(address)] == ["still alive"]
+    finally:
+        server.shutdown()

@@ -113,12 +113,22 @@ class _Handler(BaseHTTPRequestHandler):
         self._reply(404, {"error": "no such route"})
 
     def _reply(self, status, body):
+        """Answer one request, tolerating an agent that left while it was waiting.
+
+        A trial ends by removing its containers, and a container parked in a long-poll
+        dies with the request still open — so the reply lands on a closed socket. That is
+        ordinary teardown, not a failure: without this the server logs a BrokenPipeError
+        traceback per agent per trial, which makes a healthy sweep look broken.
+        """
         encoded = json.dumps(body).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
 
     def log_message(self, *args):
         """Silence per-request logging; the transcript is the record."""
