@@ -7,10 +7,10 @@ the task's evaluator key and the deterministic results in hand so it cannot cont
 number that was already checked.
 
     bench/judge.py bench/runs/qr1/framed/trial-1
-    bench/judge.py --all --model claude-opus-5
+    bench/judge.py --all --model z-ai/glm-5.2
 
-Writes `judge.json` beside `score.json`, and prints the rubric total. Requires an
-Anthropic API key: ANTHROPIC_API_KEY, or the .env the agents already use.
+Writes `judge.json` beside `score.json`, and prints the rubric total. Requires
+OPENROUTER_API_KEY, either in the environment or in the .env the agents already use.
 """
 
 import argparse
@@ -19,12 +19,17 @@ import os
 import re
 from pathlib import Path
 
-import anthropic
+import openai
 
 import runner
 
 HERE = Path(__file__).resolve().parent
-MODEL = "claude-opus-5"
+MODEL = "z-ai/glm-5.2"
+BASE_URL = "https://openrouter.ai/api/v1"
+# The judge asks again, more insistently, if the model ignores response_format and
+# returns something json.loads can't parse — not every model behind OpenRouter honors a
+# JSON schema as strictly as it's asked to.
+MAX_JSON_ATTEMPTS = 3
 
 # The source rubric, section 6. Ids are what the judge returns; the deterministic scorer
 # owns the numbers behind them, so a line is judged in light of those numbers, not
@@ -135,6 +140,44 @@ def build_prompt(task, run, score, lines):
     return "\n\n".join(parts)
 
 
+def _extract_json(text):
+    """Parse a model's JSON reply, tolerating stray prose around the object.
+
+    response_format is a request, not a guarantee, once it passes through OpenRouter to
+    whatever model is behind it — this is the fallback for a model that wraps the JSON in
+    a sentence or a code fence instead of returning it bare.
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, re.S)
+        if not match:
+            raise
+        return json.loads(match.group())
+
+
+def _call_judge(client, model, prompt, schema):
+    """One structured-output call, retried if the model doesn't return parseable JSON."""
+    messages = [{"role": "system", "content": JUDGE_SYSTEM},
+                {"role": "user", "content": prompt}]
+    last_error = None
+    for attempt in range(MAX_JSON_ATTEMPTS):
+        response = client.chat.completions.create(
+            model=model, max_tokens=16000, messages=messages,
+            response_format={"type": "json_schema",
+                             "json_schema": {"name": "verdict", "schema": schema, "strict": True}},
+        )
+        text = response.choices[0].message.content
+        try:
+            return _extract_json(text), response.usage
+        except (json.JSONDecodeError, AttributeError) as error:
+            last_error = error
+            messages.append({"role": "user", "content":
+                             "That was not a single valid JSON object matching the schema. "
+                             "Respond with ONLY the JSON object — no prose, no code fence."})
+    raise RuntimeError(f"the judge never returned parseable JSON: {last_error}")
+
+
 def judge_trial(trial_dir, client, model=MODEL):
     trial_dir = Path(trial_dir)
     run = json.loads((trial_dir / "run.json").read_text())
@@ -142,23 +185,13 @@ def judge_trial(trial_dir, client, model=MODEL):
     task = runner.load_task(run["task"])
     lines = RUBRIC + ([PERTURBATION] if run.get("puppet_reply") else [])
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=16000,
-        system=JUDGE_SYSTEM,
-        output_config={"format": {"type": "json_schema", "schema": _schema(lines)}},
-        messages=[{"role": "user", "content": build_prompt(task, run, score, lines)}],
-    )
-    if response.stop_reason == "refusal":
-        raise RuntimeError(f"the judge declined to grade {trial_dir}")
-
-    verdict = json.loads(next(b.text for b in response.content if b.type == "text"))
+    verdict, usage = _call_judge(client, model, build_prompt(task, run, score, lines),
+                                 _schema(lines))
     result = collect(verdict, lines)
     result.update({
         "task": run["task"], "config": run["config"], "trial": run["trial"],
         "model": model, "summary": verdict["summary"],
-        "usage": {"input_tokens": response.usage.input_tokens,
-                  "output_tokens": response.usage.output_tokens},
+        "usage": {"input_tokens": usage.prompt_tokens, "output_tokens": usage.completion_tokens},
     })
     (trial_dir / "judge.json").write_text(json.dumps(result, indent=2))
     return result
@@ -188,14 +221,14 @@ def collect(verdict, lines):
 
 def api_key():
     """The key from the environment, or from the .env the agents already use."""
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return os.environ["ANTHROPIC_API_KEY"]
+    if os.environ.get("OPENROUTER_API_KEY"):
+        return os.environ["OPENROUTER_API_KEY"]
     env = HERE.parent / ".env"
     if env.exists():
-        found = re.search(r"^ANTHROPIC_API_KEY=(.+)$", env.read_text(), re.M)
+        found = re.search(r"^OPENROUTER_API_KEY=(.+)$", env.read_text(), re.M)
         if found:
             return found.group(1).strip().strip("'\"")
-    raise SystemExit("no ANTHROPIC_API_KEY in the environment or .env")
+    raise SystemExit("no OPENROUTER_API_KEY in the environment or .env")
 
 
 def main():
@@ -220,7 +253,7 @@ def main():
             print(build_prompt(runner.load_task(run["task"]), run, score, lines))
         return
 
-    client = anthropic.Anthropic(api_key=api_key())
+    client = openai.OpenAI(api_key=api_key(), base_url=BASE_URL)
     for trial in trials:
         result = judge_trial(trial, client, args.model)
         head = f"{result['task']}/{result['config']}/trial-{result['trial']}"
