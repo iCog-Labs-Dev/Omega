@@ -295,6 +295,7 @@ def main():
                         help="seconds to keep listening after the first FINAL ANSWER")
     parser.add_argument("--out", type=Path, default=HERE / "runs")
     args = parser.parse_args()
+    args.out = args.out.resolve()
 
     if args.full:
         task_ids = sorted(p.stem for p in (HERE / "tasks").glob("*.yaml"))
