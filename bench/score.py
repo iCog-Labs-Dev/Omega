@@ -224,21 +224,24 @@ def channel_discipline(messages, collaborators, main=runner.MAIN_NAME, puppets=(
             "finalized_before_any_result": premature}
 
 
+FRAME_SKILLS = ["ctx-add-hypothesis", "ctx-add-result",
+                "complete-goals-stm", "complete-goals-ltm"]
+
+
 def frame_continuity(trial_dir, main=runner.MAIN_NAME):
-    """Metric 7.8. Frames live in the main agent's own history, not in the channel."""
+    """Metric 7.8. How much the main agent drove the runtime's own context frame.
+
+    The frame itself is maintained by the runtime, not written by the agent, so there is
+    no frame text to find in history.metta. What is findable is the agent's own calls
+    into it: each of FRAME_SKILLS lands in its history the same way any other action does.
+    """
     history = trial_dir / "agents" / main / "memory" / "history.metta"
     if not history.exists():
-        return {"frames": 0, "note": "no history file"}
+        return {"frame_calls": 0, "note": "no history file"}
     text = history.read_text(errors="ignore")
-    # Split rather than match: a bounded lookahead pattern finds nothing at all once the
-    # text after the last FRAME outgrows the bound, which reads as "kept no frame".
-    frames = text.split("FRAME")[1:]
-    fields = ["goal", "subgoals", "constraints", "hypotheses", "results", "rejected",
-              "budget", "deliverables", "state"]
-    last = frames[-1] if frames else ""
-    return {"frames": len(frames),
-            "fields_in_last_frame": [f for f in fields if f"{f}:" in last.lower()],
-            "missing_from_last_frame": [f for f in fields if f"{f}:" not in last.lower()]}
+    calls = {skill: text.count(skill) for skill in FRAME_SKILLS}
+    return {"frame_calls": sum(calls.values()), "calls": calls,
+            "completed": calls["complete-goals-stm"] > 0 or calls["complete-goals-ltm"] > 0}
 
 
 def efficiency(trial_dir, messages, agents, collaborators):

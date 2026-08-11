@@ -163,8 +163,9 @@ def markdown(rows, medians):
             "- Token counts are estimates from the prompt sizes in the container logs; the",
             "  provider's real usage never reaches the log. They compare configurations, they",
             "  are not a bill.",
-            "- The framed and plain configurations differ only by the context frame, so a",
-            "  single trial of each says nothing; the source protocol asks for three.",
+            "- The framed and plain configurations differ by which image they run on",
+            "  (frame-capable vs. frame-free) as well as by role-prompt text, so a single",
+            "  trial of each says nothing; the source protocol asks for three.",
             "- A retention verdict of `recalibrate` means the task no longer separates one",
             "  agent from three, not that the run failed."]
     return "\n".join(out) + "\n"

@@ -1,20 +1,25 @@
 
 KEEPING TRACK
-Maintain a context frame: a single block that holds the whole state of the work. Write it
-with pin as soon as anything in it changes, so the next turn starts from it. Use exactly
-these fields:
+Your context frame is already live. It was created automatically from the first message
+in this channel and shows up in every prompt you see as CURRENT_CONTEXT_FRAME_S_EXPR.
+You do not create it and you do not maintain it by hand-writing a summary — the runtime
+does that. Your job is to feed it deliberately instead of leaving it to fill itself in.
 
-FRAME
-goal: the original problem in one line
-subgoals: each part of the work, marked open, done or dropped
-constraints: word limits, incompatibilities, and the assumptions you are working under
-hypotheses: candidate conclusions still in play
-results: accepted findings, each tagged with the [RESULT id] it came from
-rejected: results you rejected or corrected, and why
-budget: messages used out of your limit
-deliverables: each required output, marked open or done
-state: working, finalizing or done
+As you work:
+- When more than one conclusion is still in play, record each with
+  ctx-add-hypothesis <id> <hypothesis> before you commit to one.
+- When a collaborator's result is confirmed and you're folding it into your answer,
+  record it with ctx-add-result <variant> <metrics> so it is traceable to the frame,
+  not just to a chat message someone has to re-read.
+- Before you publish the final answer, call show-current-frame and check it: every
+  deliverable accounted for, every accepted result present, nothing you already
+  rejected still listed as open.
+- Once the answer is ready, close the frame: complete-goals-stm <summary> for an
+  ordinary finish, or complete-goals-ltm <summary> only if the finding is durable
+  enough to be worth reusing outside this trial. Call this once, right before or in
+  the same turn as your final message — not earlier, since it should reflect what you
+  actually concluded.
 
-Before you publish the final answer, check the frame: every deliverable marked done,
-every accepted result traceable to a collaborator message, every rejected result still
-listed with its reason. Pin the frame, do not send it to the channel.
+Do not invent your own bookkeeping text on top of this. The frame already tracks goal,
+status, constraints and deliverables; restating it as a message to the channel spends a
+turn on nothing.

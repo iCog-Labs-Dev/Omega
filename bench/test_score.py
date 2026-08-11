@@ -55,9 +55,10 @@ def clean(tmp_path):
                   "Agent-A's enumeration is confirmed."),
          ("Main", GOOD_ANSWER)],
         GOOD_ANSWER, [runner.MAIN_NAME, "Agent-A", "Wren"],
-        history="pin FRAME goal: portfolio subgoals: done constraints: budget 90 "
-                "hypotheses: ABE results: QR1-A-1 rejected: none budget: 6/24 "
-                "deliverables: done state: done",
+        history="ctx-add-hypothesis ABE the value-maximizing portfolio is A, B, E\n"
+                "ctx-add-result QR1-A-1 cost=89 value=154\n"
+                "ctx-add-result QR1-B-1 reoptimized=BDE value=134\n"
+                "complete-goals-stm portfolio solved, A B E at 154, reoptimized to B D E",
         logs={runner.MAIN_NAME: "CHARS_SENT: 4000\nCHARS_SENT: 4400\n"})
     return score.score_trial(trial)
 
@@ -97,20 +98,22 @@ def test_a_clean_trial_reads_as_well_organised(clean):
 def test_a_clean_trial_records_its_frame(clean):
     frame = clean["metrics"]["frame_continuity"]
 
-    assert frame["frames"] == 1
-    assert frame["missing_from_last_frame"] == []
+    assert frame["frame_calls"] == 4
+    assert frame["calls"] == {"ctx-add-hypothesis": 1, "ctx-add-result": 2,
+                               "complete-goals-stm": 1, "complete-goals-ltm": 0}
+    assert frame["completed"] is True
 
 
 def test_a_frame_is_still_found_under_a_long_history(tmp_path):
-    """A real history keeps growing after the frame; the frame must not vanish with it."""
+    """A real history keeps growing after the calls; they must not vanish with it."""
     trial = build_trial(tmp_path, [("Main", GOOD_ANSWER)], GOOD_ANSWER, [runner.MAIN_NAME],
-                        history="pin FRAME goal: portfolio subgoals: done constraints: none "
-                                "hypotheses: ABE results: QR1-A-1 rejected: none budget: 6/24 "
-                                "deliverables: done state: done\n" + "later turns\n" * 500)
+                        history="ctx-add-hypothesis ABE the value-maximizing portfolio\n"
+                                "ctx-add-result QR1-A-1 cost=89 value=154\n"
+                                "complete-goals-stm portfolio solved\n" + "later turns\n" * 500)
 
     frame = score.score_trial(trial)["metrics"]["frame_continuity"]
-    assert frame["frames"] == 1
-    assert frame["missing_from_last_frame"] == []
+    assert frame["frame_calls"] == 3
+    assert frame["completed"] is True
 
 
 def test_a_letter_group_is_read_however_the_answer_punctuates_it():
