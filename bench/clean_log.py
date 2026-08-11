@@ -12,6 +12,7 @@ record of what happened legible after the fact.
 
     bench/clean_log.py path/to/docker.log            # print to stdout
     bench/clean_log.py path/to/trial-1/               # write a .clean.log next to each
+    docker logs -f <container> | bench/clean_log.py -   # filter a live stream as it arrives
 """
 
 import argparse
@@ -79,38 +80,71 @@ def unwrap_response(message):
     return message[start:end]
 
 
-def clean(raw):
-    lines = raw.splitlines()
-    start = next((i for i, l in enumerate(lines) if LINE_RE.match(l)), len(lines))
-    out = [f"[omitted {start} lines of MeTTa interpreter startup]"] if start else []
+class Cleaner:
+    """Line-by-line cleaner, so the same logic reads a whole file or filters a live stream.
 
-    for line in lines[start:]:
+    feed() takes one raw log line (no trailing newline) and returns its cleaned form, or
+    None if the line should be dropped. State is just the startup-skip count, so a live
+    `docker logs -f` stream can be filtered exactly like a finished file, one line as it
+    arrives instead of the whole thing at once.
+    """
+
+    def __init__(self):
+        self._seen_first = False
+        self._skipped = 0
+
+    def feed(self, line):
         m = LINE_RE.match(line)
+        prefix = ""
+        if not self._seen_first:
+            if not m:
+                self._skipped += 1
+                return None
+            self._seen_first = True
+            if self._skipped:
+                prefix = f"[omitted {self._skipped} lines of MeTTa interpreter startup]\n"
         if not m:
-            continue  # nginx access/error lines: no timestamp prefix in this format
+            return None  # nginx access/error lines: no timestamp prefix in this format
         ts, component, message = m.groups()
         if component not in KEEP_COMPONENTS:
-            continue
+            return prefix or None
         message = unescape(message)
         if message.startswith("(---------iteration"):
-            out.append(f"\n--- {ts}  {message.strip('()- ')} ---")
-        elif message.startswith("(CHARS_SENT:"):
-            continue  # the full rebuilt prompt; unchanging parts are already in the role file
-        elif message.startswith("(RESPONSE:"):
-            out.append(f"{ts}  {unwrap_response(message)}")
-        else:
-            out.append(f"{ts}  [{component}] {message}")
+            return prefix + f"\n--- {ts}  {message.strip('()- ')} ---"
+        if message.startswith("(CHARS_SENT:"):
+            return prefix or None  # the full rebuilt prompt; unchanged parts are in the role file
+        if message.startswith("(RESPONSE:"):
+            return prefix + f"{ts}  {unwrap_response(message)}"
+        return prefix + f"{ts}  [{component}] {message}"
+
+
+def clean(raw):
+    cleaner = Cleaner()
+    out = [cleaned for cleaned in (cleaner.feed(line) for line in raw.splitlines())
+           if cleaned is not None]
     return "\n".join(out) + "\n"
+
+
+def follow(lines):
+    """Filter an already-open line iterator (e.g. sys.stdin) and print each result as it comes."""
+    cleaner = Cleaner()
+    for line in lines:
+        cleaned = cleaner.feed(line.rstrip("\n"))
+        if cleaned is not None:
+            print(cleaned, flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("path", type=Path,
-                        help="a docker.log file, or a directory to clean every docker.log under")
+                        help="a docker.log file, a directory to clean every docker.log "
+                             "under, or - to filter stdin as a live stream")
     args = parser.parse_args()
 
-    if args.path.is_dir():
+    if str(args.path) == "-":
+        follow(sys.stdin)
+    elif args.path.is_dir():
         logs = sorted(args.path.rglob("docker.log"))
         if not logs:
             sys.exit(f"no docker.log files under {args.path}")

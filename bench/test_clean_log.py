@@ -40,3 +40,20 @@ def test_keeps_llm_usage_and_iteration_markers():
 def test_unwrap_falls_back_to_the_unescaped_line_when_shape_is_unrecognized():
     message = "(RESPONSE: (@Agent-A _quote_hi_quote_))"
     assert clean_log.unwrap_response(clean_log.unescape(message)) == '(@Agent-A "hi")'
+
+
+def test_feeding_lines_one_at_a_time_matches_cleaning_the_whole_file_at_once():
+    cleaner = clean_log.Cleaner()
+    streamed = [cleaner.feed(line) for line in RAW.splitlines()]
+    streamed_text = "\n".join(c for c in streamed if c is not None) + "\n"
+
+    assert streamed_text == clean_log.clean(RAW)
+
+
+def test_follow_prints_each_cleaned_line_as_it_arrives(capsys):
+    clean_log.follow(iter(RAW.splitlines(keepends=True)))
+    out = capsys.readouterr().out
+
+    assert "[omitted 2 lines of MeTTa interpreter startup]" in out
+    assert '(@Agent-A "Do the thing")' in out
+    assert "_quote_" not in out
