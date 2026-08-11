@@ -72,6 +72,7 @@
                                (initPlugins)
                                (initChannels)
                                (initContextFrame)
+                               (commChannelSend (version))
                                (llmProviderStart (provider)))
           (change-state! &loops (- (get-state &loops) 1)))
 

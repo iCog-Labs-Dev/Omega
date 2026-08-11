@@ -64,6 +64,14 @@ class PythonPlugin:
     def __init__(self, mod):
         self.mod = mod
 
+def addLocationToPath(location):
+    """Add a plugin's folder to sys.path so a plugin made of several files can
+    import its own modules. Used by the Python loader for multi-file Python
+    plugins, and by the MeTTa loader so a MeTTa plugin can py-call into its own
+    .py file."""
+    global _REPO
+    sys.path.append(str(pathlib.Path(location.format(REPO=_REPO)).resolve()))
+
 def loadPythonPlugin(name, location):
     """Python plugin loader implementation. If location of the plugin is
     specified it imports "<location>/<name>.py" file. Imports <name> Python
@@ -77,12 +85,12 @@ def loadPythonPlugin(name, location):
         logger.info(f"_initPythonPlugin: loading {name} plugin from PYTHONPATH using Python module loader")
         mod = importlib.import_module(name)
     else:
+        # adding location into sys.path to be able loading plugins which
+        # consist of multiple files
+        addLocationToPath(location)
         location = pathlib.Path(location.format(REPO=_REPO)).resolve()
         modpath = location.joinpath(f"{name}.py").resolve()
         logger.info(f"_initPythonPlugin: loading {name} plugin from {modpath} using Python module loader")
-        # adding location into sys.path to be able loading plugins which
-        # consist of multiple files
-        sys.path.append(str(location))
         spec = importlib.util.spec_from_file_location(name, modpath)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)

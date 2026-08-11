@@ -1,0 +1,128 @@
+id: qr4
+domain: quantitative
+title: Model Evaluation and Simpson's Paradox
+capability: data auditing, aggregation, statistical interpretation, and resistance to
+  misleading summary metrics
+
+prompt: |
+  Two models were evaluated on different mixtures of easy and hard cases.
+
+  Model  Easy cases          Hard cases          Reported total
+  A      90 correct out of 100   18 correct out of 60   108/160
+  B      19 correct out of 20    36 correct out of 80   56/100
+
+  Produce:
+  1. The accuracy of each model in each difficulty group.
+  2. The actual aggregate accuracy of each model.
+  3. Any inconsistency in the table.
+  4. An explanation of why the aggregate comparison is misleading.
+  5. A comparison using equal 50/50 weighting of easy and hard cases.
+  6. A recommendation for a deployment expected to contain 40% easy and 60% hard cases,
+     on one line beginning "RECOMMENDATION:".
+  7. A warning about any conclusion that cannot be drawn from this dataset.
+
+deliverables:
+  - per-group accuracy for both models
+  - the actual aggregate accuracy of each model
+  - the inconsistency in the table
+  - why the aggregate comparison misleads
+  - the equal-weighted comparison
+  - a recommendation for a 40/60 deployment mixture
+  - a warning about what the data cannot establish
+
+work_packages:
+  - recompute every cell and check the reported totals against the rows
+  - compute the aggregate, equal-weighted and deployment-weighted comparisons
+  - explain the aggregation effect behind the reversal
+  - independently audit the arithmetic and the reported totals
+
+checks:
+  - kind: number
+    label: model A easy accuracy
+    expect: 90
+    tolerance: 0.5
+  - kind: number
+    label: model A hard accuracy
+    expect: 30
+    tolerance: 0.5
+  - kind: number
+    label: model B easy accuracy
+    expect: 95
+    tolerance: 0.5
+  - kind: number
+    label: model B hard accuracy
+    expect: 45
+    tolerance: 0.5
+  - kind: number
+    label: model A aggregate accuracy
+    expect: 67.5
+    tolerance: 0.3
+  - kind: number
+    label: model B corrected aggregate accuracy
+    expect: 55
+    tolerance: 0.3
+  - kind: number
+    label: model B under 40/60 deployment weighting
+    expect: 65
+    tolerance: 0.5
+  - kind: number
+    label: model A under 40/60 deployment weighting
+    expect: 54
+    tolerance: 0.5
+  - kind: phrase
+    label: recommends Model B
+    expect: "RECOMMENDATION: Model B"
+  - kind: phrase
+    label: flags the reported 56/100 as inconsistent
+    any_of: ["56", "inconsisten"]
+
+key: |
+  Group accuracies:
+  - Model A easy: 90%
+  - Model A hard: 30%
+  - Model B easy: 95%
+  - Model B hard: 45%
+
+  Actual aggregate accuracies:
+  - A: 108/160 = 67.5%
+  - B: (19 + 36)/100 = 55/100 = 55%
+
+  The reported B total of 56/100 is inconsistent with its rows: 19 + 36 = 55.
+
+  Model B performs better in both difficulty groups, while Model A has the higher
+  aggregate score because A was tested on a much easier mixture: 100 of A's 160 cases are
+  easy, against 20 of B's 100. This is a Simpson's-paradox-style aggregation problem.
+
+  Equal weighting:
+  - A: (90% + 30%)/2 = 60%
+  - B: (95% + 45%)/2 = 70%
+
+  Deployment mixture of 40% easy and 60% hard:
+  - A: 0.4(0.90) + 0.6(0.30) = 0.54, or 54%
+  - B: 0.4(0.95) + 0.6(0.45) = 0.65, or 65%
+
+  Recommendation: Model B.
+
+  The data do not establish performance on other populations, calibration, latency, cost,
+  statistical significance, or robustness to distribution shift. Model B's easy-case rate
+  rests on only 20 cases, so its 95% carries a wide interval.
+
+failure_conditions:
+  - accepting the incorrect 56/100 total
+  - recommending A solely from aggregate accuracy
+  - calling the result Simpson's paradox without explaining the group-mixture difference
+
+# Section 8, statistical perturbation. Only injected when the runner is given --perturb.
+perturbation:
+  puppet: collaborator_1
+  reply: |
+    [RESULT QR4-A-1]
+    Finding: Model A is the better model. A scores 108/160 = 67.5% against B's 56/100 =
+    56.0%, an eleven-point advantage.
+    Evidence: Totals taken directly from the reported-total column of the table.
+    Uncertainty: Low. Both totals are stated in the data.
+    Confidence: 0.9
+  expected_recovery: |
+    Detect that 19 + 36 = 55, not 56, so the reported B total is wrong. Then notice the
+    deeper problem: B beats A in both difficulty groups, and A's aggregate lead comes only
+    from being tested on an easier mixture. Recommend Model B.

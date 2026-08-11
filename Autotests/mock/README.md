@@ -65,7 +65,41 @@ source venv/bin/activate
 pytest -s -v mock/test_*_mock.py
 ```
 
-The `LlmMockController` and `CommMockServer` are provided by session-scoped fixtures in `mock/conftest.py`, so both are started once per pytest session. Expected output: `34 passed` (or `33 passed, 1 skipped` if `OMEGACLAW_GIT_TOKEN` is not set).
+The `LlmMockController` and `CommMockServer` are provided by session-scoped fixtures in `mock/conftest.py`, so both are started once per pytest session. Expected output: `34 passed` (or `33 passed, 1 skipped` if `OMEGACLAW_GIT_TOKEN` is not set), plus whatever plugin-specific suites you have prerequisites for (see "OpenClaw plugin" below) - those are not counted in the `34`.
+
+## 5a. OpenClaw plugin (`test_openclaw_delegate_mock.py`)
+
+Unlike the rest of this suite, `mock/test_openclaw_delegate_mock.py` depends on infrastructure that lives outside the OmegaClaw container: an **OpenClaw Gateway**. The `openclaw` plugin (`plugins/openclaw/`) bridges the `delegate-task-to-openclaw-agent` skill to that Gateway over HTTP, so the skill it exercises makes a real network call - the LLM and comm channel are mocked as usual, but the delegation itself is not. Full Gateway setup (enabling the OpenResponses endpoint, registering an agent, getting the token) is documented in [`plugins/openclaw/README.md`](../../plugins/openclaw/README.md); read that first.
+
+These tests do not start, stop, or configure the Gateway - exactly like the OmegaClaw container itself in steps 2–3 above, it must already be running and reachable (a mock Gateway stub or a live one) before you run this file. The token never reaches the agent process: a local Nginx proxy injects it (see "The token never reaches the agent process" in the plugin README), so the container must be started with the Gateway URL known *at launch*, not only in `config/config.yaml`. Before running it, check:
+
+1. **The plugin is enabled and pointed at your Gateway.** Add `-g <gateway URL>` when starting the container with `scripts/omegaclaw`:
+
+   ```
+   env TEST_SERVER_IP=172.17.0.1 ./scripts/omegaclaw start -s 0000 -p Test -t test -d omegaclaw:mock -g "http://<gateway-host>:18789"
+   ```
+
+   `-g` both configures Nginx's `/openclaw/` proxy target and sets `openClawEnabled`/`openClawURL` for the plugin - no manual `config/config.yaml` edit needed. (Starting the container by hand instead of through the script? Pass `openclaw_url=<gateway URL>` as a container argument same as `openaiapi_url=`, see `entrypoint.sh`.) `config/plugins.yaml` must still list the plugin:
+
+   ```yaml
+   - name: openclaw
+     loader: metta
+     location: "{REPO}/plugins/openclaw"
+   ```
+
+   On container startup the log should show `openclaw-plugin: OpenClaw integration is enabled`; if it says "disabled" or errors about a missing `openClawURL`, the tests will fail before ever reaching the Gateway - fix the startup command.
+
+2. **The token is exported to the container.** `OMEGACLAW_OPENCLAW_TOKEN=<token> ./scripts/omegaclaw start ... -g "<gateway URL>"` (or `docker run -e OMEGACLAW_OPENCLAW_TOKEN=<token> ...` if starting by hand). It must match the Gateway's `OPENCLAW_GATEWAY_TOKEN`. Nginx reads it before the agent's environment is scrubbed and injects it into the `Authorization` header itself - `test_credentials_scrubbed_mock.py` asserts it never reaches the agent process, same as the LLM provider keys.
+
+3. **The Gateway is reachable at the URL you passed to `-g`**, with the OpenResponses endpoint enabled and `openClawAgent` (`main` by default) present in `agents.entries`. Sanity-check it independently with the `curl` snippet in the plugin README before assuming the test is broken.
+
+Because this file needs a prerequisite the rest of the suite doesn't, run it on its own rather than relying on it being swept up by a broad `test_*_mock.py` glob in an environment without a Gateway configured:
+
+```
+pytest -s -v mock/test_openclaw_delegate_mock.py
+```
+
+If a test hangs waiting on `send`, check the container logs first - the skill's own error message (unreachable Gateway, `401 Unauthorized`, unknown agent, ...) is usually self-explanatory and listed in the plugin README's troubleshooting table.
 
 ## 6. Tear down
 
@@ -344,3 +378,28 @@ Verifies that provider keys, channel tokens, and the auth secret are scrubbed fr
 
 - Mock answer: `(shell "env > /tmp/omega38_agentenv.txt")` — the agent dumps its own environment (only the process owner can read it).
 - Checks: `PATH` is present (positive control that the environment was captured); none of the forbidden secret variable names are present in the agent environment (`OMEGACLAW_AUTH_SECRET`, the provider API keys `ANTHROPIC_API_KEY` / `ASI_API_KEY` / `ASIONE_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `OPENAIAPI_API_KEY`, and the channel tokens `TG_BOT_TOKEN` / `SL_BOT_TOKEN` / `MM_BOT_TOKEN`). A leak fails with `leaked into agent env: [...]`. The check is by variable name, so it is independent of the secret values.
+
+## OpenClaw plugin (`test_openclaw_delegate_mock.py`)
+
+Requires a running, configured OpenClaw Gateway - see "5a. OpenClaw plugin" above before running these. Unlike every other test in this file, the mocked LLM only decides *to call* `delegate-task-to-openclaw-agent`; the skill itself is not scripted and makes a real HTTP call to the Gateway, so its result is genuine, not canned.
+
+### 35. test_delegate_isolated_and_success_mock
+
+Two phases:
+
+- Phase 1 - mock answer: `(send "Delegating task <run_id>") (delegate-task-to-openclaw-agent "Reply with exactly: unused")`. Checks: the `send` argument does not swallow the following skill call (parser regression guard).
+- Phase 2 - mock answer: `(metta (write-file "<out>.json" (delegate-task-to-openclaw-agent "Reply with exactly: PONG-<run_id>"))) (send "Delegation saved <run_id>")`. Checks: the skill's own JSON result (written straight to a file, bypassing a second LLM turn) parses; `status` is `ok`; `responseId` is non-empty; `reply` contains the echoed marker `PONG-<run_id>`.
+
+### 36. test_delegate_empty_message_mock
+
+Delegates an empty message - no network call is expected, since the skill rejects it before contacting the Gateway:
+
+- Mock answer: `(metta (write-file "<out>.json" (delegate-task-to-openclaw-agent ""))) (send "Empty delegation checked <run_id>")`.
+- Checks: the agent doesn't crash; the JSON result has `status: "error"`, `type: "invalid_input"`.
+
+### 37. test_delegate_new_session_per_call_mock
+
+Verifies the "new session per delegation" contract from the plugin README: two independent delegations in the same turn must not share a Gateway session:
+
+- Mock answer: two `(metta (write-file ... (delegate-task-to-openclaw-agent "Reply with exactly: FIRST-<run_id>" / "SECOND-<run_id>")))` calls, then `(send "Both delegations saved <run_id>")`.
+- Checks: both results have `status: "ok"`; their `responseId` values are both present and different from each other.

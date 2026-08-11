@@ -1,0 +1,93 @@
+id: la2
+domain: liberal-arts
+title: The Library Donor Plaque
+capability: ethical framework fidelity, stakeholder reconciliation, constraint management,
+  concise writing, and counterargument handling
+
+# The <PLAQUE> marker makes the 120-word ceiling checkable; exceeding it is the first
+# failure condition the source lists.
+prompt: |
+  The city must decide how to present the legacy of industrialist Elias Varo, who
+  financed its first free public library in 1908.
+
+  Known facts:
+  - Varo paid the full construction cost.
+  - The library served approximately 18,000 residents in its first year.
+  - Approximately 42% of Varo's fortune came from a company that used twelve-hour shifts
+    and paid below-market wages.
+  - The company employed violent strikebreakers during a 1906 dispute.
+  - Varo's descendants will fund restoration only if the original celebratory plaque
+    remains unchanged.
+  - A workers' association wants the plaque removed.
+  - City policy requires permanent historical plaques to:
+    - remain under 120 words;
+    - be factually accurate;
+    - acknowledge major contested aspects of a person's legacy;
+    - avoid issuing an official moral verdict.
+
+  Produce:
+  1. A recommendation to retain, remove, replace, or contextualize the original plaque,
+     given on one line beginning "RECOMMENDATION:".
+  2. A replacement or supplementary plaque of no more than 120 words, wrapped in
+     <PLAQUE> and </PLAQUE>.
+  3. A justification using consequentialist reasoning, deontological reasoning, and
+     restorative-justice reasoning, each treated distinctly.
+  4. The strongest objection to your recommendation, and your response to it.
+
+deliverables:
+  - a recommendation to retain, remove, replace or contextualize
+  - a plaque of at most 120 words
+  - a justification under all three ethical frameworks, applied distinctly
+  - the strongest objection and a response to it
+
+work_packages:
+  - reconcile the stakeholder positions and the four policy constraints
+  - draft the plaque within the word limit, covering benefit and harm
+  - apply the three ethical frameworks to the recommendation, distinctly
+  - construct the strongest objection and answer it
+
+checks:
+  - kind: words
+    label: plaque length
+    region: PLAQUE
+    between: [1, 120]
+  - kind: phrase
+    label: plaque or answer records the public benefit
+    any_of: [library, free public]
+  - kind: phrase
+    label: records the labor conditions or strikebreaking
+    any_of: [twelve-hour, below-market, strikebreak, labor conditions, wages]
+  - kind: phrase
+    label: applies consequentialist reasoning
+    any_of: [consequentialist, consequences]
+  - kind: phrase
+    label: applies deontological reasoning
+    any_of: [deontolog, duty, duties]
+  - kind: phrase
+    label: applies restorative-justice reasoning
+    any_of: [restorative]
+
+key: |
+  Contextualization is the most straightforward recommendation, but any decision can
+  receive full credit when well justified.
+
+  The plaque must acknowledge both the public benefit of the library and the labor
+  conditions and strikebreaking connected to the fortune.
+
+  Framework requirements:
+  - Consequentialism: effects on public education, restoration funding, community trust
+    and historical understanding.
+  - Deontology: duties of truthfulness, respect for workers, and avoidance of deceptive
+    commemoration.
+  - Restorative justice: inclusion of harmed groups, public acknowledgment, and possibly
+    participatory interpretation.
+
+  The descendants' funding condition and the workers' association's demand pull in
+  opposite directions; a strong answer names that tension rather than hiding it.
+
+failure_conditions:
+  - exceeding 120 words
+  - erasing either the contribution or the labor harms
+  - presenting disputed moral language as settled city fact
+  - using the ethical frameworks as interchangeable labels without applying their
+    distinct principles

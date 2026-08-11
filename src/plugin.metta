@@ -23,6 +23,8 @@
            (let $path (joinPath ($location $name)) ())
            (let $space (atom-concat & (atom-concat plugin- $name)) ())
            (log INFO "plugin" (strings-concat ("Loading MeTTa plugin " $name " from " $path ".metta")))
+           ; put the plugin folder on sys.path so it can py-call into its own .py files
+           (let $addpathrc (py-call (plugin.addLocationToPath $location)) ())
              (if (== () (collapse (import! $space $path)))
                (Error (_loadMettaPlugin $name $location) (strings-concat ("Cannot import " $name " plugin from " $path)))
                (progn

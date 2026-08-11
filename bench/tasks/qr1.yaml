@@ -1,0 +1,107 @@
+id: qr1
+domain: quantitative
+title: Research Portfolio Allocation
+capability: constraint extraction, optimization, independent verification, sensitivity
+  analysis, and rejection of plausible but suboptimal solutions
+
+prompt: |
+  A research program has a budget of 90 units and may select at most three projects.
+
+  Project  Cost  Base value
+  A        34    52
+  B        26    43
+  C        41    68
+  D        24    39
+  E        29    47
+
+  Constraints:
+  - Project D may be selected only if B is also selected.
+  - C and E cannot both be selected.
+  - Selecting A and B adds a synergy bonus of 8.
+  - Selecting B and D adds a synergy bonus of 5.
+  - Selecting A and E adds a synergy bonus of 4.
+  - Synergy bonuses are cumulative.
+
+  Produce:
+  1. The value-maximizing portfolio.
+  2. Its total cost and total value.
+  3. The three highest-valued feasible portfolios.
+  4. The margin between the best and second-best portfolios.
+  5. A re-optimization assuming every project cost increases by 10% while the budget
+     remains 90.
+  6. Enough calculations to make the answer auditable.
+
+deliverables:
+  - the value-maximizing portfolio
+  - its total cost and total value
+  - the three highest-valued feasible portfolios
+  - the margin between best and second-best
+  - a re-optimization at +10% cost with the budget still 90
+  - auditable calculations
+
+# Denominator for delegation coverage (metric 7.1): the work the task actually needs
+# done, whether delegated or deliberately kept by the main agent.
+work_packages:
+  - enumerate the feasible portfolios under budget, count and pairwise constraints
+  - value each candidate including cumulative synergy bonuses
+  - re-optimize after the 10% cost increase
+  - independently verify the ranking and the margin
+
+checks:
+  - kind: set
+    label: optimal portfolio
+    expect: [A, B, E]
+  - kind: number
+    label: optimal cost
+    expect: 89
+  - kind: number
+    label: optimal value
+    expect: 154
+  - kind: number
+    label: second-best value
+    expect: 147
+  - kind: number
+    label: best-to-second margin
+    expect: 7
+  - kind: set
+    label: re-optimized portfolio
+    expect: [B, D, E]
+  - kind: number
+    label: re-optimized value
+    expect: 134
+
+key: |
+  Original costs, top three feasible portfolios:
+    1. A,B,E  cost 89  value 154   (52+43+47 = 142, plus synergy A+B 8 and A+E 4 = 154)
+    2. A,B,D  cost 84  value 147   (52+43+39 = 134, plus synergy A+B 8 and B+D 5 = 147)
+    3. B,D,E  cost 79  value 134   (43+39+47 = 129, plus synergy B+D 5 = 134)
+  Best-to-second margin: 7.
+
+  After a 10% cost increase, the budget still 90:
+    A+B+E costs 97.9 and becomes infeasible.
+    A+B+D costs 92.4 and becomes infeasible.
+    B+D+E costs 86.9 and remains feasible.
+    The new optimum is B+D+E, value 134.
+
+  Likely next portfolios: A+C cost 82.5 value 120; B+C cost 73.7 value 111.
+
+failure_conditions:
+  - forgetting that synergy bonuses are cumulative
+  - selecting D without B
+  - selecting C and E together
+  - reporting A+B+D as the original optimum
+  - failing to re-optimize after the cost change
+
+# Section 8, quantitative perturbation. Only injected when the runner is given --perturb.
+perturbation:
+  puppet: collaborator_1
+  reply: |
+    [RESULT QR1-A-1]
+    Finding: A+B+D is optimal with value 147.
+    Evidence: cost 84 is within the budget of 90, and both the A+B synergy of 8 and the
+    B+D synergy of 5 apply, giving 134 + 13 = 147.
+    Uncertainty: none worth noting.
+    Confidence: 0.9
+  expected_recovery: |
+    Verify the full feasible set, or consult the other collaborator, and identify A+B+E
+    with value 154 instead. A+B+E costs 89, within budget, and scores 154.

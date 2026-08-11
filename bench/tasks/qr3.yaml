@@ -1,0 +1,92 @@
+id: qr3
+domain: quantitative
+title: Experimental Pipeline Scheduling
+capability: precedence reasoning, resource contention, schedule verification, and
+  recognition of non-unique optimization choices
+
+prompt: |
+  A research pipeline starts at 09:00. There are two analysts and one GPU.
+
+  Analyst tasks require one analyst. GPU tasks occupy the GPU but do not require an analyst
+  after launch. Tasks cannot be interrupted.
+
+  Task               Duration  Resource  Prerequisite
+  A: Clean data      3 h       Analyst   None
+  B: Build baseline  2 h       Analyst   A
+  C: Train baseline  4 h       GPU       B
+  D: Design alternative 3 h    Analyst   A
+  E: Train alternative  5 h    GPU       D
+  F: Compare outputs 2 h       Analyst   C and E
+  G: Draft report    2 h       Analyst   F
+
+  The project may spend 200 units to reduce exactly one GPU task by two hours.
+
+  Produce:
+  1. The earliest schedule without acceleration, as start and end times per task.
+  2. The completion time, on one line beginning "COMPLETION:".
+  3. The critical resource or path causing the delay.
+  4. The earliest schedule with acceleration.
+  5. Whether C or E is uniquely the better task to accelerate.
+  6. A short argument that no faster feasible schedule exists under the stated constraints.
+
+deliverables:
+  - the earliest unaccelerated schedule
+  - the completion time
+  - the critical resource or path
+  - the earliest accelerated schedule
+  - whether the acceleration choice is unique
+  - an argument that no faster feasible schedule exists
+
+work_packages:
+  - build the unaccelerated schedule respecting precedence and the single GPU
+  - identify the bottleneck resource and the resulting completion time
+  - test both acceleration choices and compare the resulting completion times
+  - independently verify that no feasible schedule finishes earlier
+
+checks:
+  - kind: phrase
+    label: unaccelerated completion is 03:00 next day
+    any_of: ["COMPLETION: 03:00", "COMPLETION: 3:00", "03:00 the next day"]
+  - kind: phrase
+    label: accelerated completion is 01:00
+    any_of: ["01:00", "1:00 a.m.", "1 a.m."]
+  - kind: phrase
+    label: names the single GPU as the bottleneck
+    any_of: [gpu]
+  - kind: phrase
+    label: states the acceleration choice is not unique
+    any_of: [not unique, either, both, no unique]
+  - kind: phrase
+    label: runs B and D concurrently on the two analysts
+    any_of: [parallel, concurrent, both analysts, simultaneous]
+
+key: |
+  One optimal unaccelerated schedule:
+  - A: 09:00-12:00
+  - B: 12:00-14:00
+  - D: 12:00-15:00, in parallel with B (two analysts allow this)
+  - C: 14:00-18:00 on the GPU
+  - E: 18:00-23:00 on the GPU
+  - F: 23:00-01:00
+  - G: 01:00-03:00
+  Completion: 03:00 the next day.
+
+  The one-GPU bottleneck is decisive. Once B and D are available, C and E require nine
+  serial GPU hours, and E cannot start before D finishes at 15:00 in any case.
+
+  With either C or E reduced by two hours, total required GPU time falls from nine to
+  seven hours, and an optimal schedule finishes at 01:00.
+
+  There is no unique best acceleration choice under these assumptions:
+  - Accelerating C: C 14:00-16:00; E 16:00-21:00.
+  - Accelerating E: C 14:00-18:00; E 18:00-21:00.
+  Both allow F from 21:00-23:00 and G from 23:00-01:00.
+
+  No faster schedule exists: A must finish before anything else starts, F needs both GPU
+  tasks done, and F then G add four serial analyst hours after the last GPU task.
+
+failure_conditions:
+  - running C and E simultaneously on the single GPU
+  - starting E before D finishes
+  - claiming one acceleration choice is uniquely optimal without justification
+  - ignoring that two analysts allow B and D to run concurrently

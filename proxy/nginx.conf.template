@@ -76,6 +76,17 @@ http {
             proxy_http_version 1.1;
         }
 
+        # OpenClaw Gateway: inject Bearer token, upstream is set at container
+        # start via the openclaw_url= argument (see entrypoint.sh).
+        location /openclaw/ {
+            proxy_pass ${OPENCLAW_URL};
+            proxy_set_header Authorization "Bearer ${OMEGACLAW_OPENCLAW_TOKEN}";
+            proxy_set_header Content-Type $content_type;
+            proxy_ssl_server_name on;
+            proxy_ssl_protocols TLSv1.2 TLSv1.3;
+            proxy_http_version 1.1;
+        }
+
         location /openrouter/ {
             proxy_pass https://openrouter.ai/api/v1/;
             proxy_set_header Authorization "Bearer ${OPENROUTER_API_KEY}";

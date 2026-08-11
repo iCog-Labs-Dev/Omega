@@ -1,0 +1,105 @@
+id: la1
+domain: liberal-arts
+title: The Harbor Square Memorial
+capability: source criticism, contradictory evidence, uncertainty management, narrative
+  synthesis, and admission of contested claims
+
+# The <MEMORIAL> marker exists so the word limit, which the source lists as a scored
+# constraint, can be checked without guessing where the plaque text starts and ends.
+prompt: |
+  A city is replacing a memorial plaque describing the 1912 Harbor Square
+  confrontation. Use only the evidence below.
+
+  Source 1 — The City Gazette, next-day report
+  The newspaper claimed that "a mob of nearly 300 attacked the Bell Warehouse before
+  troops restored order." The Gazette was partly financed by the warehouse owner.
+
+  Source 2 — Dockworkers' Union minutes, recorded two days later
+  The union stated that the march was authorized as an unarmed wage protest. It also
+  recorded that, after troops arrived, "several stones were thrown and two warehouse
+  windows were broken."
+
+  Source 3 — Municipal hospital register
+  Between 4:20 p.m. and 5:05 p.m., the hospital admitted eleven people with gunshot
+  wounds, three with blunt-force injuries, and one with smoke inhalation.
+
+  Source 4 — Captain Elian's official report
+  The captain wrote that a dispersal warning was issued at 4:10 p.m. and troops fired at
+  4:18 p.m. after "missiles were directed toward the line." The report lists no injured
+  soldiers.
+
+  Source 5 — Surviving photograph
+  The image shows a large crowd, one visibly broken window, and smoke near the warehouse.
+  No firearms are visible. The photograph has no visible clock, and its exact time is
+  disputed.
+
+  Source 6 — Oral history recorded in 1968
+  A former marcher said, "We carried banner poles, not weapons. Nobody came planning a
+  riot."
+
+  Produce:
+  1. A proposed memorial text of 300 to 400 words, wrapped in <MEMORIAL> and </MEMORIAL>.
+  2. A short table separating established facts, reasonable inferences, and unresolved
+     claims.
+  3. A recommendation among these three, given on one line beginning "RECOMMENDATION:"
+     - Peaceful protest met by unprovoked gunfire.
+     - Violent riot suppressed by troops.
+     - A more accurate formulation of your own.
+  4. One sentence explaining the strongest remaining uncertainty.
+
+deliverables:
+  - a memorial text of 300-400 words
+  - a table separating established facts, reasonable inferences and unresolved claims
+  - a recommendation among the two supplied labels or a better formulation
+  - one sentence on the strongest remaining uncertainty
+
+work_packages:
+  - assess each source for bias, proximity and what it can actually establish
+  - reconstruct the sequence of events and mark what the evidence cannot settle
+  - draft the memorial text within the word limit
+  - audit the draft against the evidence for unsupported claims
+
+checks:
+  - kind: words
+    label: memorial text length
+    region: MEMORIAL
+    between: [300, 400]
+  - kind: phrase
+    label: acknowledges the gunfire and its casualties
+    any_of: [gunshot, gunfire, fired]
+  - kind: phrase
+    label: acknowledges the stones or broken windows
+    any_of: [stone, window]
+  - kind: phrase
+    label: notes the Gazette's financial interest
+    any_of: [financed, owner, financial interest]
+  - kind: absent
+    label: does not adopt the peaceful-protest label verbatim
+    expect: "RECOMMENDATION: Peaceful protest met by unprovoked gunfire"
+  - kind: absent
+    label: does not adopt the violent-riot label verbatim
+    expect: "RECOMMENDATION: Violent riot suppressed by troops"
+
+key: |
+  A strong answer concludes that neither supplied label is adequately supported.
+
+  Expected accepted conclusions:
+  - There was an organized labor protest.
+  - Some stone-throwing and property damage probably occurred.
+  - Troops fired and numerous civilians suffered gunshot wounds.
+  - Evidence for a planned riot is weak.
+  - Evidence that the firing was completely unprovoked is also insufficient.
+  - The exact order and severity of events remain uncertain.
+  - The Gazette, union minutes, captain's report, oral history and photograph each have
+    identifiable limitations: the Gazette was financed by the warehouse owner; the union
+    and the captain each describe their own side; the oral history is 56 years later; the
+    photograph is undated and shows one moment, not a sequence.
+
+  Suggested formulation: "Labor protest followed by confrontation, limited property
+  violence, and deadly military gunfire."
+
+failure_conditions:
+  - calling the event entirely peaceful without acknowledging the stones and broken windows
+  - calling it a planned riot without evidence of planning or widespread armed violence
+  - treating the photograph as proving the complete sequence
+  - ignoring the financial or institutional interests of the sources

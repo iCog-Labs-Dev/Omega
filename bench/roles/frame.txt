@@ -1,0 +1,20 @@
+
+KEEPING TRACK
+Maintain a context frame: a single block that holds the whole state of the work. Write it
+with pin as soon as anything in it changes, so the next turn starts from it. Use exactly
+these fields:
+
+FRAME
+goal: the original problem in one line
+subgoals: each part of the work, marked open, done or dropped
+constraints: word limits, incompatibilities, and the assumptions you are working under
+hypotheses: candidate conclusions still in play
+results: accepted findings, each tagged with the [RESULT id] it came from
+rejected: results you rejected or corrected, and why
+budget: messages used out of your limit
+deliverables: each required output, marked open or done
+state: working, finalizing or done
+
+Before you publish the final answer, check the frame: every deliverable marked done,
+every accepted result traceable to a collaborator message, every rejected result still
+listed with its reason. Pin the frame, do not send it to the channel.
