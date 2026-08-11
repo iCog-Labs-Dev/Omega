@@ -217,6 +217,21 @@ def save_logs(trial_dir, agents, containers):
         path.write_text(logs.stdout + logs.stderr)
 
 
+def trial_done(trial_dir):
+    """A trial counts as done only if its run.json is a complete, valid record.
+
+    A run killed mid-trial can leave a trial_dir with no run.json, or one that's empty
+    or truncated (the process died mid-write) — either way json.loads fails and the
+    trial is treated as not done, same as one that was never started. run_trial wipes
+    and redoes it.
+    """
+    try:
+        json.loads((trial_dir / "run.json").read_text())
+        return True
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
 def run_trial(task, config_name, trial, args):
     trial_dir = args.out / task["id"] / config_name / f"trial-{trial}"
     if trial_dir.exists():
@@ -314,6 +329,10 @@ def main():
         task = load_task(task_id)
         for config_name in configs:
             for trial in range(1, trials + 1):
+                trial_dir = args.out / task_id / config_name / f"trial-{trial}"
+                if trial_done(trial_dir):
+                    print(f"  {task_id}/{config_name}/trial-{trial}: already done, skipping")
+                    continue
                 run_trial(task, config_name, trial, args)
 
 

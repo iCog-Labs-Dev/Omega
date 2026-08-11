@@ -86,3 +86,13 @@ def test_no_final_answer_reads_as_none(tmp_path):
     channel.say("Main", "still working")
 
     assert runner.final_answer_text(channel) is None
+
+
+def test_trial_done_needs_a_valid_run_json(tmp_path):
+    assert runner.trial_done(tmp_path) is False        # no run.json at all
+
+    (tmp_path / "run.json").write_text('{"stop_reason": "final_answer"')  # truncated
+    assert runner.trial_done(tmp_path) is False
+
+    (tmp_path / "run.json").write_text('{"stop_reason": "final_answer"}')
+    assert runner.trial_done(tmp_path) is True
