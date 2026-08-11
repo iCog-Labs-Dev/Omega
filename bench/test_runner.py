@@ -25,6 +25,16 @@ def test_the_solo_agent_has_no_collaborators():
     assert "@" not in agents[0]["role"]
 
 
+def test_the_solo_role_names_send_as_the_way_to_finish():
+    # Finishing is the solo agent's first and only turn, with no earlier send call in its
+    # own transcript to copy. Left to infer it, the model emits FINAL ANSWER as a command
+    # of its own, nothing reaches the bus, and the trial runs out the clock in silence.
+    agents, _ = plan("solo")
+    finishing = agents[0]["role"].split("FINISHING")[1].split("TOOLS")[0]
+
+    assert "send" in finishing
+
+
 def test_collaborator_names_are_filled_in_everywhere():
     agents, _ = plan()
     names = [a["name"] for a in agents[1:]]
