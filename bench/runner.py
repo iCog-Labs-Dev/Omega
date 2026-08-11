@@ -133,6 +133,7 @@ def launch(container, agent_name, memory_dir, port, args):
         "commchannel=bench", f"agent={agent_name}", f"bus={args.bus_host}:{port}",
         f"provider={args.provider}", "embeddingprovider=Local",
         f"securityPolicyPath={CONTAINER_POLICY}", "memoryDirectory=$MEMORY_DIR",
+        *([f"model={args.model}"] if args.model else []),
     ], check=True, capture_output=True)
 
 
@@ -282,7 +283,7 @@ def run_trial(task, config_name, trial, args):
         "message_count": len(channel.messages),
         "duration_s": round(time.time() - started, 1),
         "limits": {"max_messages": args.max_messages, "wall_clock": args.wall_clock},
-        "provider": args.provider, "image": args.image,
+        "provider": args.provider, "model": args.model, "image": args.image,
     }
     (trial_dir / "run.json").write_text(json.dumps(record, indent=2))
     print(f"  {task['id']}/{config_name}/trial-{trial}: {stop_reason}, "
@@ -302,6 +303,8 @@ def main():
     parser.add_argument("--image", default="omegaclaw:bench")
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--provider", default="Anthropic")
+    parser.add_argument("--model", default=None,
+                        help="overrides the provider's config.yaml default model")
     parser.add_argument("--bus-host", default="172.17.0.1",
                         help="host address containers reach on the docker bridge")
     parser.add_argument("--max-messages", type=int, default=24)
