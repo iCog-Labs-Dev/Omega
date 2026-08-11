@@ -30,6 +30,7 @@ from pathlib import Path
 import yaml
 
 import bus
+import clean_log
 
 HERE = Path(__file__).resolve().parent
 CONTAINER_MEMORY_DIR = "/PeTTa/repos/OmegaClaw-Core/memory"
@@ -214,8 +215,10 @@ def watch(channel, containers, args):
 def save_logs(trial_dir, agents, containers):
     for agent, container in zip(agents, containers):
         logs = subprocess.run(["docker", "logs", container], capture_output=True, text=True)
+        raw = logs.stdout + logs.stderr
         path = trial_dir / "agents" / agent["name"] / "docker.log"
-        path.write_text(logs.stdout + logs.stderr)
+        path.write_text(raw)
+        path.with_suffix(".clean.log").write_text(clean_log.clean(raw))
 
 
 def trial_done(trial_dir):

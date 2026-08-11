@@ -15,7 +15,8 @@ so `bench/` is kept out of `Autotests/`.
 | `benchchannel.py` | The `bench` comm channel, registered in `config/plugins.yaml`. Joins one agent to the bus. |
 | `roles/` | Role prompts. The framed main agent is `main_plain.txt` + `frame.txt`. As of 2026-08-11, `framed` also needs the frame-capable image (see Running) — the role text alone no longer makes the difference. |
 | `tasks/` | One YAML per task: prompt, deliverables, work packages, deterministic checks, evaluator key, perturbation. |
-| `runner.py` | Runs trials: renders roles, launches containers, posts the task, watches for the final answer, writes `run.json`. |
+| `runner.py` | Runs trials: renders roles, launches containers, posts the task, watches for the final answer, writes `run.json`. Also writes each agent's `docker.clean.log` alongside its raw `docker.log`. |
+| `clean_log.py` | Strips a raw `docker.log` down to what a human needs: unescapes the loop's internal `_quote_`/`_newline_`/`_apostrophe_` encoding, collapses the interpreter-startup dump to one line, and unwraps `(RESPONSE: (RESULTS: ((COMMAND_RETURN: ...` nesting. `bench/clean_log.py <dir>` re-cleans every `docker.log` under a run directory. |
 | `score.py` | Deterministic scoring: the task's checks against the published answer, plus the log-derived orchestration metrics. Writes `score.json`. |
 | `judge.py` | One model call per trial for the rubric lines that need reading, with the evaluator key and the deterministic results supplied as authoritative. Writes `judge.json`. |
 | `report.py` | Medians the trials of each configuration, compares orchestration against the single-agent baseline, and applies the retention bands. Writes `report.md`. |
