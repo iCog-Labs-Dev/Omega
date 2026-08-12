@@ -94,6 +94,78 @@ agents/<name>/docker.log
 A trial ends when the main agent publishes a message beginning `FINAL ANSWER`, or at the
 message cap (default 24), the wall clock (default 900 s), or an agent dying.
 
+## Results, 2026-08-12
+
+First sweep where all three configurations produced valid data: 72 trials, 8 tasks × 3
+configs × 3 trials, OpenAI `gpt-5.6-sol`, no perturbation. 71 of 72 reached a final answer
+— the miss is one `framed` message-cap trial. Earlier sweeps each had a broken column, the
+worst being `solo` at 0% completion, so nothing before this date is comparable.
+
+| config | rubric /100 | median prompt tokens | vs. solo | completion |
+|---|---|---|---|---|
+| framed | 89.5 | 79,621 | 19.7× | 23/24 |
+| plain | **90.0** | 54,178 | 13.4× | 24/24 |
+| solo | 65.5 | 4,041 | 1.0× | 24/24 |
+
+`report.py` prints that as **+23 to +31 for orchestration, retain on all eight tasks**.
+Do not quote it. Four rubric lines pay for having collaborators at all — integration
+accuracy (8), role distinctness (5), context supplied (5), both useful (4) — so a single
+agent scores 0 on 22 of the 100 by construction, not by doing worse. On the 78 points every
+config can earn:
+
+| comparison | full rubric | 78 points both can earn |
+|---|---|---|
+| best orchestrated vs. solo | +24.5 | **+3.0** |
+| framed vs. plain | −0.5 | **−0.5** |
+
+Median points per line says where the 3 points come from and what they cost:
+
+| rubric line | max | framed | plain | solo |
+|---|---|---|---|---|
+| decomposition | 8 | 6.0 | 6.0 | **3.5** |
+| critique | 6 | 5.0 | 5.0 | **2.0** |
+| correctness | 25 | 23.0 | 24.0 | 24.0 |
+| completeness | 12 | 11.0 | 11.0 | **12.0** |
+| efficiency | 6 | 3.0 | 3.0 | **5.0** |
+| log_hygiene | 5 | 3.0 | 2.0 | **5.0** |
+| uncertainty | 8 | 7.5 | 8.0 | 8.0 |
+| traceability | 5 | 5.0 | 5.0 | 5.0 |
+| goal_continuity | 3 | 3.0 | 3.0 | 3.0 |
+
+The four collaboration-only lines are omitted above: orchestrated configs take all 22,
+`solo` takes 0, every time.
+
+Orchestration wins the two lines that describe what it is for — picking the right subtasks,
+and catching and resolving wrong results — and loses efficiency, log hygiene and
+completeness. Those nearly cancel. It buys better decomposition and error-catching for
+13–20× the tokens; it does not buy more correct answers. On the deterministic checks alone
+`solo` ties or beats both orchestrated configs on every task except `la3`.
+
+**The frame layer did not pay for itself.** `framed` and `plain` sit within half a point on
+both scorings, `plain` leads 5 of 8 tasks, and `framed` spends ~1.5× the tokens. The layer
+was active, not idle — median 3 frame calls per trial against 0 elsewhere. `framed` also
+owns the worst trial in the sweep, 43/100, against `plain`'s floor of 65.
+
+Read the numbers against these, on top of the ceilings below:
+
+- **The judge was not `z-ai/glm-5.2`.** No OpenRouter key on the host, so it ran on OpenAI
+  `gpt-5.5` — same vendor as the model under test, one generation off. Judging is ~1% of
+  sweep cost, so re-running it against an independent model is the cheapest way to firm up
+  every number here.
+- **Two checks look broken.** `qr3`'s concurrency check fails in all 24 trials and cannot
+  be satisfied by `solo` at all, which has no second analyst; `qr4`'s "recommends Model B"
+  fails in all 24 across every config. Suspect the key, not the models.
+- **No prompt caching happened** this run (`cached_tokens=0` throughout), unlike the
+  2026-08-11 sweep at ~45% cached. Within-run ratios compare; absolute cost across sweeps
+  does not.
+- **Three trials per config** is the protocol floor. One or two points between `framed` and
+  `plain` is noise. The 22-point structural gap is not.
+
+Worth doing next: an independent judge, a decision on how collaboration-only lines should
+score for `solo` (the 78-point subtotal is arguably what `report.py` should print), and the
+perturbation sweep — catching a planted wrong result is where orchestration should look
+best, and `critique` is already its strongest line.
+
 ## Notes for anyone changing this
 
 - **Containers need `-it`.** Without a TTY the container's nginx cannot open
