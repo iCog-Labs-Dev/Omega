@@ -112,7 +112,7 @@
                     ($mcerr (HandleError MULTI_COMMAND_FAILURE_NOTHING_WAS_DONE_PLEASE_CORRECT_PARENTHESES_AND_USE_QUOTES_AND_RETRY $response $sexpr))
                     ($_ (log INFO "loop" (RESPONSE: $sexpr)))
                     ($results (if (== $mcerr $sexpr)
-                                  (RESULTS: (collapse (let $s (superpose $sexpr) (COMMAND_RETURN: ($s (HandleError SINGLE_COMMAND_ERROR_NOTHING_WAS_DONE_PLEASE_FIX_AND_RETRY $s (catch (let $R (eval $s) (py-call (helper.normalize_string $R))))))))))
+                                  (RESULTS: (collapse (let $s (superpose $sexpr) (COMMAND_RETURN: ($s (HandleError SINGLE_COMMAND_ERROR_NOTHING_WAS_DONE_PLEASE_FIX_AND_RETRY $s (catch (let $R (eval $s) (if (== $R $s) (Error $s NOT_A_SKILL_NOTHING_WAS_DONE_USE_ONLY_THE_SKILLS_LISTED_UNDER_SKILLS) (py-call (helper.normalize_string $R)))))))))))
                                   (RESULTS: $mcerr)))
                     ($_ (log INFO "loop" (RESPONSE: $results))))
                   (progn (if (or $msgnew (not (== $sexpr ()))) (addToHistory $msg $response $sexpr $msgnew) _)

@@ -500,8 +500,19 @@
 ;; TODO: There should be another function to update a frame with a user message if there is a frame already consisting
 ;;          ongoing frame for that specific user/module/sub-agents.
 ;; Update: Frame composition is implemented to address the above issue.
+;;
+;; Creating a frame is not enough to make the message visible. The prompt renders only the
+;; current frame, and a newly created frame is loaded as current only while the root mode is
+;; still Slow — which is true for the first user message and never again. So every later
+;; message would land in a frame the model never reads. When the current frame does not
+;; change, the message is recorded onto it so it reaches the next prompt; when it does
+;; change, the new frame's own goal already is the message.
 (= (cfv2-ingest-user-message $msg)
-       (cfv2-create-frame-from-user-message $msg))
+   (let $before (get-state &cfv2-current-frame-id)
+      (progn (cfv2-create-frame-from-user-message $msg)
+             (if (== $before (get-state &cfv2-current-frame-id))
+                 (cfv2-record-message-for-current-frame $msg)
+                 _))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Frame Composition
