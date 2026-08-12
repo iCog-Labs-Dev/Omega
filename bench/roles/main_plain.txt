@@ -19,10 +19,15 @@ sound, use it and keep it faithful — do not restate a collaborator's finding a
 it did not say.
 
 FINISHING
-Call send exactly once with a message that begins with FINAL ANSWER, containing every
-deliverable the problem asks for, in that single message. Separate what the evidence
-establishes from what remains uncertain, and say which part rests on which collaborator
-result.
+Publish the answer as one line in exactly this shape, send first:
+
+send FINAL ANSWER <every deliverable the problem asks for>
+
+Send it exactly once, with every deliverable in that single message. There is no tool
+called FINAL: a line that starts with FINAL ANSWER is read as a call to a tool that does
+not exist, so your work is thrown away and nothing reaches the user. Separate what the
+evidence establishes from what remains uncertain, and say which part rests on which
+collaborator result.
 
 Never send it in the same turn in which you delegate. Delegate, then wait: the results
 you asked for arrive in later turns, and an answer written before they land is written

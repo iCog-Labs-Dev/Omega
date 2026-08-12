@@ -297,10 +297,11 @@ def run_trial(task, config_name, trial, args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tasks", default="qr1", help="comma-separated task ids")
-    parser.add_argument("--configs", default="framed,plain,solo")
+    parser.add_argument("--configs", default=None,
+                        help="comma-separated configs, default every config")
     parser.add_argument("--trials", type=int, default=1)
     parser.add_argument("--full", action="store_true",
-                        help="every task, every config, three trials")
+                        help="every task and three trials; still honours --configs")
     parser.add_argument("--perturb", action="store_true",
                         help="inject the task's scripted faulty collaborator result")
     parser.add_argument("--image", default="omegaclaw:bench")
@@ -318,12 +319,15 @@ def main():
     args = parser.parse_args()
     args.out = args.out.resolve()
 
+    # --full widens tasks and trials but must not widen configs: framed and plain/solo need
+    # different images, so a --full that ignored --configs would run framed against
+    # whichever single --image was passed and quietly spoil the sweep.
+    configs = args.configs.split(",") if args.configs else list(CONFIGS)
     if args.full:
         task_ids = sorted(p.stem for p in (HERE / "tasks").glob("*.yaml"))
-        configs, trials = list(CONFIGS), 3
+        trials = 3
     else:
         task_ids = args.tasks.split(",")
-        configs = args.configs.split(",")
         trials = args.trials
 
     unknown = set(configs) - set(CONFIGS)

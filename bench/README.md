@@ -21,6 +21,7 @@ so `bench/` is kept out of `Autotests/`.
 | `judge.py` | One model call per trial for the rubric lines that need reading, with the evaluator key and the deterministic results supplied as authoritative. Writes `judge.json`. |
 | `report.py` | Medians the trials of each configuration, compares orchestration against the single-agent baseline, and applies the retention bands. Writes `report.md`. |
 | `smoke.sh` | Two agents, one exchange. Run this first when anything in the plumbing changes. |
+| `check_frame_input.metta` | Regression check for the two runtime bugs fixed on 2026-08-12 (see Fixed). Needs Docker and a key; invocation is in its header comment. |
 | `test_*.py` | Host-only tests. No Docker, no LLM, no API key.
 
 ## Setup
@@ -41,6 +42,10 @@ An `.env` with the provider key is required, the same one the agent normally use
 container's proxy reads it, and the agent process never sees it.
 
 ## Running
+
+`runner.py` has no shebang and is not executable; call it through the venv interpreter
+(`.venv/bin/python bench/runner.py ...`). The bare `bench/runner.py` spelling below is
+shorthand for that.
 
 ```sh
 .venv/bin/python -m pytest bench/                       # host checks, free and instant

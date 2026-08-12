@@ -161,12 +161,21 @@ def _call_judge(client, model, prompt, schema):
     messages = [{"role": "system", "content": JUDGE_SYSTEM},
                 {"role": "user", "content": prompt}]
     last_error = None
+    # OpenAI's current models reject max_tokens and want max_completion_tokens; OpenRouter
+    # takes either. Ask for the new name first and fall back once, so both endpoints work.
+    cap = {"max_completion_tokens": 16000}
     for attempt in range(MAX_JSON_ATTEMPTS):
-        response = client.chat.completions.create(
-            model=model, max_tokens=16000, messages=messages,
-            response_format={"type": "json_schema",
-                             "json_schema": {"name": "verdict", "schema": schema, "strict": True}},
-        )
+        try:
+            response = client.chat.completions.create(
+                model=model, messages=messages, **cap,
+                response_format={"type": "json_schema",
+                                 "json_schema": {"name": "verdict", "schema": schema, "strict": True}},
+            )
+        except openai.BadRequestError:
+            if "max_tokens" in cap:
+                raise
+            cap = {"max_tokens": 16000}
+            continue
         text = response.choices[0].message.content
         try:
             return _extract_json(text), response.usage
@@ -219,16 +228,21 @@ def collect(verdict, lines):
     }
 
 
-def api_key():
-    """The key from the environment, or from the .env the agents already use."""
-    if os.environ.get("OPENROUTER_API_KEY"):
-        return os.environ["OPENROUTER_API_KEY"]
+def api_key(names=("OPENROUTER_API_KEY", "OPENAI_API_KEY")):
+    """The first of `names` set in the environment, or in the .env the agents already use.
+
+    Two names because the judge can run against either OpenRouter or OpenAI directly, and
+    the key that reaches the agents is not always an OpenRouter one.
+    """
     env = HERE.parent / ".env"
-    if env.exists():
-        found = re.search(r"^OPENROUTER_API_KEY=(.+)$", env.read_text(), re.M)
+    text = env.read_text() if env.exists() else ""
+    for name in names:
+        if os.environ.get(name):
+            return os.environ[name]
+        found = re.search(rf"^{name}=(.+)$", text, re.M)
         if found:
             return found.group(1).strip().strip("'\"")
-    raise SystemExit("no OPENROUTER_API_KEY in the environment or .env")
+    raise SystemExit(f"none of {', '.join(names)} in the environment or .env")
 
 
 def main():
@@ -237,6 +251,9 @@ def main():
     parser.add_argument("--all", action="store_true", help="judge every scored run")
     parser.add_argument("--runs", type=Path, default=HERE / "runs")
     parser.add_argument("--model", default=MODEL)
+    parser.add_argument("--base-url", default=BASE_URL,
+                        help="provider endpoint; pass an OpenAI URL to judge without "
+                             "an OpenRouter key, at the cost of same-vendor grading")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the prompt that would be sent, and stop")
     args = parser.parse_args()
@@ -253,7 +270,7 @@ def main():
             print(build_prompt(runner.load_task(run["task"]), run, score, lines))
         return
 
-    client = openai.OpenAI(api_key=api_key(), base_url=BASE_URL)
+    client = openai.OpenAI(api_key=api_key(), base_url=args.base_url)
     for trial in trials:
         result = judge_trial(trial, client, args.model)
         head = f"{result['task']}/{result['config']}/trial-{result['trial']}"
