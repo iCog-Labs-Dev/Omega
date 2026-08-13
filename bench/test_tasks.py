@@ -5,6 +5,8 @@ expectations are written from the same source, so a number that appears in one a
 the other means one of them was mistyped.
 """
 
+import re
+
 import pytest
 import yaml
 
@@ -13,7 +15,7 @@ import runner
 TASK_FILES = sorted((runner.HERE / "tasks").glob("*.yaml"))
 REQUIRED = ["id", "domain", "title", "prompt", "deliverables", "work_packages",
             "checks", "key", "failure_conditions"]
-CHECK_KINDS = {"number", "set", "phrase", "absent", "words"}
+CHECK_KINDS = {"number", "set", "phrase", "absent", "words", "regex"}
 SLOTS = {"collaborator_1", "collaborator_2"}
 
 
@@ -51,6 +53,8 @@ def test_every_check_is_well_formed(task):
             assert check["region"] and 0 < low <= high
         elif kind == "phrase":
             assert check.get("expect") or check.get("any_of")
+        elif kind == "regex":
+            re.compile(check["expect"])  # an unparseable pattern fails every trial silently
         else:
             assert "expect" in check
 

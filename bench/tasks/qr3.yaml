@@ -56,9 +56,12 @@ checks:
   - kind: phrase
     label: states the acceleration choice is not unique
     any_of: [not unique, either, both, no unique]
-  - kind: phrase
+  # Answers show the concurrency in the times rather than naming it: D starts at 12:00, the
+  # moment A frees an analyst, which is only possible while B also runs. Every trial of the
+  # 2026-08-12 sweep did that and failed the word-matching version of this check.
+  - kind: regex
     label: runs B and D concurrently on the two analysts
-    any_of: [parallel, concurrent, both analysts, simultaneous]
+    expect: '\bD\b[^A-Za-z0-9]{0,4}12:00\s*[–—-]{1,2}\s*15:00|parallel|concurrent|both analysts|simultaneous'
 
 key: |
   One optimal unaccelerated schedule:

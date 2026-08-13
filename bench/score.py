@@ -14,6 +14,7 @@ Writes `score.json` beside each `run.json` and prints one line per trial.
 
 import argparse
 import difflib
+import itertools
 import json
 import re
 from pathlib import Path
@@ -66,13 +67,29 @@ _ITEM = r"\b[A-Za-z]\b"
 
 
 def _check_set(check, answer):
-    """Pass when the answer lists exactly this group somewhere, e.g. {A, B, E} or A+B+E."""
+    """Pass when the answer lists exactly this group somewhere, e.g. {A, B, E} or A+B+E.
+
+    Single-letter groups are also accepted written solid, as `BDE`, which is how answers
+    often shorten a portfolio. Before 2026-08-13 only the separated forms counted, and a
+    correct answer written that way was scored wrong — and the judge, told the checks are
+    authoritative, then deducted correctness for it.
+
+    ponytail: permutations of the expected letters, so `{A, D, E}` also accepts the word
+    `DEA`. Six forms for a three-item group and the match is case-sensitive on uppercase,
+    which keeps it clear of ordinary prose. Upgrade path is requiring the group to sit
+    next to one of the task's own labels for it.
+    """
     expect = {str(item).upper() for item in check["expect"]}
     for match in re.finditer(rf"{_ITEM}(?:{_SEPARATOR}{_ITEM})+", answer):
         group = {part.strip().upper() for part in
                  re.split(_SEPARATOR, match.group()) if part.strip()}
         if group == expect:
             return True, f"found {match.group().strip()}"
+    if all(len(item) == 1 for item in expect):
+        for order in itertools.permutations(sorted(expect)):
+            solid = "".join(order)
+            if re.search(rf"\b{solid}\b", answer):
+                return True, f"found {solid}"
     return False, f"no group equal to {sorted(expect)}"
 
 
@@ -101,8 +118,27 @@ def _check_words(check, answer):
     return low <= count <= high, f"{count} words, wanted {low}-{high}"
 
 
+def _check_regex(check, answer):
+    """Pass when the pattern matches, case-insensitively and across line breaks.
+
+    For a fact whose wording varies but whose shape does not. `phrase` needs the literal
+    text, which fails when an answer states the fact correctly in words nobody listed —
+    "choose B" against a check written for "Model B". A pattern says what is required and
+    leaves the phrasing free:
+
+        kind: regex
+        expect: 'RECOMMENDATION:[^.]{0,120}?\\bB\\b'
+
+    Prefer `phrase` when a fixed string really is required. Reach for this when the fact is
+    a labelled item, a time span, or anything an answer can shorten.
+    """
+    found = re.search(check["expect"], answer, re.IGNORECASE | re.DOTALL)
+    return ((True, f"matched {found.group()[:70].strip()!r}") if found
+            else (False, f"no match for {check['expect']}"))
+
+
 CHECKERS = {"number": _check_number, "set": _check_set, "phrase": _check_phrase,
-            "absent": _check_absent, "words": _check_words}
+            "absent": _check_absent, "words": _check_words, "regex": _check_regex}
 
 
 def run_checks(task, answer):
@@ -244,15 +280,44 @@ def frame_continuity(trial_dir, main=runner.MAIN_NAME):
             "completed": calls["complete-goals-stm"] > 0 or calls["complete-goals-ltm"] > 0}
 
 
+USAGE_LINE = re.compile(r"input_tokens=(\d+) output_tokens=(\d+) total_tokens=\d+ "
+                        r"cached_tokens=(\d+)")
+
+
+def usage(trial_dir, agents):
+    """Metric 7.9's cost half: real provider usage, per agent and summed.
+
+    The provider layer logs one `input_tokens=... cached_tokens=...` line per call, so the
+    billed numbers are recoverable from the container log rather than estimated. Cached
+    input is reported separately because it is billed at a fraction of fresh input, and
+    because a sweep with caching cannot be compared on cost to one without.
+    """
+    per_agent, total = {}, {"calls": 0, "input": 0, "cached_input": 0, "output": 0}
+    for agent in agents:
+        log = trial_dir / "agents" / agent / "docker.log"
+        found = (USAGE_LINE.findall(log.read_text(errors="ignore"))
+                 if log.exists() else [])
+        counts = {"calls": len(found),
+                  "input": sum(int(i) for i, _, _ in found),
+                  "cached_input": sum(int(c) for _, _, c in found),
+                  "output": sum(int(o) for _, o, _ in found)}
+        per_agent[agent] = counts
+        for key in total:
+            total[key] += counts[key]
+    total["fresh_input"] = total["input"] - total["cached_input"]
+    total["cache_hit_rate"] = (round(total["cached_input"] / total["input"], 3)
+                               if total["input"] else None)
+    return {"total": total, "per_agent": per_agent}
+
+
 def efficiency(trial_dir, messages, agents, collaborators):
-    """Metric 7.9. Message band, and a token estimate from the prompt sizes in the logs.
+    """Metric 7.9. Message band, and the prompt bytes the loop pushed through the provider.
 
     The bands count inter-agent traffic, so they only mean something when there is more
     than one agent; a single agent talking to itself is not spending coordination.
 
-    ponytail: characters divided by four. Real usage never reaches the log, so this
-    compares configurations rather than billing anyone. Upgrade path is logging usage in
-    the provider layer.
+    `estimated_prompt_tokens` is kept only so this sweep stays comparable with the ones
+    before 2026-08-13, which had no better number. Use `metrics.usage` for anything real.
     """
     chars = 0
     for agent in agents:
@@ -317,6 +382,8 @@ def score_trial(trial_dir):
             "efficiency": efficiency(trial_dir, messages,
                                      [a["name"] for a in run["agents"] if not a["puppet"]],
                                      collaborators),
+            "usage": usage(trial_dir,
+                           [a["name"] for a in run["agents"] if not a["puppet"]]),
         },
     }
     score["flags"] = flags(score)
@@ -366,8 +433,11 @@ def main():
     for trial in trials:
         score = score_trial(trial)
         head = f"{score['task']}/{score['config']}/trial-{score['trial']}"
+        used = score["metrics"]["usage"]["total"]
         print(f"{head}: checks {score['checks_passed']}/{score['checks_total']}, "
-              f"{score['metrics']['efficiency']['messages']} messages")
+              f"{score['metrics']['efficiency']['messages']} messages, "
+              f"{used['calls']} calls, {used['input']:,} in "
+              f"({used['cached_input']:,} cached), {used['output']:,} out")
         for flag in score["flags"]:
             print(f"    - {flag}")
 

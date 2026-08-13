@@ -118,10 +118,15 @@ def test_a_frame_is_still_found_under_a_long_history(tmp_path):
 
 def test_a_letter_group_is_read_however_the_answer_punctuates_it():
     check = {"expect": ["A", "B", "E"]}
-    for written in ["A+B+E", "A, B, E", "A, B, and E", "portfolio {A, B and E}"]:
+    for written in ["A+B+E", "A, B, E", "A, B, and E", "portfolio {A, B and E}",
+                    # Written solid, in any order. Real answers do this and used to fail.
+                    "ABE", "BAE", "EAB"]:
         assert score._check_set(check, f"The answer is {written}.")[0], written
     # Prose that happens to hold single letters is not a group.
     assert not score._check_set(check, "total cost and value, B and E only")[0]
+    # Nor is a solid run that is the wrong group, or the right letters inside a longer word.
+    assert not score._check_set(check, "the portfolio is ABD")[0]
+    assert not score._check_set(check, "see the TABEL for details")[0]
 
 
 def test_the_sloppy_trial_fails_the_task_checks(sloppy):
@@ -213,3 +218,46 @@ def test_a_real_agents_repeats_still_count(tmp_path):
 
     result = score.score_trial(trial)
     assert result["metrics"]["channel_discipline"]["near_identical_pairs"] == [[3, 5]]
+
+
+def test_usage_sums_real_provider_numbers_per_agent(tmp_path):
+    """The provider layer logs one usage line per call; both agents' lines must be summed."""
+    line = ("input_tokens={i} output_tokens={o} total_tokens={t} cached_tokens={c}")
+    trial = build_trial(
+        tmp_path,
+        [("User", "@Main go"), ("Main", "@Agent-A enumerate"), ("Agent-A", "done"),
+         ("Main", GOOD_ANSWER)],
+        GOOD_ANSWER, [runner.MAIN_NAME, "Agent-A"],
+        logs={
+            runner.MAIN_NAME: "\n".join([line.format(i=1000, o=50, t=1050, c=400),
+                                         line.format(i=2000, o=70, t=2070, c=600)]),
+            "Agent-A": line.format(i=500, o=30, t=530, c=0),
+        })
+
+    used = score.score_trial(trial)["metrics"]["usage"]
+    assert used["total"] == {"calls": 3, "input": 3500, "cached_input": 1000,
+                             "output": 150, "fresh_input": 2500, "cache_hit_rate": 0.286}
+    assert used["per_agent"]["Agent-A"] == {"calls": 1, "input": 500,
+                                           "cached_input": 0, "output": 30}
+
+
+def test_a_regex_check_reads_a_fact_stated_in_any_words():
+    """Both patterns are the real ones from qr4 and qr3, against real answer wording."""
+    recommends = {"kind": "regex", "expect": r"RECOMMENDATION:[^.]{0,140}?\bB\b"}
+    for written in ["RECOMMENDATION: For 40% easy and 60% hard, choose B: weighted 65%",
+                    "RECOMMENDATION: Choose B for a deployment with 40% easy cases",
+                    "RECOMMENDATION: Deploy B for a 40% easy/60% hard mix",
+                    "RECOMMENDATION: Model B"]:
+        assert score._check_regex(recommends, written)[0], written
+    assert not score._check_regex(recommends, "RECOMMENDATION: Model A is preferable")[0]
+    # The marker itself is still required, and B must be named as a label, not inside a word.
+    assert not score._check_regex(recommends, "We would choose B for deployment.")[0]
+    assert not score._check_regex(recommends, "RECOMMENDATION: pick the Baseline model")[0]
+
+    concurrent = {"kind": "regex",
+                  "expect": r"\bD\b[^A-Za-z0-9]{0,4}12:00\s*[–—-]{1,2}\s*15:00"
+                            r"|parallel|concurrent|both analysts|simultaneous"}
+    assert score._check_regex(concurrent, "B 12:00–14:00; D 12:00–15:00; C 14:00")[0]
+    assert score._check_regex(concurrent, "B and D run in parallel on the two analysts")[0]
+    # D serialised after B is the wrong schedule and must not pass.
+    assert not score._check_regex(concurrent, "B 12:00–14:00; D 14:00–17:00")[0]

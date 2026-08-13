@@ -18,22 +18,28 @@ def test_the_framed_role_is_the_plain_role_plus_the_frame():
     assert "FRAME" in framed[0]["role"] and "FRAME" not in plain[0]["role"]
 
 
-def test_only_framed_collaborators_receive_frame_management_tools():
-    framed, _ = plan("framed")
-    plain, _ = plan("plain")
-
-    for collaborator in framed[1:]:
+def test_only_framed_collab_gives_collaborators_frame_management_tools():
+    for collaborator in plan("framed_collab")[0][1:]:
         assert "ctx-add-result" in collaborator["role"]
         assert "complete-goals-stm" in collaborator["role"]
         assert "Use only send, ctx-add-result" in collaborator["role"]
-    for collaborator in plain[1:]:
-        assert "ctx-add-result" not in collaborator["role"]
-        assert "Use only send." in collaborator["role"]
+    # framed isolates the frame block to the main agent, so its collaborators must stay
+    # byte-identical to plain's or framed-vs-plain stops being a one-variable comparison.
+    for config in ("framed", "plain"):
+        for collaborator in plan(config)[0][1:]:
+            assert "ctx-add-result" not in collaborator["role"]
+            assert "Use only send." in collaborator["role"]
 
 
-def test_framed_collaborator_avoids_nonessential_frame_operations():
+def test_framed_and_plain_collaborators_are_identical():
     framed, _ = plan("framed")
-    role = framed[1]["role"]
+    plain, _ = plan("plain")
+
+    assert [a["role"] for a in framed[1:]] == [a["role"] for a in plain[1:]]
+
+
+def test_framed_collab_collaborator_avoids_nonessential_frame_operations():
+    role = plan("framed_collab")[0][1]["role"]
 
     assert "Do not create, switch, or inspect frame spaces" in role
     assert "Never call complete-goals-ltm" in role

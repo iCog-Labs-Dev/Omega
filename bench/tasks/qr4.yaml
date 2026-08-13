@@ -69,9 +69,13 @@ checks:
     label: model A under 40/60 deployment weighting
     expect: 54
     tolerance: 0.5
-  - kind: phrase
+  # The task asks for the marker line, not for the words "Model B" after it, and answers
+  # write the reasoning first: "RECOMMENDATION: For 40% easy and 60% hard, choose B".
+  # Requiring the literal string failed all 24 trials of the 2026-08-12 sweep, every one of
+  # which recommended B. This wants the marker, then B named before the sentence ends.
+  - kind: regex
     label: recommends Model B
-    expect: "RECOMMENDATION: Model B"
+    expect: 'RECOMMENDATION:[^.]{0,140}?\bB\b'
   - kind: phrase
     label: flags the reported 56/100 as inconsistent
     any_of: ["56", "inconsisten"]

@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 # well-orchestrated trio. Outside these bands, the task needs recalibrating.
 SOLO_BAND = (55, 80)
 ORCHESTRATED_BAND = (80, 95)
-ORCHESTRATED = ["framed", "plain"]
+ORCHESTRATED = ["framed", "framed_collab", "plain"]
 
 
 def load(runs_dir):
@@ -47,7 +47,10 @@ def summarise(trial):
         "checks_passed": score["checks_passed"] if score else None,
         "checks_total": score["checks_total"] if score else None,
         "messages": run["message_count"],
+        # Real provider usage; `tokens` stays the estimate so pre-2026-08-13 sweeps compare.
         "tokens": score["metrics"]["efficiency"]["estimated_prompt_tokens"] if score else None,
+        **({f"usage_{k}": v for k, v in score["metrics"]["usage"]["total"].items()}
+           if score and "usage" in score["metrics"] else {}),
         "duration_s": run["duration_s"],
         "stop_reason": run["stop_reason"],
         "perturbed": bool(run.get("puppet_reply")),
@@ -76,6 +79,10 @@ def by_config(rows):
                   "judge_median": median([r["judge_total"] for r in group]),
                   "messages_median": median([r["messages"] for r in group]),
                   "tokens_median": median([r["tokens"] for r in group]),
+                  "calls_median": median([r.get("usage_calls") for r in group]),
+                  "input_median": median([r.get("usage_input") for r in group]),
+                  "cached_median": median([r.get("usage_cached_input") for r in group]),
+                  "output_median": median([r.get("usage_output") for r in group]),
                   "checks_median": median([r["checks_passed"] for r in group]),
                   "checks_total": group[0]["checks_total"]}
             for key, group in grouped.items()}
@@ -103,15 +110,19 @@ def markdown(rows, medians):
            f"{len(rows)} trial(s) across {len(tasks)} task(s). "
            f"Scores are out of 100; perturbation points are counted separately.", ""]
 
+    cell = lambda v: f"{v:,.0f}" if v is not None else "-"
     out += ["## Per configuration (median of trials)", "",
-            "| task | config | trials | score | checks | messages | est. prompt tokens |",
-            "|---|---|---|---|---|---|---|"]
+            "| task | config | trials | score | checks | messages | calls | input | "
+            "cached | output |",
+            "|---|---|---|---|---|---|---|---|---|---|"]
     for (task, config), value in sorted(medians.items()):
         checks = (f"{value['checks_median']}/{value['checks_total']}"
                   if value["checks_median"] is not None else "-")
         out.append(f"| {task} | {config} | {value['trials']} | "
                    f"{value['judge_median'] if value['judge_median'] is not None else 'unjudged'} | "
-                   f"{checks} | {value['messages_median']} | {value['tokens_median']} |")
+                   f"{checks} | {value['messages_median']} | {cell(value['calls_median'])} | "
+                   f"{cell(value['input_median'])} | {cell(value['cached_median'])} | "
+                   f"{cell(value['output_median'])} |")
 
     out += ["", "## Orchestration versus the single-agent baseline", "",
             "| task | single agent | best orchestrated | delta | retention |",

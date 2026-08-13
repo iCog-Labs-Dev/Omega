@@ -40,10 +40,21 @@ CONTAINER_POLICY = "/PeTTa/repos/OmegaClaw-Core/profile/policy.yaml"
 NAME_POOL = ["Agent-A", "Agent-B", "Nova", "Pike", "Wren", "Kade", "Juno", "Reva"]
 MAIN_NAME = "Main"
 
-# Configurations differ only in the role prompt the main agent gets, and in whether
-# collaborators exist at all.
+# Configurations differ in the role prompt the main agent gets, in whether collaborators
+# exist, and in whether the collaborators are allowed the frame tools.
+#
+# `framed` deliberately keeps plain collaborators, so it differs from `plain` in one thing
+# only: the main agent's frame block. `framed_collab` adds the collaborator frame tools on
+# top, which answers a different question — whether the layer pays off when every agent
+# drives it, not just the coordinator. Keeping them apart is what makes the effect
+# attributable to one change at a time.
 CONFIGS = {
     "framed": {
+        "main": ["main_plain.txt", "frame.txt"],
+        "collaborator": ["collaborator.txt", "collaborator_plain.txt"],
+        "collaborators": 2,
+    },
+    "framed_collab": {
         "main": ["main_plain.txt", "frame.txt"],
         "collaborator": ["collaborator.txt", "collaborator_frame.txt"],
         "collaborators": 2,

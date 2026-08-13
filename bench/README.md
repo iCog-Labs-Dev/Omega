@@ -13,7 +13,7 @@ so `bench/` is kept out of `Autotests/`.
 |---|---|
 | `bus.py` | One channel, N parties. HTTP server plus the client calls agents make. Writes the transcript. |
 | `benchchannel.py` | The `bench` comm channel, registered in `config/plugins.yaml`. Joins one agent to the bus. |
-| `roles/` | Role prompts. The framed main agent is `main_plain.txt` + `frame.txt`. As of 2026-08-11, `framed` also needs the frame-capable image (see Running) — the role text alone no longer makes the difference. |
+| `roles/` | Role prompts, concatenated per config by `CONFIGS` in `runner.py`. The framed main agent is `main_plain.txt` + `frame.txt`. Collaborators are `collaborator.txt` plus one TOOLS block: `collaborator_plain.txt` (send only) or `collaborator_frame.txt` (send plus the frame tools). As of 2026-08-11, `framed` also needs the frame-capable image (see Running) — the role text alone no longer makes the difference. |
 | `tasks/` | One YAML per task: prompt, deliverables, work packages, deterministic checks, evaluator key, perturbation. |
 | `runner.py` | Runs trials: renders roles, launches containers, posts the task, watches for the final answer, writes `run.json`. Also writes each agent's `docker.clean.log` alongside its raw `docker.log`. |
 | `clean_log.py` | Strips a raw `docker.log` down to what a human needs: unescapes the loop's internal `_quote_`/`_newline_`/`_apostrophe_` encoding, collapses the interpreter-startup dump to one line, and unwraps `(RESPONSE: (RESULTS: ((COMMAND_RETURN: ...` nesting. `bench/clean_log.py <dir>` re-cleans every `docker.log` under a run directory. |
@@ -55,15 +55,28 @@ bench/runner.py --tasks qr1 --configs plain,solo --image omegaclaw:bench-noframe
 bench/runner.py --tasks qr1 --configs framed --image omegaclaw:bench-frame --trials 3
 bench/runner.py --tasks qr1 --configs framed --image omegaclaw:bench-frame --perturb
 bench/runner.py --full --image omegaclaw:bench-noframe --configs plain,solo
-bench/runner.py --full --image omegaclaw:bench-frame --configs framed
+bench/runner.py --full --image omegaclaw:bench-frame --configs framed,framed_collab
 ```
 
 Both invocations write into the same `--out` tree (default `bench/runs/`), keyed by
 `<task>/<config>/trial-<n>`, so `report.py` aggregates across them with no changes.
 
-Configurations: `framed` (main agent drives the real context-frame skills — see
-`roles/frame.txt`), `plain` (same agents, frame skills don't exist in this image at
-all), `solo` (one agent, no collaborators, same no-frame image as `plain`).
+Configurations:
+
+| config | main agent | collaborators | image |
+|---|---|---|---|
+| `framed` | frame block (`roles/frame.txt`) | send only, identical to `plain`'s | `bench-frame` |
+| `framed_collab` | frame block | frame tools as well (`collaborator_frame.txt`) | `bench-frame` |
+| `plain` | no frame block | send only | `bench-noframe` |
+| `solo` | no collaborators | none | `bench-noframe` |
+
+`framed` versus `plain` is the one-variable comparison: the main agent's frame block is the
+only role text that differs, so an effect is attributable to it. `framed_collab` then adds
+the collaborators, which answers the separate question of whether the layer pays off when
+every agent drives it. Run `framed` before `framed_collab`; if the coordinator-only version
+shows nothing, the wider one is where to look, and the 2026-08-12 sweep measured neither —
+its framed collaborators sat on the frame image while their prompt forbade the frame tools,
+so they paid the layer's cost without using it.
 
 **Before 2026-08-11**, `framed` meant something mechanically different: a hand-written
 `FRAME` text block re-saved through the `pin` skill, which was a no-op. That convention
@@ -152,9 +165,21 @@ Read the numbers against these, on top of the ceilings below:
   `gpt-5.5` — same vendor as the model under test, one generation off. Judging is ~1% of
   sweep cost, so re-running it against an independent model is the cheapest way to firm up
   every number here.
-- **Two checks look broken.** `qr3`'s concurrency check fails in all 24 trials and cannot
-  be satisfied by `solo` at all, which has no second analyst; `qr4`'s "recommends Model B"
-  fails in all 24 across every config. Suspect the key, not the models.
+- **Three checks were broken, and are fixed as of 2026-08-13.** All three read a surface
+  form rather than a fact, so a correct answer written another way scored wrong. `qr1`'s two
+  `set` checks missed a portfolio written solid, as `BDE`. `qr3`'s concurrency check hunted
+  for the words "parallel" or "concurrent" while every answer showed the concurrency in the
+  times, `D 12:00–15:00` alongside `B 12:00–14:00`. `qr4`'s wanted the literal
+  `RECOMMENDATION: Model B` while every answer put its reasoning first and named B after it.
+  The two schedule and recommendation checks are now `kind: regex`; `_check_set` now accepts
+  the solid form. **An earlier note here said `qr3` could not be satisfied by `solo` at all,
+  "which has no second analyst" — that was wrong.** The two analysts are a resource in the
+  problem, not agents in the harness, and all three `solo` trials scheduled B and D
+  concurrently and correctly. Rescoring the archived sweep with the fixes gives 145/156
+  `framed`, 152/156 `plain`, 151/156 `solo`, and once `framed`'s one capped trial is set
+  aside the three are level at 96.7 / 97.4 / 96.8%. Three of the numbers in the tables above
+  predate the fix; the `+3.0` level-field gap and the rubric medians do not move, because the
+  judge has not been re-run.
 - **No prompt caching happened** this run (`cached_tokens=0` throughout), unlike the
   2026-08-11 sweep at ~45% cached. Within-run ratios compare; absolute cost across sweeps
   does not.
@@ -185,12 +210,14 @@ best, and `critique` is already its strongest line.
 
 Each is marked in the code with a `ponytail:` comment naming the upgrade path.
 
-- **Token counts are estimates.** The provider's real usage never reaches the log, so
-  efficiency uses the `CHARS_SENT:` byte counts in the container logs, divided by four.
-  Good for comparing configurations under one provider; not a bill. Measured runs use
-  roughly 60,000 estimated prompt tokens for three agents against 5,000 for one — well
-  above the source's 3,000-10,000 envelope, because the loop rebuilds the whole prompt
-  every iteration.
+- **Token counts were estimates — resolved 2026-08-13.** The provider layer logs
+  `input_tokens=... output_tokens=... cached_tokens=...` once per call, so `score.py`'s
+  `metrics.usage` now reports billed input, cached input and output per agent and summed,
+  and `report.py` medians all three. `metrics.efficiency.estimated_prompt_tokens` is kept
+  only so sweeps before this date still compare; it ran about 25% low against the real
+  numbers on the trial it was checked on. Note where the spend goes: on a framed trial the
+  two collaborators account for ~71% of input tokens, and each makes more provider calls
+  than the main agent, because the loop rebuilds the whole prompt every iteration.
 - **Frames are prompted, not enforced — resolved 2026-08-11 for `framed` vs. `plain`.**
   This used to mean the main agent was merely asked to keep a `FRAME` block via `pin`,
   a no-op, so config 1 versus config 2 measured prompt discipline rather than an actual
@@ -205,3 +232,9 @@ Each is marked in the code with a `ponytail:` comment naming the upgrade path.
 - **The judge is a single pass.** No panel, no adversarial second opinion.
 - **Position-blind checks.** A `set` check passes if the group appears anywhere in the
   answer, so a right value in the wrong list still passes; the judge catches those.
+- **A check tests a surface form, not a fact.** Every kind matches text, so an answer that
+  states the right thing in unanticipated words scores wrong — and because the judge is told
+  the checks are authoritative, that error propagates into the rubric instead of being caught
+  there. Three checks failed this way before 2026-08-13 (see Results). `kind: regex` widens
+  what a check can accept but does not change the nature of the problem: when a check fails
+  across every configuration, read the answers before believing it.
