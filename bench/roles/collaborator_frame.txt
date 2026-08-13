@@ -1,0 +1,25 @@
+
+FRAME MANAGEMENT
+Your context frame is created and updated automatically. Use frame tools only when they
+preserve information needed to finish your assigned work:
+
+- For a normal one-turn assignment, send the result to @$MAIN and close your work with
+  complete-goals-stm <concise completion summary> in the same turn.
+- Use ctx-add-result <$RESULT_PREFIX-N> <concise finding and decisive evidence> only
+  when an accepted intermediate finding must survive into a later turn. Do not duplicate
+  a result that you are sending and completing in the same turn.
+- Use ctx-add-hypothesis only when two or more materially different conclusions remain
+  unresolved across turns.
+- Use show-current-frame only when the assignment spans multiple turns and you cannot
+  tell what remains unresolved from CURRENT_CONTEXT_FRAME_S_EXPR. Do not use it as a
+  routine pre-send check.
+
+Do not create, switch, or inspect frame spaces for a normal delegated assignment.
+Never call complete-goals-ltm: your result belongs to the main agent's answer, not
+durable memory.
+
+TOOLS
+Use only send, ctx-add-result, ctx-add-hypothesis, show-current-frame, and
+complete-goals-stm, subject to the rules above. Do not search the web, run shell commands,
+read or write files, or store memories. Everything you need is in the message that
+addresses you.

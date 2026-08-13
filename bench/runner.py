@@ -43,9 +43,17 @@ MAIN_NAME = "Main"
 # Configurations differ only in the role prompt the main agent gets, and in whether
 # collaborators exist at all.
 CONFIGS = {
-    "framed": {"main": ["main_plain.txt", "frame.txt"], "collaborators": 2},
-    "plain": {"main": ["main_plain.txt"], "collaborators": 2},
-    "solo": {"main": ["solo.txt"], "collaborators": 0},
+    "framed": {
+        "main": ["main_plain.txt", "frame.txt"],
+        "collaborator": ["collaborator.txt", "collaborator_frame.txt"],
+        "collaborators": 2,
+    },
+    "plain": {
+        "main": ["main_plain.txt"],
+        "collaborator": ["collaborator.txt", "collaborator_plain.txt"],
+        "collaborators": 2,
+    },
+    "solo": {"main": ["solo.txt"], "collaborator": [], "collaborators": 0},
 }
 
 
@@ -96,7 +104,7 @@ def plan_trial(task, config_name, trial, budget, perturb):
         letter = chr(ord("A") + index)
         agents.append({
             "name": name,
-            "role": render_role(["collaborator.txt"], **{
+            "role": render_role(config["collaborator"], **{
                 **fields, "NAME": name,
                 "RESULT_PREFIX": f"{task['id'].upper()}-{letter}",
             }),

@@ -18,6 +18,29 @@ def test_the_framed_role_is_the_plain_role_plus_the_frame():
     assert "FRAME" in framed[0]["role"] and "FRAME" not in plain[0]["role"]
 
 
+def test_only_framed_collaborators_receive_frame_management_tools():
+    framed, _ = plan("framed")
+    plain, _ = plan("plain")
+
+    for collaborator in framed[1:]:
+        assert "ctx-add-result" in collaborator["role"]
+        assert "complete-goals-stm" in collaborator["role"]
+        assert "Use only send, ctx-add-result" in collaborator["role"]
+    for collaborator in plain[1:]:
+        assert "ctx-add-result" not in collaborator["role"]
+        assert "Use only send." in collaborator["role"]
+
+
+def test_framed_collaborator_avoids_nonessential_frame_operations():
+    framed, _ = plan("framed")
+    role = framed[1]["role"]
+
+    assert "Do not create, switch, or inspect frame spaces" in role
+    assert "Never call complete-goals-ltm" in role
+    assert "routine pre-send check" in role
+    assert "Do not duplicate" in role
+
+
 def test_the_solo_agent_has_no_collaborators():
     agents, _ = plan("solo")
 

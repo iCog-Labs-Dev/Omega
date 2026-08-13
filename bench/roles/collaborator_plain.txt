@@ -1,0 +1,4 @@
+
+TOOLS
+Use only send. Do not search the web, run shell commands, read or write files, or store
+memories. Everything you need is in the message that addresses you.
