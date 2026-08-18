@@ -10,6 +10,29 @@ from src.logger import get_logger
 
 logger = get_logger(__name__)
 
+class LLMQuotaExceededError(Exception):
+    """Raised when the LLM API quota/billing limit is reached."""
+    pass
+
+# Error substrings that indicate quota/billing exhaustion across providers
+_QUOTA_SIGNALS = [
+    "insufficient_quota",       # OpenAI
+    "quota_exceeded",           # OpenAI / generic
+    "you exceeded your current quota",  # OpenAI message text
+    "rate_limit_exceeded",      # some providers reuse this for billing
+    "billing",                  # Anthropic billing errors
+    "credit balance is too low",# Anthropic
+    "your account has been disabled",   # suspended accounts
+    "payment required",         # HTTP 402 text
+    "out of credits",           # ASI / generic
+    "insufficient credits",     # ASI / generic
+]
+
+def _is_quota_error(exc: Exception) -> bool:
+    """Return True if the exception looks like a quota/billing exhaustion."""
+    text = str(exc).lower()
+    return any(signal in text for signal in _QUOTA_SIGNALS)
+
 def _log_raw(provider: str, model: str, raw: str) -> None:
     logger.debug(f"[LLM_RAW] provider={provider} model={model} chars={len(raw or '')} raw={raw!r}")
 
@@ -134,6 +157,11 @@ class AIProvider(AbstractAIProvider):
             return resp
         except Exception as e:
             logger.exception(f"[AIProvider.chat]: Exception while communicating with LLM: {e}")
+            if _is_quota_error(e):
+                raise LLMQuotaExceededError(
+                    f"LLM API quota/billing limit reached for provider '{self._name}'. "
+                    "Please check your account credits or billing details."
+                ) from e
             return ""
 
     def _clean_text(self, text: str) -> str:

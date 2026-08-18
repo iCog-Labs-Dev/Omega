@@ -3,6 +3,7 @@ import lib_llm_ext as llm
 import providers
 from src.logger import get_logger
 from config import config_get_by_key
+from lib_llm_ext import LLMQuotaExceededError, _is_quota_error
 
 logger = get_logger(__name__)
 
@@ -74,4 +75,10 @@ class OpenAIProviderImpl(llm.AIProvider):
             return self._clean_text(raw)
         except Exception as e:
             logger.exception(f"[OpenAIProviderImpl.chat]: Exception while communicating with LLM: {e}")
+            # Surface quota/billing errors so the agent loop can notify the user
+            if _is_quota_error(e):
+                raise LLMQuotaExceededError(
+                    f"LLM API quota/billing limit reached for provider 'OpenAI'. "
+                    "Please check your billing details at https://platform.openai.com/settings/billing"
+                ) from e
             return ""

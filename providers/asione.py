@@ -2,6 +2,7 @@ import lib_llm_ext as llm
 import providers
 from src.logger import get_logger
 from config import config_get_by_key
+from lib_llm_ext import LLMQuotaExceededError, _is_quota_error
 
 logger = get_logger(__name__)
 
@@ -58,4 +59,9 @@ class ASIOneProviderImpl(llm.AIProvider):
             return resp
         except Exception as e:
             logger.exception(f"[ASIOneProviderImpl.chat]: Exception while communicating with LLM: {e}")
+            if _is_quota_error(e):
+                raise LLMQuotaExceededError(
+                    f"LLM API quota/billing limit reached for provider 'ASIOne'. "
+                    "Please check your account at https://api.asi1.ai"
+                ) from e
             return ""
