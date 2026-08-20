@@ -7,10 +7,22 @@ on:
   workflow_call:
     inputs:
       publish_docker:
-        description: 'Publish Docker images to Docker Hub'
+        description: 'Publish Docker images to the registry'
         required: false
         default: false
         type: boolean
+      image_name:
+        description: 'Image repository to publish, without the tag. Include the
+          registry host for anything other than Docker Hub, e.g.
+          ghcr.io/owner/omegaclaw'
+        required: false
+        default: 'singularitynet/omegaclaw'
+        type: string
+      registry:
+        description: 'Registry to log in to'
+        required: false
+        default: 'docker.io'
+        type: string
       tag_name:
         description: 'Tag to publish'
         required: false
@@ -41,6 +53,13 @@ on:
         required: false
       DOCKERHUB_TOKEN:
         required: false
+      # Used when `registry` is anything other than docker.io. Docker Hub keeps
+      # reading the DOCKERHUB_ pair, so callers that inherit secrets are not
+      # affected by these even if the org defines them for something else.
+      REGISTRY_USERNAME:
+        required: false
+      REGISTRY_PASSWORD:
+        required: false
       CICD_GITHUB_PAT:
         required: false
 
@@ -64,13 +83,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Login to Docker Hub
+      - name: Log in to the image registry
         if: inputs.publish_docker
         uses: docker/login-action@v4
         with:
-          registry: docker.io
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ inputs.registry }}
+          username: ${{ inputs.registry == 'docker.io' && secrets.DOCKERHUB_USERNAME || secrets.REGISTRY_USERNAME }}
+          password: ${{ inputs.registry == 'docker.io' && secrets.DOCKERHUB_TOKEN || secrets.REGISTRY_PASSWORD }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -87,8 +106,8 @@ jobs:
           platforms: ${{ inputs.platforms }}
           push: ${{ inputs.publish_docker }}
           tags: |
-            singularitynet/omegaclaw:${{ inputs.tag_name }}
-            ${{ inputs.move_latest && 'singularitynet/omegaclaw:latest' || '' }}
+            ${{ inputs.image_name }}:${{ inputs.tag_name }}
+            ${{ inputs.move_latest && format('{0}:latest', inputs.image_name) || '' }}
           provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=min
@@ -103,8 +122,8 @@ jobs:
           platforms: ${{ inputs.platforms }}
           push: ${{ inputs.publish_docker }}
           tags: |
-            singularitynet/omegaclaw:${{ inputs.tag_name }}
-            ${{ inputs.move_latest && 'singularitynet/omegaclaw:latest' || '' }}
+            ${{ inputs.image_name }}:${{ inputs.tag_name }}
+            ${{ inputs.move_latest && format('{0}:latest', inputs.image_name) || '' }}
           provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=min

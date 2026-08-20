@@ -1,0 +1,118 @@
+name: Deploy (production)
+
+on:
+  push:
+    tags:
+      - "prod-*"
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      image_name: ${{ steps.meta.outputs.image_name }}
+      image: ${{ steps.meta.outputs.image }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Resolve image coordinates
+        id: meta
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          tag="production-${{ github.sha }}"
+          echo "image_name=ghcr.io/${owner}/omegaclaw" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${owner}/omegaclaw:${tag}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prep
+    uses: ./.github/workflows/common.yml
+    with:
+      publish_docker: true
+      image_name: ${{ needs.prep.outputs.image_name }}
+      registry: ghcr.io
+      tag_name: ${{ needs.prep.outputs.tag }}
+      platforms: linux/amd64
+    secrets:
+      REGISTRY_USERNAME: ${{ github.actor }}
+      REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    needs: [prep, build]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Fetch secrets from Infisical
+        uses: Infisical/secrets-action@v1.0.7
+        with:
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: IMAGE,GHCR_USER,GHCR_TOKEN,ASI_API_KEY,OPENAI_API_KEY,ANTHROPIC_API_KEY,OPENROUTER_API_KEY,TG_BOT_TOKEN,TG_CHAT_ID,LLM_PROVIDER,LLM_MODEL
+          script: |
+            set -e
+            mkdir -p /omegaclaw
+            tee /omegaclaw/.env > /dev/null <<EOF
+            ASI_API_KEY=...${ASI_API_KEY: -5}
+            OPENAI_API_KEY=...${OPENAI_API_KEY: -5}
+            ANTHROPIC_API_KEY=...${ANTHROPIC_API_KEY: -5}
+            OPENROUTER_API_KEY=...${OPENROUTER_API_KEY: -5}
+            TG_BOT_TOKEN=...${TG_BOT_TOKEN: -5}
+            TG_CHAT_ID=${TG_CHAT_ID}
+            LLM_PROVIDER=${LLM_PROVIDER}
+            LLM_MODEL=${LLM_MODEL}
+            EOF
+            chmod 600 /omegaclaw/.env
+
+            mkdir -p /Backup/docker/PeTTa
+
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+            docker pull "${IMAGE}"
+            docker rm -f omegaclaw 2>/dev/null || true
+
+            # The prompt ships inside the plugin at plugins/telegram/prompt.txt and
+            # is read from there by default, so it no longer has to be copied out
+            # of the image and mounted back. To override it, mount a file and point
+            # TG_PROMPT_PATH at it.
+            docker run -d \
+              --name omegaclaw \
+              --restart=always \
+              --env-file /omegaclaw/.env \
+              -e ASI_API_KEY="${ASI_API_KEY}" \
+              -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+              -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
+              -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
+              -e TG_BOT_TOKEN="${TG_BOT_TOKEN}" \
+              -v /Backup/docker/PeTTa:/PeTTa/repos/OmegaClaw-Core/memory \
+              "${IMAGE}" \
+              commchannel=telegram \
+              TG_CHAT_ID=${TG_CHAT_ID} \
+              provider=${LLM_PROVIDER} \
+              LLM=${LLM_MODEL} \
+              embeddingprovider=OpenAI
+        env:
+          IMAGE: ${{ needs.prep.outputs.image }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASI_API_KEY: ${{ env.ASI_API_KEY }}
+          OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ env.OPENROUTER_API_KEY }}
+          TG_BOT_TOKEN: ${{ env.BOT_TOKEN }}
+          TG_CHAT_ID: ${{ env.CHAT_ID }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
