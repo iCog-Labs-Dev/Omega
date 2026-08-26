@@ -2,13 +2,13 @@ import os
 import re
 import glob
 import hashlib
-import logging
-import traceback
-
 import chromadb
 import openai
+from   lib_llm_ext import initLocalEmbedding, useLocalEmbedding
+from src.logger import get_logger
+from config import config_get_by_key
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # --- Constants -----------------------------------------------------------
 
@@ -138,12 +138,39 @@ def _chunk_markdown(text, filename):
 
 # --- Embedding -----------------------------------------------------------
 
-def _embed_batch(texts):
+def openai_embed_batch(texts):
     """Embed a list of texts via OpenAI. Returns list of float vectors."""
-    client = openai.OpenAI()
-    resp = client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
+    proxy_url = config_get_by_key("GATEWAY_URL")
+    if proxy_url:
+        client = openai.OpenAI(base_url=f"{proxy_url.rstrip('/')}/openai/", api_key="unused")
+    else:
+        client = openai.OpenAI()
+    try:
+        resp = client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
+    except Exception as e:
+        raise RuntimeError(f"Embedding request failed: {e}") from e
     return [item.embedding for item in resp.data]
 
+
+def openai_embed(text):
+    """Embed one runtime memory string via the configured OpenAI route."""
+    return openai_embed_batch([text])[0]
+
+
+def local_embed_batch(texts):
+    """Embed a list of texts via lib_llm_ext local embeddings."""
+    if isinstance(texts, str):
+        texts = [texts]
+
+    if not texts:
+        return []
+
+    initLocalEmbedding()
+
+    return [
+        useLocalEmbedding(text)
+        for text in texts
+    ]
 
 # --- Hash sentinel docs --------------------------------------------------
 
@@ -156,8 +183,8 @@ def _get_stored_hash(collection, filename):
         result = collection.get(ids=[_hash_id(filename)], include=["metadatas"])
         if result["ids"]:
             return result["metadatas"][0].get("hash")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"{filename}: could not read stored hash, re-indexing: {e}")
     return None
 
 
@@ -178,22 +205,23 @@ _last_query = None
 _last_result = None
 
 
-def init_knowledge():
+def init_knowledge(embedding_selection):
     """Chunk, embed, and store knowledge files. Skips unchanged files."""
     global _embedding_dim, _last_query, _last_result
     _last_query = None
     _last_result = None
+    logger.info(f"Embedding type selected is {embedding_selection}")
 
     try:
         collection = _get_collection()
         knowledge_dir = _resolve_knowledge_dir()
 
         if not os.path.isdir(knowledge_dir):
-            return f"Knowledge dir not found: {knowledge_dir}"
+            return f"Knowledge dir not found: {knowledge_dir}, bypassing knowledge load..."
 
         md_files = sorted(glob.glob(os.path.join(knowledge_dir, "*.md")))
         if not md_files:
-            return "No .md files found in knowledge-priors/"
+            return "No markdown .md files found in directory knowledge-priors, bypassing knowledge load..."
 
         unchanged = 0
         reindexed = 0
@@ -204,7 +232,7 @@ def init_knowledge():
             stored_hash = _get_stored_hash(collection, filename)
 
             if stored_hash == current_hash:
-                print(f"  {filename}: unchanged (skipped)")
+                logger.debug(f"{filename}: unchanged (skipped)")
                 unchanged += 1
                 continue
 
@@ -213,8 +241,8 @@ def init_knowledge():
                 old = collection.get(where={"source": filename}, include=[])
                 if old["ids"]:
                     collection.delete(ids=old["ids"])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"{filename}: could not delete old chunks, stale chunks may remain: {e}")
 
             # Chunk and embed
             text = open(filepath, "r", encoding="utf-8").read()
@@ -223,9 +251,17 @@ def init_knowledge():
                 continue
 
             texts = [c["text"] for c in chunks]
-            embeddings = _embed_batch(texts)
+            if embedding_selection == "Local":
+                embeddings = local_embed_batch(texts)
+            elif embedding_selection == "OpenAI":
+                embeddings = openai_embed_batch(texts)
+            else:
+                raise ValueError(
+                      f"Invalid embedding_selection={embedding_selection!r}. "
+                      "Expected 'Local' or 'OpenAI'.")
+                 
             if not embeddings:
-                print(f"  {filename}: embedding failed, skipping")
+                logger.warning(f"{filename}: embedding failed, skipping")
                 continue
 
             if _embedding_dim is None:
@@ -252,57 +288,12 @@ def init_knowledge():
             # Store hash sentinel
             _store_hash(collection, filename, current_hash, _embedding_dim)
 
-            print(f"  {filename}: indexed {len(chunks)} chunks")
+            logger.info(f"{filename}: indexed {len(chunks)} chunks")
             reindexed += 1
 
         total = unchanged + reindexed
         return f"Knowledge: {total} files ({unchanged} unchanged, {reindexed} re-indexed)"
 
     except Exception as e:
-        traceback.print_exc()
+        logger.exception(f"Knowledge init failed: {e}", exc_info=True)
         return f"Knowledge init failed: {e}"
-
-
-def query_knowledge(query_str, k=TOP_K):
-    """Retrieve top-k relevant knowledge chunks for a query string."""
-    global _last_query, _last_result
-
-    if not query_str or query_str in ("", "(@ none)"):
-        return ""
-
-    if query_str == _last_query and _last_result is not None:
-        return _last_result
-
-    try:
-        collection = _get_collection()
-        if collection.count() == 0:
-            return ""
-
-        decoded = _decode_metta(query_str)
-        query_vec = _embed_batch([decoded])[0]
-
-        results = collection.query(
-            query_embeddings=[query_vec],
-            n_results=k,
-            where={"type": "chunk"},
-            include=["documents", "metadatas"],
-        )
-
-        docs = results.get("documents", [[]])[0]
-        metas = results.get("metadatas", [[]])[0]
-
-        parts = []
-        for doc, meta in zip(docs, metas):
-            bc = meta.get("breadcrumb", "")
-            text = doc[:2000] if len(doc) > 2000 else doc
-            parts.append(f"[{bc}] {text}")
-
-        result = "\n---\n".join(parts)
-
-        _last_query = query_str
-        _last_result = result
-        return result
-
-    except Exception as e:
-        logger.warning(f"Knowledge query failed: {e}")
-        return ""

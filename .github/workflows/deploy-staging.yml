@@ -62,7 +62,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: IMAGE,ASI_API_KEY,OPENAI_API_KEY,ANTHROPIC_API_KEY,OPENROUTER_API_KEY,BOT_TOKEN,CHAT_ID,LLM_PROVIDER,LLM_MODEL
+          envs: IMAGE,GHCR_USER,GHCR_TOKEN,ASI_API_KEY,OPENAI_API_KEY,ANTHROPIC_API_KEY,OPENROUTER_API_KEY,TG_BOT_TOKEN,TG_CHAT_ID,LLM_PROVIDER,LLM_MODEL
           script: |
             set -e
             mkdir -p /omegaclaw
@@ -71,8 +71,8 @@ jobs:
             OPENAI_API_KEY=...${OPENAI_API_KEY: -5}
             ANTHROPIC_API_KEY=...${ANTHROPIC_API_KEY: -5}
             OPENROUTER_API_KEY=...${OPENROUTER_API_KEY: -5}
-            BOT_TOKEN=...${BOT_TOKEN: -5}
-            CHAT_ID=${CHAT_ID}
+            TG_BOT_TOKEN=...${TG_BOT_TOKEN: -5}
+            TG_CHAT_ID=${TG_CHAT_ID}
             LLM_PROVIDER=${LLM_PROVIDER}
             LLM_MODEL=${LLM_MODEL}
             EOF
@@ -80,14 +80,16 @@ jobs:
 
             mkdir -p /Backup/docker/PeTTa
 
+            # Staging pulls the same private ghcr image production does, so it
+            # needs the same login. Without it the pull fails on a private package.
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
             docker pull "${IMAGE}"
             docker rm -f omegaclaw 2>/dev/null || true
 
-            docker run --rm --user 0:0 \
-              -v /Backup/docker/PeTTa:/dst \
-              --entrypoint sh \
-              "${IMAGE}" -c "cp /PeTTa/repos/OmegaClaw-Core/memory/tg_prompt.txt /dst/tg_prompt.txt"
-
+            # The prompt ships inside the plugin at plugins/telegram/prompt.txt and
+            # is read from there by default, so it no longer has to be copied out
+            # of the image and mounted back. To override it, mount a file and point
+            # TG_PROMPT_PATH at it.
             docker run -d \
               --name omegaclaw \
               --env-file /omegaclaw/.env \
@@ -95,23 +97,23 @@ jobs:
               -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
               -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
               -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
-              -e BOT_TOKEN="${BOT_TOKEN}" \
+              -e TG_BOT_TOKEN="${TG_BOT_TOKEN}" \
               -v /Backup/docker/PeTTa:/PeTTa/repos/OmegaClaw-Core/memory \
-              -v /Backup/docker/PeTTa/tg_prompt.txt:/PeTTa/repos/OmegaClaw-Core/memory/tg_prompt.txt:ro \
               "${IMAGE}" \
               commchannel=telegram \
-              BOT_TOKEN=${BOT_TOKEN} \
-              CHAT_ID=${CHAT_ID} \
+              TG_CHAT_ID=${TG_CHAT_ID} \
               provider=${LLM_PROVIDER} \
               LLM=${LLM_MODEL} \
               embeddingprovider=OpenAI
         env:
           IMAGE: ${{ needs.prep.outputs.image }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASI_API_KEY: ${{ env.ASI_API_KEY }}
           OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
           OPENROUTER_API_KEY: ${{ env.OPENROUTER_API_KEY }}
-          BOT_TOKEN: ${{ env.BOT_TOKEN }}
-          CHAT_ID: ${{ env.CHAT_ID }}
+          TG_BOT_TOKEN: ${{ env.BOT_TOKEN }}
+          TG_CHAT_ID: ${{ env.CHAT_ID }}
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}

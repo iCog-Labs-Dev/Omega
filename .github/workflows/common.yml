@@ -11,6 +11,18 @@ on:
         required: false
         default: false
         type: boolean
+      image_name:
+        description: 'Image repository to publish, without the tag. Include the
+          registry host for anything other than Docker Hub, e.g.
+          ghcr.io/owner/omegaclaw'
+        required: false
+        default: 'singularitynet/omegaclaw'
+        type: string
+      registry:
+        description: 'Registry to log in to'
+        required: false
+        default: 'docker.io'
+        type: string
       tag_name:
         description: 'Tag to publish'
         required: false
@@ -34,49 +46,50 @@ on:
       run_tests:
         description: 'Run tests'
         required: false
-        default: false
+        default: true
         type: boolean
-      image_name:
-        description: 'Fully qualified image name (without tag)'
-        required: false
-        default: 'singularitynet/omegaclaw'
-        type: string
-      registry:
-        description: 'Container registry to log in to'
-        required: false
-        default: 'docker.io'
-        type: string
     secrets:
       DOCKERHUB_USERNAME:
         required: false
       DOCKERHUB_TOKEN:
         required: false
+      # Used when `registry` is anything other than docker.io. Docker Hub keeps
+      # reading the DOCKERHUB_ pair, so callers that inherit secrets are not
+      # affected by these even if the org defines them for something else.
       REGISTRY_USERNAME:
         required: false
       REGISTRY_PASSWORD:
         required: false
-    outputs:
-      image:
-        description: 'Fully qualified image reference that was built/pushed'
-        value: ${{ jobs.common.outputs.image }}
+      CICD_GITHUB_PAT:
+        required: false
 
 jobs:
-  common:
-    runs-on: ubuntu-latest
-    outputs:
-      image: ${{ steps.resolve.outputs.image }}
-    steps:
-      - name: Resolve image reference
-        id: resolve
-        run: echo "image=${{ inputs.image_name }}:${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+  autotests:
+    if: inputs.run_tests
+    uses: ./.github/workflows/autotests.yml
+    with:
+      platforms: ${{ inputs.platforms }}
+      no_build_cache: ${{ inputs.no_build_cache }}
+    secrets: inherit
 
-      - name: Login to registry
-        if: ${{ inputs.publish_docker }}
+  common:
+    needs: autotests
+    if: always() && (needs.autotests.result == 'success' || needs.autotests.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Log in to the image registry
+        if: inputs.publish_docker
         uses: docker/login-action@v4
         with:
           registry: ${{ inputs.registry }}
-          username: ${{ secrets.REGISTRY_USERNAME || secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+          username: ${{ inputs.registry == 'docker.io' && secrets.DOCKERHUB_USERNAME || secrets.REGISTRY_USERNAME }}
+          password: ${{ inputs.registry == 'docker.io' && secrets.DOCKERHUB_TOKEN || secrets.REGISTRY_PASSWORD }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -84,30 +97,34 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build image (no push)
-        uses: docker/build-push-action@v7
-        with:
-          platforms: ${{ inputs.platforms }}
-          load: ${{ inputs.run_tests }}
-          push: false
-          tags: ${{ inputs.image_name }}:${{ inputs.tag_name }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          no-cache: ${{ inputs.no_build_cache }}
-
-      - name: Run auto tests
-        if: inputs.run_tests
-        run: echo "No autotests yet"
-
       - name: Build and push (release)
-        if: success() && inputs.publish_docker
+        id: push
+        continue-on-error: true
         uses: docker/build-push-action@v7
         with:
+          context: .
           platforms: ${{ inputs.platforms }}
           push: ${{ inputs.publish_docker }}
           tags: |
             ${{ inputs.image_name }}:${{ inputs.tag_name }}
             ${{ inputs.move_latest && format('{0}:latest', inputs.image_name) || '' }}
+          provenance: false
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min
+          no-cache: ${{ inputs.no_build_cache }}
+
+      # Docker Hub occasionally returns a transient 400 on the large layer's blob PUT; retry the push once.
+      - name: Build and push (release, retry)
+        if: inputs.publish_docker && steps.push.outcome == 'failure'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ inputs.platforms }}
+          push: ${{ inputs.publish_docker }}
+          tags: |
+            ${{ inputs.image_name }}:${{ inputs.tag_name }}
+            ${{ inputs.move_latest && format('{0}:latest', inputs.image_name) || '' }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
           no-cache: ${{ inputs.no_build_cache }}

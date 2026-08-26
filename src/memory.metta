@@ -6,7 +6,7 @@
 (= (embeddingprovider) (empty))
 
 (= (initMemory)
-   (progn (println! "Initializing memory")
+   (progn (log INFO "memory" "Initializing memory")
           (configure maxFeedback 50000)
           (configure maxRecallItems 20)
           (configure maxEpisodeRecallLines 20)
@@ -15,14 +15,23 @@
           (if (== (embeddingprovider) Local)
               (py-call (lib_llm_ext.initLocalEmbedding)) _)))
 
-(= (getPrompt)
-   (if (isTelegram)
-       (read-file (library OmegaClaw-Core ./memory/tg_prompt.txt))
-       (read-file (library OmegaClaw-Core ./memory/prompt.txt))))
+(= (getPrompt $provider)
+   (let $model_prompt
+         (library OmegaClaw-Core (py-str ("./memory/prompt_" $provider ".txt")))
+     (if (exists-file $model_prompt)
+         (read-file $model_prompt)
+         (let $default_prompt ;Safely read the default prompt. Return an empty string if the file does not exist.
+               (library OmegaClaw-Core ./memory/prompt.txt)
+           (if (exists-file $default_prompt)
+               (read-file $default_prompt)
+               "")))))
 
 (= (getHistory)
-   (let $ret (read-file (library OmegaClaw-Core ./memory/history.metta))
-        (last_chars $ret (maxHistory))))
+   (let $history_file
+         (library OmegaClaw-Core ./memory/history.metta)
+     (if (exists-file $history_file) ;Safely read the history. Return an empty string if the file does not exist.
+         (read_file_tail $history_file (maxHistory))
+         "")))
 
 (= (addToHistory $lastmessage $response $sexpr $msgnew)
    (if $msgnew
@@ -36,10 +45,10 @@
 (= (embed $str)
    (if (== (embeddingprovider) Local)
        (py-call (lib_llm_ext.useLocalEmbedding (string-safe $str)))
-       (useGPTEmbedding (string-safe $str))))
+       (py-call (rag.openai_embed (string-safe $str)))))
 
 (= (appendToHistory $addition)
-   (append-file (library OmegaClaw-Core ./memory/history.metta) (swrite $addition)))
+   (append-file-raw (library OmegaClaw-Core ./memory/history.metta) (swrite $addition)))
 
 (= (remember $str)
    (progn (py-call (lib_chromadb.remember $str (embed $str) (get_time_as_string)))

@@ -1,43 +1,24 @@
 ;configured at runtime:
-(= (isTelegram) (== (commchannel) telegram))
-(= (BOT_TOKEN) (empty))
-(= (CHAT_ID) (empty))
-(= (IRC_channel) (empty))
-(= (IRC_server) (empty))
-(= (IRC_port) (empty))
-(= (IRC_user) (empty))
 (= (commchannel) (empty))
-(= (MM_URL) (empty))
-(= (MM_CHANNEL_ID) (empty))
-(= (MM_BOT_TOKEN) (empty))
 
 ;Connect all the channels:
 (= (initChannels)
-   (progn (println! "Initializing channels")
+   (progn (log INFO "channels" "Initializing channels")
           (configure commchannel irc)
-          (case (commchannel)
-                ((irc      (progn (configure IRC_channel ##omegaclaw)
-                                  (configure IRC_server "irc.quakenet.org")
-                                  (configure IRC_port 6667)
-                                  (configure IRC_user omegaclaw)
-                                  (py-call (irc.start_irc (IRC_channel) (IRC_server) (IRC_port) (IRC_user)))))
-                 (telegram  (progn 
-                                (println! "Initializing telegram")
-                                (configure BOT_TOKEN "")
-                                (configure CHAT_ID "")
-                                (py-call (tg_channel.start_telegram (BOT_TOKEN) (CHAT_ID)))))
-                 ($_ (progn (configure MM_URL "https://chat.singularitynet.io")
-                            (configure MM_CHANNEL_ID "8fjrmabjx7gupy7e5kjznpt5qh")
-                            (configure MM_BOT_TOKEN "")
-                            (py-call (mattermost.start_mattermost (MM_URL) (MM_CHANNEL_ID) (MM_BOT_TOKEN)))))))))
+          (commChannelStart (commchannel))))
+
+(= (commChannelStart $commchannel)
+   (py-call (channels.commChannelStart $commchannel)))
+
+(= (commChannelReceive)
+   (py-call (channels.commChannelReceive)))
+
+(= (commChannelSend $message)
+   (py-call (channels.commChannelSend $message)))
 
 ;Receive the latest user message considering all communication channels:
 (= (receive)
-   (if (== (commchannel) irc)
-       (py-call (irc.getLastMessage))
-       (if (== (commchannel) telegram)
-           (py-call (tg_channel.getLastMessage))
-           (py-call (mattermost.getLastMessage)))))
+   (commChannelReceive))
 
 ;Send a message to all communication channels:
 !(change-state! &lastsend "")
@@ -45,8 +26,4 @@
    (if (!= $msg (get-state &lastsend))
        (progn (change-state! &lastsend $msg)
               (let $safemsg (string-replace $msg  "\n" "\\n")
-                   (if (== (commchannel) irc)
-                       (let $temp (cut) (py-call (irc.send_message $safemsg)))
-                       (if (== (commchannel) telegram)
-                           (let $temp (cut) (py-call (tg_channel.send_message $safemsg)))
-                           (let $temp (cut) (py-call (mattermost.send_message $safemsg))))))) _))
+                   (let $temp (cut) (commChannelSend $safemsg)))) _))
