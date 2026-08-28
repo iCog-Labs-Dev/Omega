@@ -389,6 +389,20 @@ def test_destructive_admin_commands_clear_the_auth_handshake():
         restore()
 
 
+def test_search_toggle_is_exposed_as_websearch_restriction():
+    channel = tm.TelegramChannel()
+    saved = tm._channel.search_disabled
+    try:
+        tm._channel.search_disabled = False
+        assert channel.is_tool_disabled("websearch") is False
+
+        tm._channel.search_disabled = True
+        assert channel.is_tool_disabled("websearch") is True
+        assert channel.is_tool_disabled("send") is False
+    finally:
+        tm._channel.search_disabled = saved
+
+
 def test_ethics_alert_reports_when_it_cannot_be_delivered():
     """A silent ethics alert reads as 'no blocks happened'. Both no-admin and
     failed-delivery must leave a record."""

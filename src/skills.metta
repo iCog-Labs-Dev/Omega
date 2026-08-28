@@ -132,7 +132,9 @@
           APPEND-FILE-SUCCESS))
 
 (= (websearch $msg)
-   (py-call (websearch.search $msg)))
+   (if (py-call (channels.commChannelIsToolDisabled "websearch"))
+       (Error websearch "Refused: Search is disabled by admin.")
+       (py-call (websearch.search $msg))))
 
 (= (get-io-policy)
    (py-call (policy.get_allowed_policy_paths (securityPolicyPath))))
