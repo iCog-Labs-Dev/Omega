@@ -4,13 +4,13 @@
 (= (openClawURL) (empty))
 (= (openClawAgent) (empty))
 
-(= (loadOmegaClawPlugin)
+(= (loadOmegaPlugin)
     (progn
         ; Enable or disable the integration.
         (configure openClawEnabled disabled)
         ; OpenClaw Gateway base URL, http://... or https://...
         ; In Docker this is only a fallback: the real target and its token
-        ; are set at container start (openclaw_url=, OMEGACLAW_OPENCLAW_TOKEN)
+        ; are set at container start (openclaw_url=, OMEGA_OPENCLAW_TOKEN)
         ; and injected by the local Nginx proxy. See plugins/openclaw/README.md.
         (configure openClawURL "")
         ; OpenClaw agent name. "main" by default
@@ -18,7 +18,7 @@
         (if (== (openClawEnabled) enabled)
             (if (== (openClawURL) "")
                 (Error
-                    (_loadOmegaClawPlugin)
+                    (_loadOmegaPlugin)
                     "OpenClaw integration is enabled, but openClawURL is not configured")
                 (progn
                     (log INFO "openclaw-plugin" "OpenClaw integration is enabled")

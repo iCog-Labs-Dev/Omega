@@ -27,7 +27,9 @@ def get_proxy_url():
 
 
 def _local_auth_secret():
-    return os.environ.get("OMEGACLAW_AUTH_SECRET", "").strip()
+    secret = os.environ.get("OMEGA_AUTH_SECRET", "").strip()
+    # Fall back to the pre-rename variable so existing exports keep working.
+    return secret or os.environ.get("OMEGACLAW_AUTH_SECRET", "").strip()
 
 
 def is_auth_enabled():
@@ -73,7 +75,7 @@ def _channel_auth_user_path():
 
 
 def store_channel_authenticated_user_id(channel_identifier, user_id):
-    # For any single run of OmegaClaw, allow only a single save of a user-id or verification    
+    # For any single run of Omega, allow only a single save of a user-id or verification    
     global _user_ID_processed
     if _user_ID_processed:
         logger.warning(f"[{channel_identifier}] Warning: a user already was validated, ignoring")

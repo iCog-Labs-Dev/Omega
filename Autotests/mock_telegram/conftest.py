@@ -48,7 +48,7 @@ from llm import LLM_MOCK_PORT as LLM_PORT_DEFAULT  # noqa: E402
 from real_driver import RealTgDriver  # noqa: E402
 
 
-AUTH_SECRET = os.environ.get("OMEGACLAW_AUTH_SECRET") or "0000"
+AUTH_SECRET = os.environ.get("OMEGA_AUTH_SECRET") or "0000"
 
 
 def _agent_username_from_bot_token(token):
