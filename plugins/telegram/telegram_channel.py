@@ -44,6 +44,11 @@ def _core_channel_infra():
 
 auth, PendingMessages = _core_channel_infra()
 
+_RASTER_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+_RASTER_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+_SVG_MIME_TYPES = {"image/svg+xml", "application/svg+xml"}
+_SVG_EXTENSIONS = {".svg", ".svgz"}
+
 # A plugin must not reconfigure the host's root logging or create files on
 # import (the fork's tg_channel called logging.basicConfig with a FileHandler
 # here). The channel's logging.info/error calls route to whatever the host has
@@ -637,7 +642,7 @@ class _TelegramChannel:
         logging.info("[IMGDBG] queued photo from %s chat=%s bytes=%d caption=%s", name, chat_id, len(image_bytes), bool(caption))
 
     async def _on_document(self, message: types.Message):
-        """Handle document (file) messages — PDF only."""
+        """Handle PDFs and raster images uploaded as uncompressed files."""
         if self._is_paused(message.chat.id):
             return
         if not self._is_chat_authorized(message):
@@ -659,13 +664,25 @@ class _TelegramChannel:
         if not self._should_bot_respond(message, caption):
             return
 
-        mime = message.document.mime_type or ""
-        if mime != "application/pdf":
-            await self._send_block_notice(message, "Only PDF files are supported. Please send a PDF.")
+        mime = (message.document.mime_type or "").lower()
+        filename = message.document.file_name or "document"
+        extension = os.path.splitext(filename.lower())[1]
+
+        if mime in _SVG_MIME_TYPES or extension in _SVG_EXTENSIONS:
+            await self._send_block_notice(message, "SVG files are not supported. Please send a PNG, JPEG, WebP, or PDF.")
+            return
+
+        is_raster_image = mime in _RASTER_IMAGE_MIME_TYPES or extension in _RASTER_IMAGE_EXTENSIONS
+        if is_raster_image and not self.reply_constraints.get("allow_media", False):
+            await self._send_block_notice(message, "Image uploads are not enabled. Please send text instead.")
+            return
+
+        if not is_raster_image and mime != "application/pdf":
+            await self._send_block_notice(message, "Only PNG, JPEG, WebP, and PDF files are supported.")
             return
 
         if caption and await is_category_blocked(caption):
-            logging.warning(f"Ethics pass rejected document caption")
+            logging.warning("Ethics pass rejected document caption")
             sender = message.from_user.username if message.from_user and message.from_user.username else "unknown"
             alert_ethics_violation("incoming_message", f"From: {sender}: [document caption] {caption}")
             return
@@ -674,7 +691,26 @@ class _TelegramChannel:
         name = "unknown user" if user is None else (user.username or user.full_name or str(user.id))
         name = f"@{name}" if user and name == user.username else name
         chat_id = message.chat.id
-        filename = message.document.file_name or "document.pdf"
+
+        if is_raster_image:
+            try:
+                buf = BytesIO()
+                await self.bot.download(message.document, destination=buf)
+                image_bytes = media_handler.sanitize_image(buf.getvalue())
+                data_uri = media_handler.image_to_data_uri(image_bytes, "image/jpeg")
+                pending_media = [{"type": "image_url", "image_url": {"url": data_uri}}]
+            except Exception as e:
+                logging.error(f"Failed to download/process image document '{filename}': {e}")
+                await self._send_block_notice(message, "Failed to process the image. Please send a valid PNG, JPEG, or WebP file.")
+                return
+
+            user_request = f" {caption}" if caption else ""
+            display_text = f"{name}: [image]{user_request}"
+            with self.msg_lock:
+                self._message_queue.append((chat_id, display_text, message.message_id, pending_media))
+            logging.info("[IMGDBG] queued image document from %s chat=%s file=%s bytes=%d caption=%s",
+                         name, chat_id, filename, len(image_bytes), bool(caption))
+            return
 
         try:
             buf = BytesIO()
