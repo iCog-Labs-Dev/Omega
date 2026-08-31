@@ -12,6 +12,13 @@ from aiogram.types import BufferedInputFile
 from aiogram.filters import Command
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramEntityTooLarge,
+    TelegramForbiddenError,
+    TelegramNotFound,
+    TelegramUnauthorizedError,
+)
 
 try:
     from telegramify_markdown import markdownify
@@ -62,6 +69,87 @@ def prompt_path():
     core tree, which is the point of it being a plugin.
     """
     return config_get_by_key("TG_PROMPT_PATH", _plugin_file("prompt.txt"))
+
+
+# Telegram refuses a text message over 4096 characters, counted on the message it
+# actually receives - which is the MarkdownV2 rendering, not what the agent
+# wrote. Rendering only ever adds characters, and by as much as a factor of two
+# on punctuation-heavy text, so the pieces are measured rendered rather than
+# split on a raw-length guess that would leave formatting to fail silently.
+TELEGRAM_TEXT_LIMIT = 4096
+
+# A send that fails with one of these is wrong in a way no retry can fix: the
+# text, the chat, or the bot's access to it. Anything else - a timeout, a 5xx, a
+# rate limit - is worth keeping in the queue and trying again.
+PERMANENT_SEND_FAILURES = (
+    TelegramBadRequest,
+    TelegramEntityTooLarge,
+    TelegramForbiddenError,
+    TelegramNotFound,
+    TelegramUnauthorizedError,
+)
+
+
+def _pack(parts, separator, fits):
+    """Rejoin consecutive parts for as long as the result still fits."""
+    run = ""
+    for part in parts:
+        candidate = f"{run}{separator}{part}" if run else part
+        if fits(candidate):
+            run = candidate
+            continue
+        if run:
+            yield run
+        run = part
+    if run:
+        yield run
+
+
+def _hard_cut(text, fits):
+    """Slice a run with no boundary left to break on, shrinking each slice until
+    it fits. Rendering only grows text, so a raw 4096 characters is the ceiling
+    worth trying first."""
+    while text:
+        take = min(len(text), TELEGRAM_TEXT_LIMIT)
+        while take > 1 and not fits(text[:take]):
+            take = take * 3 // 4
+        yield text[:take]
+        text = text[take:]
+
+
+def split_for_telegram(text, fits=None):
+    """Break text into pieces that each fit in one Telegram message.
+
+    Cuts on the largest boundary that fits - a blank line first, then a single
+    line, then mid-line as a last resort - so a long answer arrives as readable
+    paragraphs instead of arbitrary slices. Text that already fits comes back
+    unchanged, as one piece.
+
+        split_for_telegram("short")     # ["short"]
+        split_for_telegram("a" * 9000)  # three pieces, in order
+
+    `fits` decides whether one piece can be sent, and defaults to counting raw
+    characters. The channel passes the rendered length instead, because that is
+    what Telegram measures.
+
+    Pieces holding nothing but whitespace are dropped: Telegram rejects a blank
+    message, and that refusal is not worth queueing.
+    """
+    if fits is None:
+        def fits(piece):
+            return len(piece) <= TELEGRAM_TEXT_LIMIT
+
+    pieces = []
+    for paragraph in _pack(text.split("\n\n"), "\n\n", fits):
+        if fits(paragraph):
+            pieces.append(paragraph)
+            continue
+        for line in _pack(paragraph.split("\n"), "\n", fits):
+            if fits(line):
+                pieces.append(line)
+            else:
+                pieces.extend(_hard_cut(line, fits))
+    return [piece for piece in pieces if piece.strip()]
 
 
 class _TelegramChannel:
@@ -901,32 +989,49 @@ class _TelegramChannel:
     def _to_mdv2(self, text):
         return markdownify(text)
 
+    def _fits_one_message(self, piece):
+        """Telegram counts the rendered message, so measure that and not the
+        text the agent wrote."""
+        return len(self._to_mdv2(piece)) <= TELEGRAM_TEXT_LIMIT
+
     def send_message(self, text, chat_id=None, reply_to_id=None):
         """Queue a text message for the target chat, then deliver whatever the
         bot is ready to take. Never call this from the bot's own event loop
-        thread: delivery blocks on the coroutine's result."""
+        thread: delivery blocks on the coroutine's result.
+
+        A reply longer than one Telegram message is queued as several pieces, in
+        order. Only the first quotes the message being answered - the rest read
+        as its continuation."""
         text = text.replace("\\n", "\n")
 
         target_chat_id = chat_id or self.chat_id
         self._stop_typing(str(target_chat_id))
         target_reply_id = reply_to_id or (self._reply_to_id if target_chat_id == self.chat_id else None)
 
-        self._outbox.put((target_chat_id, target_reply_id, text))
+        for piece in split_for_telegram(text, self._fits_one_message):
+            self._outbox.put((target_chat_id, target_reply_id, piece))
+            target_reply_id = None
         self._flush_outbox()
 
     def _ready_to_send(self):
         return bool(self.connected and self.bot is not None and self.loop is not None)
 
     def _flush_outbox(self):
-        """Drain the outbox. A message that cannot be delivered stays queued and
-        is retried on the next flush rather than being lost."""
+        """Drain the outbox. A message that failed for a reason a later attempt
+        could fix stays queued and is retried on the next flush rather than being
+        lost; one Telegram refuses outright is dropped by `_deliver`."""
         try:
             self._outbox.flush(self._deliver, self._ready_to_send)
         except Exception as e:
             logging.warning(f"Telegram send failed, message stays queued: {e}")
 
     def _deliver(self, item):
-        """Send one queued message. Raises on failure so the outbox keeps it."""
+        """Send one queued message.
+
+        Raises on a failure a later attempt could fix, so the outbox keeps the
+        message. Returns on a refusal no retry can fix, so the outbox drops it
+        and moves on - retrying such a message forever would block every answer
+        queued behind it."""
         target_chat_id, target_reply_id, text = item
         if target_chat_id is None:
             target_chat_id = self.chat_id
@@ -952,7 +1057,10 @@ class _TelegramChannel:
                                   reply_to_message_id=target_reply_id),
             self.loop,
         )
-        fut_fallback.result(timeout=10)
+        try:
+            fut_fallback.result(timeout=10)
+        except PERMANENT_SEND_FAILURES as refusal:
+            logging.error(f"Telegram refused this message outright, dropping it: {refusal}")
 
     def send_photo(self, image_bytes, caption=None, chat_id=None, reply_to_id=None):
         """Send a photo to the active chat, dispatched to the bot's event loop.
