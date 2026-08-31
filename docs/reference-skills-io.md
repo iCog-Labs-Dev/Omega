@@ -44,7 +44,7 @@ The captured stdout of the command as a string.
 Read a file into a string.
 
 ### Parameters
-- `path` — absolute or relative filesystem path. MeTTa library paths of the form `(library OmegaClaw-Core ./memory/prompt.txt)` are also accepted (see `getPrompt`).
+- `path` — absolute or relative filesystem path. MeTTa library paths of the form `(library Omega ./memory/prompt.txt)` are also accepted (see `getPrompt`).
 
 ### Returns
 The file's contents as a single string.

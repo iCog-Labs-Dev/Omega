@@ -27,9 +27,7 @@ def get_proxy_url():
 
 
 def _local_auth_secret():
-    secret = os.environ.get("OMEGA_AUTH_SECRET", "").strip()
-    # Fall back to the pre-rename variable so existing exports keep working.
-    return secret or os.environ.get("OMEGACLAW_AUTH_SECRET", "").strip()
+    return os.environ.get("OMEGA_AUTH_SECRET", "").strip()
 
 
 def is_auth_enabled():

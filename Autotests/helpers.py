@@ -17,7 +17,7 @@ IRC_PORT = 6667
 WAIT = 30
 POLL = 3
 
-HISTORY_FILE = "/PeTTa/repos/OmegaClaw-Core/memory/history.metta"
+HISTORY_FILE = "/PeTTa/repos/Omega/memory/history.metta"
 CHROMA_SQLITE = "/PeTTa/chroma_db/chroma.sqlite3"
 
 GIT_TOKEN_ENV = "OMEGA_GIT_TOKEN"

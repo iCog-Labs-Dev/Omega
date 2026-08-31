@@ -40,10 +40,6 @@ def config_get_by_key(key, default=None):
     envkey = f"OMEGA_{key}"
     if envkey in os.environ:
         return _cache_config(key, os.environ.get(envkey), "environment variable")
-    legacy_envkey = f"OMEGACLAW_{key}"
-    if legacy_envkey in os.environ:
-        logger.warning(f"{legacy_envkey} is deprecated, use {envkey} instead")
-        return _cache_config(key, os.environ.get(legacy_envkey), "environment variable")
     if key in _CONFIG_FILE:
         return _cache_config(key, _CONFIG_FILE.get(key), "config file")
     return _cache_config(key, default, "defaults")

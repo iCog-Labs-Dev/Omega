@@ -14,9 +14,9 @@ on:
       image_name:
         description: 'Image repository to publish, without the tag. Include the
           registry host for anything other than Docker Hub, e.g.
-          ghcr.io/owner/omegaclaw'
+          ghcr.io/owner/omega'
         required: false
-        default: 'singularitynet/omegaclaw'
+        default: 'singularitynet/omega'
         type: string
       registry:
         description: 'Registry to log in to'

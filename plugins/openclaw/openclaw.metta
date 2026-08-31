@@ -1,4 +1,4 @@
-!(import! &self (library OmegaClaw-Core ./plugins/openclaw/openclaw.py))
+!(import! &self (library Omega ./plugins/openclaw/openclaw.py))
 
 (= (openClawEnabled) (empty))
 (= (openClawURL) (empty))
@@ -48,7 +48,7 @@
 ; append-file rather than appendToHistory/library: this plugin's own
 ; definitions live in the plugin's own MeTTa space (src/plugin.metta),
 ; library's file-spec resolves against whichever space an
-; evaluation started from - it does not find the OmegaClaw-Core alias
+; evaluation started from - it does not find the Omega alias
 ; reached this way. append-file takes a plain path and has no such
 ; dependency, so the path is built with projectRootDirectory/joinPath
 ; (same as pluginWorkflowInstructionsDir in workflow.metta) instead of

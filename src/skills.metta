@@ -139,7 +139,7 @@
 (= (get-io-policy)
    (py-call (policy.get_allowed_policy_paths (securityPolicyPath))))
 
-!(import_prolog_functions_from_file (library OmegaClaw-Core ./src/skills.pl) (shell first_char gc read_file_tail))
+!(import_prolog_functions_from_file (library Omega ./src/skills.pl) (shell first_char gc read_file_tail))
 
 (= (metta $str)
    (let $code (sread $str)

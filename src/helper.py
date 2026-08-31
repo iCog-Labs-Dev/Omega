@@ -63,7 +63,7 @@ def extract_timestamp(line):
 
 def around_time(needle_time_str, k):
     needle_time_str = needle_time_str.replace(r'\"', '').replace('"', '').strip()
-    filename = "repos/OmegaClaw-Core/memory/history.metta"
+    filename = "repos/Omega/memory/history.metta"
     target = datetime.strptime(needle_time_str, "%Y-%m-%d %H:%M:%S")
     best_lineno = None
     best_line = None
@@ -212,13 +212,8 @@ def _format_omega_version(version: str) -> str | None:
         return None
     if version.startswith("Omega version="):
         return version
-    # a version file baked by a pre-rename image still carries the old prefix
-    if version.startswith("OmegaClaw version="):
-        return f"Omega version={version[len('OmegaClaw version='):]}"
-    for prefix in ("Omega ", "OmegaClaw "):
-        if version.startswith(prefix):
-            version = version[len(prefix):]
-            break
+    if version.startswith("Omega "):
+        version = version[len("Omega "):]
     return f"Omega version={version}"
 
 
@@ -267,12 +262,6 @@ def test_omega_version():
         assert omega_version(root) == "Omega version=v1.2.3-4-g1234567"
 
         (root / "version").write_text("Omega v1.2.3\n", encoding="utf-8")
-        assert omega_version(root) == "Omega version=v1.2.3"
-
-        (root / "version").write_text("OmegaClaw v1.2.3\n", encoding="utf-8")
-        assert omega_version(root) == "Omega version=v1.2.3"
-
-        (root / "version").write_text("OmegaClaw version=v1.2.3\n", encoding="utf-8")
         assert omega_version(root) == "Omega version=v1.2.3"
 
 

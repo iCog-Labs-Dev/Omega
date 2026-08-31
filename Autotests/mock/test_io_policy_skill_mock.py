@@ -12,7 +12,7 @@ from helpers import Checker, dexec, make_prompt, wait_for_skill_call
 
 
 JSON_POLICY_OUTPUT_PATH = "/tmp/policy_out.json"
-YAML_POLICY_INPUT_PATH = "/PeTTa/repos/OmegaClaw-Core/profile/policy.yaml"
+YAML_POLICY_INPUT_PATH = "/PeTTa/repos/Omega/profile/policy.yaml"
 
 
 def test_get_io_policy_mock(llm, comm):

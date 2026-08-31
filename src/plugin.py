@@ -100,12 +100,7 @@ def loadPythonPlugin(name, location):
     else:
         _error("_initPythonPlugin", f"Couldn't find Python module {name}")
 
-    if hasattr(mod, "loadOmegaPlugin"):
-        plugin_loader = getattr(mod, "loadOmegaPlugin")
-    elif hasattr(mod, "loadOmegaClawPlugin"):
-        # deprecated entry point, still accepted for out-of-tree plugins
-        logger.warning(f"_initPythonPlugin: plugin {name} implements deprecated loadOmegaClawPlugin(), rename it to loadOmegaPlugin()")
-        plugin_loader = getattr(mod, "loadOmegaClawPlugin")
-    else:
+    if not hasattr(mod, "loadOmegaPlugin"):
         _error("_initPythonPlugin", f"No loadOmegaPlugin() function is implemented by plugin {name}")
+    plugin_loader = getattr(mod, "loadOmegaPlugin")
     plugin_loader()

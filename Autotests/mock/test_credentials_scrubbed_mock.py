@@ -28,8 +28,6 @@ FORBIDDEN = [
     "OPENAI_API_KEY", "OPENROUTER_API_KEY", "OPENAIAPI_API_KEY",
     "TG_BOT_TOKEN", "SL_BOT_TOKEN", "MM_BOT_TOKEN",
     "OMEGA_OPENCLAW_TOKEN",
-    # pre-rename names, kept so a half-renamed launcher still fails here
-    "OMEGACLAW_AUTH_SECRET", "OMEGACLAW_OPENCLAW_TOKEN",
 ]
 
 

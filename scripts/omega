@@ -493,7 +493,7 @@ help() {
     echo -e "\t              Pass the Gateway token via OMEGA_OPENCLAW_TOKEN"
     echo -e "\t-c <IRC channel> set IRC channel"
     echo -e "\t-t <channel type> set communication channel type: irc|telegram|slack|websocket|mattermost|test"
-    echo -e "\t-d <Docker image> set Docker image name (default omegaclaw:latest)"
+    echo -e "\t-d <Docker image> set Docker image name (default omega:latest)"
     echo -e "\t-l <logging config> set Python logging config file"
     echo -e "\t--version, -v show the Omega version"
     echo -e "\t--help, -h show this help"
@@ -502,7 +502,7 @@ help() {
 options() {
     OMEGA_AUTH_SECRET=0000
     provider=ASICloud
-    image=singularitynet/omegaclaw:latest
+    image=singularitynet/omega:latest
     commchannel=irc
     IRC_channel="${IRC_channel:-##omega}"
     TG_BOT_TOKEN="${TG_BOT_TOKEN:-}"
@@ -512,7 +512,7 @@ options() {
     SL_POLL_INTERVAL="${SL_POLL_INTERVAL:-2}"
     WS_URL="${WS_URL:-}"
     WS_TOKEN="${WS_TOKEN:-}"
-    OMEGA_OPENCLAW_TOKEN="${OMEGA_OPENCLAW_TOKEN:-${OMEGACLAW_OPENCLAW_TOKEN:-}}"
+    OMEGA_OPENCLAW_TOKEN="${OMEGA_OPENCLAW_TOKEN:-}"
     commchannel=irc
     log_config_path=""
 
@@ -612,7 +612,7 @@ start() {
             --tmpfs /tmp:size=64m,mode=1777
             --tmpfs /var/tmp:size=64m,mode=1777
             --tmpfs /run:size=16m,mode=755
-            --volume omega-memory:/PeTTa/repos/OmegaClaw-Core/memory
+            --volume omega-memory:/PeTTa/repos/Omega/memory
             ${log_config_volume[@]+"${log_config_volume[@]}"}
             -e "${api_token_var}"="${api_token}"
             -e "TG_BOT_TOKEN=${TG_BOT_TOKEN:-}"
@@ -624,7 +624,7 @@ start() {
             "commchannel=${commchannel}"
             "provider=${provider}"
             "embeddingprovider=${embeddingprovider}"
-            "securityPolicyPath=/PeTTa/repos/OmegaClaw-Core/profile/policy.yaml"
+            "securityPolicyPath=/PeTTa/repos/Omega/profile/policy.yaml"
             "memoryDirectory=\$MEMORY_DIR"
     )
 

@@ -35,7 +35,6 @@ def test_standalone_auth_rejects_wrong_secret(monkeypatch):
 
 def test_standalone_auth_without_secret_is_disabled_and_denies(monkeypatch):
     monkeypatch.delenv("OMEGA_AUTH_SECRET", raising=False)
-    monkeypatch.delenv("OMEGACLAW_AUTH_SECRET", raising=False)
     auth = load_auth_module(monkeypatch)
 
     assert auth.is_auth_enabled() is False
@@ -48,15 +47,6 @@ def test_standalone_auth_accepts_unicode_secret(monkeypatch):
 
     assert auth.verify_token("пароль🔒") is True
     assert auth.verify_token("пароль") is False
-
-
-def test_standalone_auth_accepts_legacy_secret_variable(monkeypatch):
-    monkeypatch.delenv("OMEGA_AUTH_SECRET", raising=False)
-    monkeypatch.setenv("OMEGACLAW_AUTH_SECRET", "1234")
-    auth = load_auth_module(monkeypatch)
-
-    assert auth.is_auth_enabled() is True
-    assert auth.verify_token("1234") is True
 
 
 def test_missing_saved_user_file_means_no_saved_user(monkeypatch, tmp_path):

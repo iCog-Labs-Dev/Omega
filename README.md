@@ -42,17 +42,17 @@ sudo apt-get install git python3 python3-dev python3-pip python3-venv build-esse
 Get [SWI-Prolog 10.0.2 or later](https://www.swi-prolog.org/).
 
 > **Note.** The `singnet/Omega` repository and the `singularitynet/omega` image are part of an
-> in-progress rename. Until they are published, use `asi-alliance/OmegaClaw-Core` and
-> `singularitynet/omegaclaw` in the commands below.
+> in-progress rename. Until they are published, use `singnet/Omega` and
+> `singularitynet/omega` in the commands below.
 
 Install Omega:
 ```
 git clone https://github.com/trueagi-io/PeTTa
 cd PeTTa
 mkdir -p repos
-git clone https://github.com/singnet/Omega.git repos/OmegaClaw-Core
+git clone https://github.com/singnet/Omega.git repos/Omega
 git clone https://github.com/patham9/petta_lib_chromadb.git repos/petta_lib_chromadb
-cp repos/OmegaClaw-Core/run.metta ./
+cp repos/Omega/run.metta ./
 ```
 
 Setup Python virtual environment (or use your own):
@@ -68,7 +68,7 @@ python3 -m pip install --index-url https://download.pytorch.org/whl/cpu torch
 
 Install Python dependencies:
 ```
-python3 -m pip install -r ./repos/OmegaClaw-Core/requirements.txt
+python3 -m pip install -r ./repos/Omega/requirements.txt
 ```
 ---
 

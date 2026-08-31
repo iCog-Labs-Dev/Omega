@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 IMAGE = os.environ.get("OMEGA_KB_IMAGE", "")
-REPO = Path(os.environ.get("OMEGA_REPO", "/root/OmegaClaw-Core"))
+REPO = Path(os.environ.get("OMEGA_REPO", "/root/Omega"))
 NAME = "omega"
 
 
