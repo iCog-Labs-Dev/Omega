@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import os
 import threading
 import logging
 import sys
@@ -264,10 +265,11 @@ def _generate_image_bytes(prompt):
 
 
 _live_send_photo = None
+_live_send_voice = None
 _live_channel = None
 
 
-def register_channel(send_photo, channel):
+def register_channel(send_photo, send_voice, channel):
     """Give this module a direct handle on the LIVE channel, called by the
     channel plugin's loadOmegaClawPlugin.
 
@@ -276,8 +278,9 @@ def register_channel(send_photo, channel):
     `import telegram` here would build a second, never-started copy whose
     bot and event loop are None — generated images would be produced and then
     dropped."""
-    global _live_send_photo, _live_channel
+    global _live_send_photo, _live_send_voice, _live_channel
     _live_send_photo = send_photo
+    _live_send_voice = send_voice
     _live_channel = channel
 
 
@@ -332,3 +335,83 @@ def generate_and_send(prompt):
         logger.error(f"Failed to send generated image: {e}")
         return f"IMAGE_FAILED: generated but could not send: {e}"
     return f"IMAGE_SENT: {prompt}"
+
+# --- Text-to-speech (outbound) ---------------------------------------------
+# speak skill: synthesise a voice message and send it via sendVoice.
+# The TTS provider is chosen INDEPENDENTLY of the chat `provider` via
+# TTS_PROVIDER / TTS_MODEL env vars, defaulting to OpenAI.
+
+TTS_PROVIDERS = {
+    "OpenAI": {
+        "route": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "key_env": "OPENAI_API_KEY",
+        "default_model": "tts-1",
+    },
+}
+DEFAULT_TTS_PROVIDER = "OpenAI"
+
+TTS_VOICES = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
+DEFAULT_TTS_VOICE = "nova"
+MAX_TTS_CHARS = 4096
+
+
+def _tts_allowed():
+    """Read the allow_voice_reply gate from the active channel's reply
+    constraints. Fail closed (False) if unavailable."""
+    try:
+        constraints = getattr(_live_channel, "reply_constraints", None) or {}
+        return bool(constraints.get("allow_voice_reply", False))
+    except Exception as e:
+        logger.error(f"Could not read allow_voice_reply gate: {e}")
+        return False
+
+
+def _synthesise_speech(text, voice, model, base_url, api_key):
+    """Call the TTS endpoint and return raw MP3 bytes, or None on failure."""
+    try:
+        import openai
+        client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        response = client.audio.speech.create(
+            model=model, voice=voice, input=text, response_format="mp3")
+        return response.content
+    except Exception as e:
+        logger.error(f"TTS synthesis failed: {e}")
+        return None
+
+
+def speak(text):
+    """speak skill: synthesise `text` as a voice message and send it to the
+    user via Telegram sendVoice. Returns a short status string (never raises)."""
+    text = (text or "").strip()
+    if not text:
+        return "VOICE_FAILED: empty text"
+    if len(text) > MAX_TTS_CHARS:
+        return f"VOICE_FAILED: text exceeds {MAX_TTS_CHARS} characters"
+    if not _tts_allowed():
+        return "VOICE_DISABLED: voice replies are turned off"
+    if _prompt_is_unsafe(text):
+        return "Refused: unsafe voice content"
+    voice = os.environ.get("TTS_VOICE", DEFAULT_TTS_VOICE)
+    if voice not in TTS_VOICES:
+        logger.warning(f"Unknown TTS_VOICE {voice!r}, falling back to {DEFAULT_TTS_VOICE}")
+        voice = DEFAULT_TTS_VOICE
+    import gateway
+    provider_name = os.environ.get("TTS_PROVIDER", DEFAULT_TTS_PROVIDER)
+    cfg = TTS_PROVIDERS.get(provider_name) or TTS_PROVIDERS[DEFAULT_TTS_PROVIDER]
+    model = os.environ.get("TTS_MODEL", cfg["default_model"])
+    base_url, api_key = gateway.upstream(cfg["route"], cfg["base_url"], cfg["key_env"])
+    if not api_key:
+        logger.error(f"speak: {cfg['key_env']} is not set for provider {provider_name}")
+        return "VOICE_FAILED: API key not set"
+    audio_bytes = _synthesise_speech(text, voice, model, base_url, api_key)
+    if not audio_bytes:
+        return "VOICE_FAILED: could not synthesise speech"
+    if _live_send_voice is None:
+        return "VOICE_FAILED: synthesised but no channel is registered to send it"
+    try:
+        _live_send_voice(audio_bytes)
+    except Exception as e:
+        logger.error(f"Failed to send voice message: {e}")
+        return f"VOICE_FAILED: synthesised but could not send: {e}"
+    return "VOICE_SENT"
