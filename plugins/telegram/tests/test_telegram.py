@@ -133,6 +133,7 @@ class FakeBot:
     def __init__(self, download_bytes=b"raw-bytes", reject_markdown=False):
         self.download_bytes = download_bytes
         self.sent_photo = None
+        self.sent_voice = None
         self.sent_messages = []
         self.reject_markdown = reject_markdown
 
@@ -149,6 +150,11 @@ class FakeBot:
 
     async def send_photo(self, chat_id, photo, caption=None, reply_to_message_id=None):
         self.sent_photo = {"chat_id": chat_id, "photo": photo, "caption": caption,
+                            "reply_to_message_id": reply_to_message_id}
+        return SimpleNamespace()
+
+    async def send_voice(self, chat_id, voice, caption=None, reply_to_message_id=None):
+        self.sent_voice = {"chat_id": chat_id, "voice": voice, "caption": caption,
                             "reply_to_message_id": reply_to_message_id}
         return SimpleNamespace()
 
@@ -402,6 +408,29 @@ def test_send_photo_dispatches_expected_aiogram_call():
         assert bot.sent_photo["chat_id"] == "555"
         assert bot.sent_photo["caption"] == "a cat"
         assert isinstance(bot.sent_photo["photo"], BufferedInputFile)
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        t.join(timeout=2)
+
+
+def test_send_voice_dispatches_expected_aiogram_call():
+    ch = _new_channel()
+    bot = FakeBot()
+    ch.bot = bot
+    ch.connected = True
+    ch.chat_id = "555"
+    ch._reply_to_id = None
+
+    loop = asyncio.new_event_loop()
+    t = threading.Thread(target=loop.run_forever, daemon=True)
+    t.start()
+    ch.loop = loop
+    try:
+        ch.send_voice(b"audio-bytes")
+        assert bot.sent_voice is not None
+        assert bot.sent_voice["chat_id"] == "555"
+        assert isinstance(bot.sent_voice["voice"], BufferedInputFile)
+        assert bot.sent_voice["voice"].filename == "voice.mp3"
     finally:
         loop.call_soon_threadsafe(loop.stop)
         t.join(timeout=2)
@@ -868,6 +897,7 @@ if __name__ == "__main__":
     test_muted_user_is_gated_from_message_queue()
     test_inbound_ethics_block_prevents_queueing()
     test_send_photo_dispatches_expected_aiogram_call()
+    test_send_voice_dispatches_expected_aiogram_call()
     test_admin_command_refuses_non_admin_allows_admin()
     test_pause_actually_gates_the_chat_it_names()
     test_open_defaults_are_warned_about()

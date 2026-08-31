@@ -206,7 +206,7 @@ def test_generate_and_send_success():
     mh._prompt_is_unsafe = lambda prompt: False
     mh._generate_image_bytes = lambda prompt: b"img"
     mh.register_channel(lambda image_bytes, caption=None: sent.update(
-        bytes=image_bytes, caption=caption), object())
+        bytes=image_bytes, caption=caption), lambda *a, **k: None, object())
     try:
         out = mh.generate_and_send("a cat")
         assert out.startswith("IMAGE_SENT"), out
@@ -247,7 +247,7 @@ def test_register_channel_wires_gate_and_sender():
     try:
         class Chan:
             reply_constraints = {"allow_image_generation": True}
-        mh.register_channel(lambda *a, **k: None, Chan())
+        mh.register_channel(lambda *a, **k: None, lambda *a, **k: None, Chan())
         assert mh._image_generation_allowed() is True
         Chan.reply_constraints = {"allow_image_generation": False}
         assert mh._image_generation_allowed() is False
@@ -258,6 +258,93 @@ def test_register_channel_wires_gate_and_sender():
 def test_generate_and_send_empty_prompt():
     out = mh.generate_and_send("   ")
     assert out == "IMAGE_FAILED: empty prompt", out
+
+
+# --- speak skill tests -------------------------------------------------------
+
+def test_speak_disabled():
+    orig = mh._tts_allowed
+    mh._tts_allowed = lambda: False
+    try:
+        out = mh.speak("hello")
+        assert out.startswith("VOICE_DISABLED"), out
+    finally:
+        mh._tts_allowed = orig
+
+
+def test_speak_synthesis_failure():
+    orig_allowed = mh._tts_allowed
+    orig_unsafe = mh._prompt_is_unsafe
+    orig_synth = mh._synthesise_speech
+    mh._tts_allowed = lambda: True
+    mh._prompt_is_unsafe = lambda text: False
+    mh._synthesise_speech = lambda text, voice, model, base_url, api_key: None
+    try:
+        out = mh.speak("hello")
+        assert out.startswith("VOICE_FAILED"), out
+    finally:
+        mh._tts_allowed = orig_allowed
+        mh._prompt_is_unsafe = orig_unsafe
+        mh._synthesise_speech = orig_synth
+
+
+def test_speak_success():
+    orig_allowed = mh._tts_allowed
+    orig_unsafe = mh._prompt_is_unsafe
+    orig_synth = mh._synthesise_speech
+    orig_send, orig_chan = mh._live_send_voice, mh._live_channel
+
+    sent = {}
+    mh._tts_allowed = lambda: True
+    mh._prompt_is_unsafe = lambda text: False
+    mh._synthesise_speech = lambda text, voice, model, base_url, api_key: b"audio-bytes"
+    mh._live_send_voice = lambda audio_bytes, caption=None: sent.update(bytes=audio_bytes)
+    try:
+        out = mh.speak("hello there")
+        assert out == "VOICE_SENT", out
+        assert sent["bytes"] == b"audio-bytes", sent
+    finally:
+        mh._tts_allowed = orig_allowed
+        mh._prompt_is_unsafe = orig_unsafe
+        mh._synthesise_speech = orig_synth
+        mh._live_send_voice, mh._live_channel = orig_send, orig_chan
+
+
+def test_synthesise_speech_uses_gateway_and_mp3():
+    calls = {}
+    fake_openai = types.ModuleType("openai")
+
+    def create_speech(**kwargs):
+        calls["request"] = kwargs
+        return types.SimpleNamespace(content=b"mp3")
+
+    class Client:
+        def __init__(self, api_key, base_url):
+            calls.update(api_key=api_key, base_url=base_url)
+            self.audio = types.SimpleNamespace(
+                speech=types.SimpleNamespace(
+                    create=create_speech))
+
+    fake_openai.OpenAI = Client
+    original_openai = sys.modules.get("openai")
+    sys.modules["openai"] = fake_openai
+    try:
+        assert mh._synthesise_speech("hello", "nova", "tts-1", "http://gateway/openai/", "proxy") == b"mp3"
+        assert calls == {
+            "api_key": "proxy",
+            "base_url": "http://gateway/openai/",
+            "request": {
+                "model": "tts-1",
+                "voice": "nova",
+                "input": "hello",
+                "response_format": "mp3",
+            },
+        }
+    finally:
+        if original_openai is None:
+            del sys.modules["openai"]
+        else:
+            sys.modules["openai"] = original_openai
 
 
 if __name__ == "__main__":
@@ -277,4 +364,8 @@ if __name__ == "__main__":
     test_generate_and_send_without_registered_channel()
     test_register_channel_wires_gate_and_sender()
     test_generate_and_send_empty_prompt()
+    test_speak_disabled()
+    test_speak_synthesis_failure()
+    test_speak_success()
+    test_synthesise_speech_uses_gateway_and_mp3()
     print("all media_handler tests passed")
