@@ -278,7 +278,7 @@ def test_speak_synthesis_failure():
     orig_synth = mh._synthesise_speech
     mh._tts_allowed = lambda: True
     mh._prompt_is_unsafe = lambda text: False
-    mh._synthesise_speech = lambda text, voice, model, base_url, api_key: None
+    mh._synthesise_speech = lambda text, voice: None
     try:
         out = mh.speak("hello")
         assert out.startswith("VOICE_FAILED"), out
@@ -297,7 +297,7 @@ def test_speak_success():
     sent = {}
     mh._tts_allowed = lambda: True
     mh._prompt_is_unsafe = lambda text: False
-    mh._synthesise_speech = lambda text, voice, model, base_url, api_key: b"audio-bytes"
+    mh._synthesise_speech = lambda text, voice: b"audio-bytes"
     mh._live_send_voice = lambda audio_bytes, caption=None: sent.update(bytes=audio_bytes)
     try:
         out = mh.speak("hello there")
@@ -310,41 +310,33 @@ def test_speak_success():
         mh._live_send_voice, mh._live_channel = orig_send, orig_chan
 
 
-def test_synthesise_speech_uses_gateway_and_mp3():
+def test_synthesise_speech_uses_edge_tts():
     calls = {}
-    fake_openai = types.ModuleType("openai")
 
-    def create_speech(**kwargs):
-        calls["request"] = kwargs
-        return types.SimpleNamespace(content=b"mp3")
+    async def fake_stream():
+        calls["called"] = True
+        yield {"type": "audio", "data": b"mp3"}
 
-    class Client:
-        def __init__(self, api_key, base_url):
-            calls.update(api_key=api_key, base_url=base_url)
-            self.audio = types.SimpleNamespace(
-                speech=types.SimpleNamespace(
-                    create=create_speech))
+    class FakeCommunicate:
+        def __init__(self, text, voice):
+            calls.update(text=text, voice=voice)
+        def stream(self):
+            return fake_stream()
 
-    fake_openai.OpenAI = Client
-    original_openai = sys.modules.get("openai")
-    sys.modules["openai"] = fake_openai
+    fake_edge_tts = types.ModuleType("edge_tts")
+    fake_edge_tts.Communicate = FakeCommunicate
+    original = sys.modules.get("edge_tts")
+    sys.modules["edge_tts"] = fake_edge_tts
     try:
-        assert mh._synthesise_speech("hello", "nova", "tts-1", "http://gateway/openai/", "proxy") == b"mp3"
-        assert calls == {
-            "api_key": "proxy",
-            "base_url": "http://gateway/openai/",
-            "request": {
-                "model": "tts-1",
-                "voice": "nova",
-                "input": "hello",
-                "response_format": "mp3",
-            },
-        }
+        result = mh._synthesise_speech("hello", "en-US-AriaNeural")
+        assert result == b"mp3", result
+        assert calls["text"] == "hello"
+        assert calls["voice"] == "en-US-AriaNeural"
     finally:
-        if original_openai is None:
-            del sys.modules["openai"]
+        if original is None:
+            del sys.modules["edge_tts"]
         else:
-            sys.modules["openai"] = original_openai
+            sys.modules["edge_tts"] = original
 
 
 if __name__ == "__main__":
@@ -367,5 +359,5 @@ if __name__ == "__main__":
     test_speak_disabled()
     test_speak_synthesis_failure()
     test_speak_success()
-    test_synthesise_speech_uses_gateway_and_mp3()
+    test_synthesise_speech_uses_edge_tts()
     print("all media_handler tests passed")

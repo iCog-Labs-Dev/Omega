@@ -338,21 +338,9 @@ def generate_and_send(prompt):
 
 # --- Text-to-speech (outbound) ---------------------------------------------
 # speak skill: synthesise a voice message and send it via sendVoice.
-# The TTS provider is chosen INDEPENDENTLY of the chat `provider` via
-# TTS_PROVIDER / TTS_MODEL env vars, defaulting to OpenAI.
+# Uses edge-tts (free, no API key). Voice is configurable via EDGE_TTS_VOICE.
 
-TTS_PROVIDERS = {
-    "OpenAI": {
-        "route": "openai",
-        "base_url": "https://api.openai.com/v1",
-        "key_env": "OPENAI_API_KEY",
-        "default_model": "tts-1",
-    },
-}
-DEFAULT_TTS_PROVIDER = "OpenAI"
-
-TTS_VOICES = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
-DEFAULT_TTS_VOICE = "nova"
+DEFAULT_TTS_VOICE = "en-US-AriaNeural"
 MAX_TTS_CHARS = 4096
 
 
@@ -367,14 +355,23 @@ def _tts_allowed():
         return False
 
 
-def _synthesise_speech(text, voice, model, base_url, api_key):
-    """Call the TTS endpoint and return raw MP3 bytes, or None on failure."""
+def _synthesise_speech(text, voice):
+    """Synthesise `text` via edge-tts and return raw MP3 bytes, or None on failure."""
     try:
-        import openai
-        client = openai.OpenAI(api_key=api_key, base_url=base_url)
-        response = client.audio.speech.create(
-            model=model, voice=voice, input=text, response_format="mp3")
-        return response.content
+        import asyncio, io, edge_tts
+        async def _run():
+            with io.BytesIO() as buf:
+                async for chunk in edge_tts.Communicate(text, voice=voice).stream():
+                    if chunk["type"] == "audio":
+                        buf.write(chunk["data"])
+                return buf.getvalue()
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, _run()).result()
+        except RuntimeError:
+            return asyncio.run(_run())
     except Exception as e:
         logger.error(f"TTS synthesis failed: {e}")
         return None
@@ -392,19 +389,8 @@ def speak(text):
         return "VOICE_DISABLED: voice replies are turned off"
     if _prompt_is_unsafe(text):
         return "Refused: unsafe voice content"
-    voice = os.environ.get("TTS_VOICE", DEFAULT_TTS_VOICE)
-    if voice not in TTS_VOICES:
-        logger.warning(f"Unknown TTS_VOICE {voice!r}, falling back to {DEFAULT_TTS_VOICE}")
-        voice = DEFAULT_TTS_VOICE
-    import gateway
-    provider_name = os.environ.get("TTS_PROVIDER", DEFAULT_TTS_PROVIDER)
-    cfg = TTS_PROVIDERS.get(provider_name) or TTS_PROVIDERS[DEFAULT_TTS_PROVIDER]
-    model = os.environ.get("TTS_MODEL", cfg["default_model"])
-    base_url, api_key = gateway.upstream(cfg["route"], cfg["base_url"], cfg["key_env"])
-    if not api_key:
-        logger.error(f"speak: {cfg['key_env']} is not set for provider {provider_name}")
-        return "VOICE_FAILED: API key not set"
-    audio_bytes = _synthesise_speech(text, voice, model, base_url, api_key)
+    voice = os.environ.get("EDGE_TTS_VOICE", DEFAULT_TTS_VOICE)
+    audio_bytes = _synthesise_speech(text, voice)
     if not audio_bytes:
         return "VOICE_FAILED: could not synthesise speech"
     if _live_send_voice is None:
