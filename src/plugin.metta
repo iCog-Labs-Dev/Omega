@@ -28,7 +28,9 @@
              (if (== () (collapse (import! $space $path)))
                (Error (_loadMettaPlugin $name $location) (strings-concat ("Cannot import " $name " plugin from " $path)))
                (progn
-                 (let $rcs (collapse (eval (loadOmegaClawPlugin))) ())
+                 (let $legacy (== () (collapse (match $space (= (loadOmegaPlugin) $b) $b))) ())
+                 (let $rcs (if $legacy (collapse (eval (loadOmegaClawPlugin))) (collapse (eval (loadOmegaPlugin)))) ())
+                 (match $space (= (loadOmegaPlugin) $body) (remove-atom $space (= (loadOmegaPlugin) $body)))
                  (match $space (= (loadOmegaClawPlugin) $body) (remove-atom $space (= (loadOmegaClawPlugin) $body)))
                  (let $agg (|-> ($acc $next) (if (== $acc ()) (if (== Error (car-atom $next)) $next ()) ()))
                    (let $rc (foldl-atom $rcs () $agg) ()))

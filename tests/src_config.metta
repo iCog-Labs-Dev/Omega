@@ -12,7 +12,7 @@
 (= (command-line)
    ("config=./tests/res/src_config_empty.yaml"
     "arg_cmdline=val_cmdline"))
-!(py-call (utils.setenv OMEGACLAW_arg_env val_env))
+!(py-call (utils.setenv OMEGA_arg_env val_env))
 !(initConfig)
 
 !(test (configGetByKey arg_config val_default) val_default)
@@ -27,7 +27,7 @@
 (= (command-line)
    ("config=./tests/res/src_config_filled.yaml"
     "arg_cmdline=val_cmdline"))
-!(py-call (utils.setenv OMEGACLAW_arg_env val_env))
+!(py-call (utils.setenv OMEGA_arg_env val_env))
 !(initConfig)
 
 !(test (configGetByKey arg_config val_default) val_config)
@@ -52,11 +52,22 @@
 (= (command-line)
    ("config=./tests/res/src_config_priorities.yaml"
     "arg_cmdline=val_cmdline"))
-!(py-call (utils.setenv OMEGACLAW_arg_cmdline val_env))
-!(py-call (utils.setenv OMEGACLAW_arg_env val_env))
+!(py-call (utils.setenv OMEGA_arg_cmdline val_env))
+!(py-call (utils.setenv OMEGA_arg_env val_env))
 !(initConfig)
 
 !(test (configGetByKey arg_cmdline val_default) val_cmdline)
 !(test (configGetByKey arg_env val_default) val_env)
 !(test (configGetByKey arg_config val_default) val_config)
 !(test (configGetByKey arg_notexist val_default) val_default)
+
+!(cleanup)
+
+; legacy OMEGACLAW_ environment variable prefix is still honoured
+
+(= (command-line)
+   ("config=./tests/res/src_config_empty.yaml"))
+!(py-call (utils.setenv OMEGACLAW_arg_legacy val_legacy))
+!(initConfig)
+
+!(test (configGetByKey arg_legacy val_default) val_legacy)

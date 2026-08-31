@@ -21,7 +21,7 @@
     ;COMMUNICATION CHANNELS:
     "- Send message to user: send string"
     "- Search the web: websearch string"
-    "- To get the OmegaClaw version number: version"
+    "- To get the Omega version number: version"
     ;CODE EXECUTION:
     "- Execute MeTTa expression: metta sexpression"
     ;ADDITIONAL RULES AND CLARIFICATIONS FOR SKILLS
@@ -149,4 +149,4 @@
    PIN-SUCCESS)
 
 (= (version)
-   (py-call (helper.omegaclaw_version)))
+   (py-call (helper.omega_version)))

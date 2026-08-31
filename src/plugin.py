@@ -1,5 +1,5 @@
 """
-This is OmegaClaw internal API which is built on the top of the plugins API.
+This is Omega internal API which is built on the top of the plugins API.
 Most of the functions here calls corresponding functions of the registered
 plugins.
 """
@@ -75,7 +75,7 @@ def addLocationToPath(location):
 def loadPythonPlugin(name, location):
     """Python plugin loader implementation. If location of the plugin is
     specified it imports "<location>/<name>.py" file. Imports <name> Python
-    module otherwise. Calls "loadOmegaClawPlugin" function from the imported
+    module otherwise. Calls "loadOmegaPlugin" function from the imported
     module. This is the point where plugin's code gets control and should
     register appropriate callbacks."""
     global _plugins, _REPO
@@ -100,7 +100,12 @@ def loadPythonPlugin(name, location):
     else:
         _error("_initPythonPlugin", f"Couldn't find Python module {name}")
 
-    if not hasattr(mod, "loadOmegaClawPlugin"):
-        _error("_initPythonPlugin", f"No loadOmegaClawPlugin() function is implemented by plugin {name}")
-    plugin_loader = getattr(mod, "loadOmegaClawPlugin")
+    if hasattr(mod, "loadOmegaPlugin"):
+        plugin_loader = getattr(mod, "loadOmegaPlugin")
+    elif hasattr(mod, "loadOmegaClawPlugin"):
+        # deprecated entry point, still accepted for out-of-tree plugins
+        logger.warning(f"_initPythonPlugin: plugin {name} implements deprecated loadOmegaClawPlugin(), rename it to loadOmegaPlugin()")
+        plugin_loader = getattr(mod, "loadOmegaClawPlugin")
+    else:
+        _error("_initPythonPlugin", f"No loadOmegaPlugin() function is implemented by plugin {name}")
     plugin_loader()
