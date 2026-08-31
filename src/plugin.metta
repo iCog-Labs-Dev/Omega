@@ -28,12 +28,15 @@
              (if (== () (collapse (import! $space $path)))
                (Error (_loadMettaPlugin $name $location) (strings-concat ("Cannot import " $name " plugin from " $path)))
                (progn
-                 (let $legacy (== () (collapse (match $space (= (loadOmegaPlugin) $b) $b))) ())
-                 (let $rcs (if $legacy (collapse (eval (loadOmegaClawPlugin))) (collapse (eval (loadOmegaPlugin)))) ())
-                 (match $space (= (loadOmegaPlugin) $body) (remove-atom $space (= (loadOmegaPlugin) $body)))
-                 (match $space (= (loadOmegaClawPlugin) $body) (remove-atom $space (= (loadOmegaClawPlugin) $body)))
+                 ; the pre-rename entry point is still evaluated so older plugins keep loading
+                 (let $rcs (collapse (eval (loadOmegaPlugin))) ())
+                 (let $rcsLegacy (collapse (eval (loadOmegaClawPlugin))) ())
+                 ; collapse keeps a non-matching name from collapsing the whole branch
+                 (let $rm (collapse (match $space (= (loadOmegaPlugin) $body) (remove-atom $space (= (loadOmegaPlugin) $body)))) ())
+                 (let $rmLegacy (collapse (match $space (= (loadOmegaClawPlugin) $body) (remove-atom $space (= (loadOmegaClawPlugin) $body)))) ())
                  (let $agg (|-> ($acc $next) (if (== $acc ()) (if (== Error (car-atom $next)) $next ()) ()))
-                   (let $rc (foldl-atom $rcs () $agg) ()))
+                   (let $rcNew (foldl-atom $rcs () $agg)
+                     (let $rc (if (== $rcNew ()) (foldl-atom $rcsLegacy () $agg) $rcNew) ())))
                  $rc))))
        (progn
          (if (= $rc1 (cons Error (cons $_ $error)))
