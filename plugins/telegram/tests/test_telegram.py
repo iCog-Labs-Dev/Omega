@@ -75,6 +75,7 @@ os.environ.setdefault("OPENAI_API_KEY", "test-key")
 import telegram_channel as tm
 import media_handler as mh
 from aiogram.types import BufferedInputFile
+from aiogram.exceptions import TelegramBadRequest, TelegramServerError
 
 
 def _stub(monkeys):
@@ -888,3 +889,167 @@ if __name__ == "__main__":
     test_auth_handshake_gates_then_binds_a_user()
     test_proxy_routes_api_calls_and_file_downloads()
     print("all telegram channel tests passed")
+
+
+def _fits(limit):
+    """A `fits` predicate counting raw characters, so the split tests can use a
+    small limit instead of building 4096-character fixtures."""
+    return lambda piece: len(piece) <= limit
+
+
+def test_split_for_telegram_keeps_a_short_message_whole():
+    assert tm.split_for_telegram("hello there") == ["hello there"]
+
+
+def test_split_for_telegram_breaks_on_paragraphs_before_lines():
+    """A blank line is the nicest place to cut, so a reply made of paragraphs
+    must break between them rather than mid-sentence."""
+    paragraph = "x" * 300
+    text = "\n\n".join([paragraph] * 4)
+
+    pieces = tm.split_for_telegram(text, _fits(700))
+
+    assert pieces == [f"{paragraph}\n\n{paragraph}"] * 2
+    assert "\n\n".join(pieces) == text
+
+
+def test_split_for_telegram_falls_back_to_single_lines():
+    """One paragraph too big for the budget still has line breaks to use."""
+    line = "y" * 200
+    text = "\n".join([line] * 5)
+
+    pieces = tm.split_for_telegram(text, _fits(450))
+
+    assert [len(p) for p in pieces] == [401, 401, 200]
+    assert "\n".join(pieces) == text
+
+
+def test_split_for_telegram_hard_cuts_an_unbroken_run():
+    """No boundary to use at all - a wall of text still has to fit."""
+    pieces = tm.split_for_telegram("z" * 1000, _fits(400))
+
+    assert all(len(p) <= 400 for p in pieces), [len(p) for p in pieces]
+    assert "".join(pieces) == "z" * 1000
+
+
+def test_split_for_telegram_drops_pieces_holding_only_whitespace():
+    """Telegram rejects a blank message outright, and that refusal is not worth
+    queueing."""
+    assert tm.split_for_telegram("") == []
+    assert tm.split_for_telegram("   \n\n  \n ") == []
+
+
+def test_split_for_telegram_measures_the_message_telegram_will_receive():
+    """MarkdownV2 rendering grows punctuation-heavy text by up to a factor of
+    two. Splitting on raw length lets a piece that looked fine be refused, which
+    costs the formatting on every such reply."""
+    doubles = lambda piece: len(piece) * 2 <= 100
+
+    pieces = tm.split_for_telegram("word " * 60, doubles)
+
+    assert all(len(p) * 2 <= 100 for p in pieces), [len(p) for p in pieces]
+    assert len(pieces) > 1
+
+
+def _run_queued_delivery(bot, texts):
+    """Queue several messages before the bot is reachable, then connect and let
+    the agent-side pump drain them through the real _deliver, the way core does
+    on its next loop iteration."""
+    ch = _new_channel()
+    ch.connected = False
+    ch.chat_id = "555"
+    ch._reply_to_id = None
+    for text in texts:
+        ch.send_message(text)
+
+    loop = asyncio.new_event_loop()
+    t = threading.Thread(target=loop.run_forever, daemon=True)
+    t.start()
+    ch.bot = bot
+    ch.loop = loop
+    ch.connected = True
+    try:
+        ch.get_last_message()
+        return ch
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        t.join(timeout=2)
+
+
+def test_a_long_reply_arrives_as_several_messages_in_order():
+    """The release blocker: a 10,000 character answer used to sit at the head of
+    the outbox being refused forever, silencing the bot until restart."""
+    paragraph = "The black mamba is a species of venomous snake. " * 20
+    text = "\n\n".join([paragraph] * 11)
+    assert len(text) > 10000
+
+    bot = FakeBot()
+    ch = _run_queued_delivery(bot, [text])
+
+    assert len(bot.sent_messages) > 1, "a 10k reply must be split"
+    assert all(len(m["text"]) <= tm.TELEGRAM_TEXT_LIMIT for m in bot.sent_messages)
+    assert len(ch._outbox) == 0, "nothing may be left stuck in the queue"
+    assert "".join(m["text"] for m in bot.sent_messages).count("black mamba") == 220
+
+
+def test_only_the_first_piece_of_a_split_reply_quotes_the_question():
+    """Three quoted replies to one message reads as three separate answers."""
+    ch = _new_channel()
+    ch.connected = False
+    ch.chat_id = "555"
+    ch._reply_to_id = 99
+
+    ch.send_message("w" * 8000)
+
+    queued = []
+    ch._deliver = lambda item: queued.append(item)
+    ch.bot = FakeBot()
+    ch.loop = object()
+    ch.connected = True
+    ch.get_last_message()
+
+    reply_ids = [item[1] for item in queued]
+    assert len(reply_ids) > 1, reply_ids
+    assert reply_ids[0] == 99
+    assert set(reply_ids[1:]) == {None}, reply_ids
+
+
+class RefusingBot(FakeBot):
+    """Raises for any text containing a marker, and delivers everything else."""
+
+    def __init__(self, marker, error):
+        super().__init__()
+        self.marker = marker
+        self.error = error
+
+    async def send_message(self, chat_id, text, reply_to_message_id=None, parse_mode=None):
+        if self.marker in text:
+            raise self.error
+        return await super().send_message(chat_id, text, reply_to_message_id, parse_mode)
+
+
+def test_a_refused_message_leaves_the_queue_instead_of_blocking_it(caplog):
+    """A message Telegram will never accept must not hold the head of the queue.
+    Retrying it forever is what left every later answer undelivered while the
+    agent believed it had replied."""
+    bot = RefusingBot("POISON", TelegramBadRequest(method=None, message="message is too long"))
+
+    with caplog.at_level(logging.ERROR):
+        ch = _run_queued_delivery(bot, ["POISON", "the answer behind it"])
+
+    assert [m["text"] for m in bot.sent_messages] == ["the answer behind it"]
+    assert len(ch._outbox) == 0, "the refused message must not stay queued"
+    assert "refused this message outright" in caplog.text
+
+
+def test_a_message_that_failed_on_a_bad_connection_stays_queued(caplog):
+    """The other half of the same decision: a failure a later attempt could fix
+    must keep the message, or a dropped connection loses answers."""
+    bot = RefusingBot("KEEPME", TelegramServerError(method=None, message="Bad Gateway"))
+
+    with caplog.at_level(logging.WARNING):
+        ch = _run_queued_delivery(bot, ["KEEPME", "queued behind it"])
+
+    assert bot.sent_messages == []
+    assert len(ch._outbox) == 2, "a retryable failure must retain the whole queue"
+    assert "stays queued" in caplog.text
