@@ -1206,6 +1206,9 @@ class TelegramChannel(channels.CommChannel):
     def send(self, message: str) -> None:
         send_message(message)
 
+    def is_tool_disabled(self, tool_name: str) -> bool:
+        return tool_name == "websearch" and is_search_disabled()
+
 
 def loadOmegaClawPlugin():
     import media_handler

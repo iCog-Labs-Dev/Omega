@@ -23,6 +23,10 @@ class CommChannel:
         """Send message via the communication channel"""
         raise NotImplementedError()
 
+    def is_tool_disabled(self, tool_name: str) -> bool:
+        """Return whether this channel currently blocks a core tool."""
+        return False
+
 def registerCommChannel(id: str, channel: CommChannel) -> None:
     """Register communication channel in the registry"""
     global _commChannelRegistry
@@ -49,3 +53,8 @@ def commChannelSend(message):
     """Send message via selected communication channel"""
     global _commchannel
     _commchannel.send(message)
+
+def commChannelIsToolDisabled(tool_name):
+    """Check a runtime tool restriction exposed by the active channel."""
+    global _commchannel
+    return _commchannel is not None and _commchannel.is_tool_disabled(str(tool_name))
