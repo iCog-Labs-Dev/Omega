@@ -71,11 +71,7 @@ def prompt_path():
     return config_get_by_key("TG_PROMPT_PATH", _plugin_file("prompt.txt"))
 
 
-# Telegram refuses a text message over 4096 characters, counted on the message it
-# actually receives - which is the MarkdownV2 rendering, not what the agent
-# wrote. Rendering only ever adds characters, and by as much as a factor of two
-# on punctuation-heavy text, so the pieces are measured rendered rather than
-# split on a raw-length guess that would leave formatting to fail silently.
+# Telegram refuses a text message over 4096 characters.
 TELEGRAM_TEXT_LIMIT = 4096
 
 # A send that fails with one of these is wrong in a way no retry can fix: the
@@ -990,8 +986,9 @@ class _TelegramChannel:
         return markdownify(text)
 
     def _fits_one_message(self, piece):
-        """Telegram counts the rendered message, so measure that and not the
-        text the agent wrote."""
+        """Measure the MarkdownV2 rendering, not the text the agent wrote -
+        that is what Telegram counts, and rendering grows punctuation-heavy
+        text by as much as a factor of two."""
         return len(self._to_mdv2(piece)) <= TELEGRAM_TEXT_LIMIT
 
     def send_message(self, text, chat_id=None, reply_to_id=None):
