@@ -1197,10 +1197,14 @@ def send_chat_action(action):
         return
     if action != "typing":
         _channel._stop_typing(str(chat_id))
-    asyncio.run_coroutine_threadsafe(
+    fut = asyncio.run_coroutine_threadsafe(
         _channel.bot.send_chat_action(chat_id=chat_id, action=action),
         _channel.loop,
     )
+    try:
+        fut.result(timeout=10)
+    except Exception as e:
+        logging.warning(f"send_chat_action({action!r}) failed: {e}")
 
 def is_search_disabled():
     """Check if admin disabled searching."""

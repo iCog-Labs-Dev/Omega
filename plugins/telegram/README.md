@@ -78,7 +78,8 @@ they belong to the proxy, not here.
 | `TG_BOT_TOKEN` | yes | Telegram bot token |
 | `ANTHROPIC_API_KEY` | for vision | Used by the default vision provider |
 | `OPENROUTER_API_KEY` | for image gen + Whisper | Also the vision key if `VISION_PROVIDER=OpenRouter` |
-| `OPENAI_API_KEY` | for safety checks and voice replies | Moderation and OpenAI text-to-speech |
+| `OPENAI_API_KEY` | for safety checks | Moderation API; without it the ethics passes allow content through |
+| `EDGE_TTS_VOICE` | no | Voice for the `speak` skill; any voice from `edge-tts --list-voices`, defaults to `en-US-AriaNeural` |
 | `VISION_PROVIDER` | no | `Anthropic` (default) or `OpenRouter` |
 | `VISION_MODEL` | no | Overrides the provider's default vision model |
 | `IMAGE_PROVIDER` | no | `OpenRouter` (default, FLUX) or `OpenAI` |
