@@ -266,10 +266,11 @@ def _generate_image_bytes(prompt):
 
 _live_send_photo = None
 _live_send_voice = None
+_live_send_chat_action = None
 _live_channel = None
 
 
-def register_channel(send_photo, send_voice, channel):
+def register_channel(send_photo, send_voice, send_chat_action, channel):
     """Give this module a direct handle on the LIVE channel, called by the
     channel plugin's loadOmegaClawPlugin.
 
@@ -278,9 +279,10 @@ def register_channel(send_photo, send_voice, channel):
     `import telegram` here would build a second, never-started copy whose
     bot and event loop are None — generated images would be produced and then
     dropped."""
-    global _live_send_photo, _live_send_voice, _live_channel
+    global _live_send_photo, _live_send_voice, _live_send_chat_action, _live_channel
     _live_send_photo = send_photo
     _live_send_voice = send_voice
+    _live_send_chat_action = send_chat_action
     _live_channel = channel
 
 
@@ -389,6 +391,11 @@ def speak(text):
         return "VOICE_DISABLED: voice replies are turned off"
     if _prompt_is_unsafe(text):
         return "Refused: unsafe voice content"
+    if _live_send_chat_action is not None:
+        try:
+            _live_send_chat_action("record_voice")
+        except Exception as e:
+            logger.warning(f"Could not send record_voice chat action: {e}")
     voice = os.environ.get("EDGE_TTS_VOICE", DEFAULT_TTS_VOICE)
     audio_bytes = _synthesise_speech(text, voice)
     if not audio_bytes:

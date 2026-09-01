@@ -206,7 +206,7 @@ def test_generate_and_send_success():
     mh._prompt_is_unsafe = lambda prompt: False
     mh._generate_image_bytes = lambda prompt: b"img"
     mh.register_channel(lambda image_bytes, caption=None: sent.update(
-        bytes=image_bytes, caption=caption), lambda *a, **k: None, object())
+        bytes=image_bytes, caption=caption), lambda *a, **k: None, lambda *a, **k: None, object())
     try:
         out = mh.generate_and_send("a cat")
         assert out.startswith("IMAGE_SENT"), out
@@ -247,7 +247,7 @@ def test_register_channel_wires_gate_and_sender():
     try:
         class Chan:
             reply_constraints = {"allow_image_generation": True}
-        mh.register_channel(lambda *a, **k: None, lambda *a, **k: None, Chan())
+        mh.register_channel(lambda *a, **k: None, lambda *a, **k: None, lambda *a, **k: None, Chan())
         assert mh._image_generation_allowed() is True
         Chan.reply_constraints = {"allow_image_generation": False}
         assert mh._image_generation_allowed() is False
@@ -292,22 +292,25 @@ def test_speak_success():
     orig_allowed = mh._tts_allowed
     orig_unsafe = mh._prompt_is_unsafe
     orig_synth = mh._synthesise_speech
-    orig_send, orig_chan = mh._live_send_voice, mh._live_channel
+    orig_send, orig_action, orig_chan = mh._live_send_voice, mh._live_send_chat_action, mh._live_channel
 
+    actions = []
     sent = {}
     mh._tts_allowed = lambda: True
     mh._prompt_is_unsafe = lambda text: False
     mh._synthesise_speech = lambda text, voice: b"audio-bytes"
     mh._live_send_voice = lambda audio_bytes, caption=None: sent.update(bytes=audio_bytes)
+    mh._live_send_chat_action = lambda action: actions.append(action)
     try:
         out = mh.speak("hello there")
         assert out == "VOICE_SENT", out
         assert sent["bytes"] == b"audio-bytes", sent
+        assert "record_voice" in actions, actions
     finally:
         mh._tts_allowed = orig_allowed
         mh._prompt_is_unsafe = orig_unsafe
         mh._synthesise_speech = orig_synth
-        mh._live_send_voice, mh._live_channel = orig_send, orig_chan
+        mh._live_send_voice, mh._live_send_chat_action, mh._live_channel = orig_send, orig_action, orig_chan
 
 
 def test_synthesise_speech_uses_edge_tts():

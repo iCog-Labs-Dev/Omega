@@ -1187,6 +1187,21 @@ def send_voice(audio_bytes, caption=None):
                         chat_id=_channel.chat_id,
                         reply_to_id=getattr(_channel, "_reply_to_id", None))
 
+
+def send_chat_action(action):
+    """Send a chat action (e.g. 'record_voice', 'typing') to the active chat.
+    When switching away from typing (e.g. to record_voice), the typing loop
+    thread is stopped first so it cannot race and re-send 'typing' afterwards."""
+    chat_id = _channel.chat_id
+    if not (_channel.connected and _channel.bot and _channel.loop and chat_id):
+        return
+    if action != "typing":
+        _channel._stop_typing(str(chat_id))
+    asyncio.run_coroutine_threadsafe(
+        _channel.bot.send_chat_action(chat_id=chat_id, action=action),
+        _channel.loop,
+    )
+
 def is_search_disabled():
     """Check if admin disabled searching."""
     return _channel.search_disabled
@@ -1256,5 +1271,5 @@ def loadOmegaClawPlugin():
     import media_handler
     # Hand media_handler this module's live channel so generate-image and
     # speak can send their output; it cannot find them by importing us by name.
-    media_handler.register_channel(send_photo, send_voice, _channel)
+    media_handler.register_channel(send_photo, send_voice, send_chat_action, _channel)
     channels.registerCommChannel("telegram", TelegramChannel())
