@@ -201,6 +201,84 @@ def test_captioned_photo_still_carries_the_image_marker():
         restore()
 
 
+def test_png_document_is_sanitized_and_queued_as_image():
+    ch = _new_channel()
+    ch.bot = FakeBot(download_bytes=b"png-bytes")
+
+    async def not_blocked(text):
+        return False
+
+    restore = _stub([
+        (mh, "sanitize_image", lambda raw: b"sanitized-jpeg"),
+        (mh, "image_to_data_uri", lambda img, mime: "data:image/jpeg;base64,AAAA"),
+        (tm, "is_category_blocked", not_blocked),
+    ])
+    try:
+        message = _fake_message(
+            document=SimpleNamespace(mime_type="image/png", file_name="diagram.png"),
+            caption="what does this diagram show?",
+        )
+        asyncio.run(ch._on_document(message))
+        assert len(ch._message_queue) == 1
+        _, display_text, _, payload = ch._message_queue[0]
+        assert "[image]" in display_text, display_text
+        assert "what does this diagram show?" in display_text, display_text
+        assert payload == [{"type": "image_url",
+                            "image_url": {"url": "data:image/jpeg;base64,AAAA"}}]
+    finally:
+        restore()
+
+
+def test_svg_document_is_rejected_without_download():
+    ch = _new_channel()
+
+    class NoDownloadBot(FakeBot):
+        async def download(self, file_obj, destination):
+            raise AssertionError("SVG must be rejected before download")
+
+    ch.bot = NoDownloadBot()
+    message = _fake_message(
+        document=SimpleNamespace(mime_type="image/svg+xml", file_name="diagram.svg"),
+    )
+    asyncio.run(ch._on_document(message))
+    assert len(ch._message_queue) == 0
+    assert message._answers and "SVG" in message._answers[0][0]
+
+
+def test_svg_extension_is_rejected_even_with_spoofed_png_mime():
+    ch = _new_channel()
+
+    class NoDownloadBot(FakeBot):
+        async def download(self, file_obj, destination):
+            raise AssertionError("SVG must be rejected before download")
+
+    ch.bot = NoDownloadBot()
+    for filename in ("diagram.svg", "diagram.svgz"):
+        message = _fake_message(
+            document=SimpleNamespace(mime_type="image/png", file_name=filename),
+        )
+        asyncio.run(ch._on_document(message))
+        assert len(ch._message_queue) == 0
+        assert message._answers and "SVG" in message._answers[0][0]
+
+
+def test_invalid_raster_document_is_rejected():
+    ch = _new_channel()
+    ch.bot = FakeBot(download_bytes=b"not-an-image")
+    restore = _stub([
+        (mh, "sanitize_image", lambda raw: (_ for _ in ()).throw(ValueError("invalid image"))),
+    ])
+    try:
+        message = _fake_message(
+            document=SimpleNamespace(mime_type="image/png", file_name="broken.png"),
+        )
+        asyncio.run(ch._on_document(message))
+        assert len(ch._message_queue) == 0
+        assert message._answers and "Failed to process the image" in message._answers[0][0]
+    finally:
+        restore()
+
+
 def test_pdf_handler_extracts_text():
     ch = _new_channel()
     ch.bot = FakeBot()
@@ -766,6 +844,10 @@ def test_admin_scan_collects_admin_ids():
 if __name__ == "__main__":
     test_photo_handler_buffers_image_and_queues_marker()
     test_captioned_photo_still_carries_the_image_marker()
+    test_png_document_is_sanitized_and_queued_as_image()
+    test_svg_document_is_rejected_without_download()
+    test_svg_extension_is_rejected_even_with_spoofed_png_mime()
+    test_invalid_raster_document_is_rejected()
     test_pdf_handler_extracts_text()
     test_pdf_handler_rejects_non_pdf_document()
     test_voice_handler_transcribes_audio()
