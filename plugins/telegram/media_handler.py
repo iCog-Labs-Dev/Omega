@@ -1,6 +1,5 @@
 import base64
 import hashlib
-import os
 import threading
 import logging
 import sys
@@ -380,6 +379,7 @@ def _synthesise_speech(text, voice):
 
 
 def speak(text):
+    from config import config_get_by_key
     """speak skill: synthesise `text` as a voice message and send it to the
     user via Telegram sendVoice. Returns a short status string (never raises)."""
     text = (text or "").strip()
@@ -396,7 +396,7 @@ def speak(text):
             _live_send_chat_action("record_voice")
         except Exception as e:
             logger.warning(f"Could not send record_voice chat action: {e}")
-    voice = os.environ.get("EDGE_TTS_VOICE", DEFAULT_TTS_VOICE)
+    voice = config_get_by_key("EDGE_TTS_VOICE", DEFAULT_TTS_VOICE)
     audio_bytes = _synthesise_speech(text, voice)
     if not audio_bytes:
         return "VOICE_FAILED: could not synthesise speech"
