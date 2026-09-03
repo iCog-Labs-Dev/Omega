@@ -120,6 +120,18 @@ def test_announcement_escapes_newlines_the_way_channels_expect():
         "Oma just updated\\n- one thing\\n- another"
 
 
+def test_a_heading_after_bullets_keeps_its_gap():
+    # Telegram's converter drops the blank line that ends a list, so the line
+    # before a heading carries a zero-width space to hold the gap open.
+    assert release.announcement("- one\n- two\n\n**Fixes**\n\n- three") == \
+        "- one\\n- two\\n\u200b\\n\\n**Fixes**\\n\\n- three"
+
+
+def test_a_heading_after_a_paragraph_is_left_alone():
+    assert release.announcement("An overview line.\n\n**Fixes**\n\n- one") == \
+        "An overview line.\\n\\n**Fixes**\\n\\n- one"
+
+
 def test_announcement_of_an_unusable_summary():
     assert release.announcement("") == ""
     assert release.announcement("   \n  ") == ""

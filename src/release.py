@@ -137,7 +137,11 @@ def announcement(summary):
     text = str(summary).strip()
     if not text:
         return ""
-    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Telegram's markdown converter eats the blank line that ends a bullet list;
+    # a zero-width space on that line holds the gap open.
+    text = re.sub(r"(?m)^(- [^\n]*)\n\n+(?!- )", "\\1\n\u200b\n\n", text)
+    return text.replace("\n", "\\n")
 
 
 def mark_announced(tag):
