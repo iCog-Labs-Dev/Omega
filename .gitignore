@@ -1,5 +1,8 @@
 # embedded vector store
 memory/chroma_db/
+
+# release already announced by this deployment
+memory/announced_release
 knowledge_db/
 chroma_db/
 

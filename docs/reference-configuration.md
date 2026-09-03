@@ -33,6 +33,24 @@ This reads a command-line override via `argk` (`name=value` on the MeTTa command
 | `maxHistory` | 30000 (chars) | Tail of `memory/history.metta` included in the prompt. |
 | `embeddingprovider` | `Local` | `Local` (Python-side model) or `OpenAI`. |
 
+## Release announcement (`src/release.metta`, `announceRelease`)
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `releaseRepo` | `iCog-Labs-Dev/mettaclaw` | Repository whose release notes the agent summarizes on the first start-up of a released build, as `owner/name`. Production is tagged and released there — see [../scripts/deploy-prod.sh](../scripts/deploy-prod.sh). |
+| `releaseApiURL` | `https://api.github.com` | Base URL of the GitHub API those notes are read from. |
+| `releaseTag` | *(empty — taken from the build)* | Release to announce, overriding the tag the build was cut from. Set it to see the announcement on a build that is not itself a release. |
+
+`scripts/deploy-prod.sh` pushes a `prod-<date>` tag; it does not create a GitHub
+release. Publish the release on that tag **before** deploying, or the fetch
+returns 404 and nothing is announced. `announceRelease` runs only on turn 1, so
+publishing the notes afterwards needs a `docker restart omegaclaw` to take
+effect.
+
+The message is handed to the channel, which may queue it when no chat is bound
+yet. The release is recorded as announced at that point, so a process that dies
+before the outbox drains will not retry it.
+
 ## Channels (`src/channels.metta`, `initChannels`)
 
 | Parameter | Default | Meaning |

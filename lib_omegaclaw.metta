@@ -18,6 +18,8 @@
 !(import! &self (library OmegaClaw-Core ./src/channels))
 !(import! &self (library OmegaClaw-Core ./src/providers.py))
 !(import! &self (library OmegaClaw-Core ./src/providers))
+!(import! &self (library OmegaClaw-Core ./src/release.py))
+!(import! &self (library OmegaClaw-Core ./src/release))
 !(import! &self (library OmegaClaw-Core ./profile/policy))
 !(import! &self (library OmegaClaw-Core ./src/fileio.py))
 !(import! &self (library OmegaClaw-Core ./src/skills))
