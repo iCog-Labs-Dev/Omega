@@ -23,6 +23,7 @@ telegram:
     allow_media: true
     allow_audio: true
     allow_image_generation: true
+    allow_voice_reply: true
     allow_admin_actions: false
     allow_new_outbound_chats: false
 
@@ -157,4 +158,9 @@ callable_capabilities:
     constraints:
       - ethics_checked_prompt
       - no_nsfw_content
+      - same_chat_only
+  voice_reply:
+    enabled: true
+    constraints:
+      - ethics_checked_text
       - same_chat_only

@@ -25,10 +25,13 @@
      (let $rc (py-call (telegram_channel.loadOmegaClawPlugin)) ())
      (add-skill describe-image
                 "See/read an image the user attached. Call when a message shows [image] and you need its contents; optionally pass what to look for (example: describe-image what error is shown)"
-                (query))
+                (image_query))
      (add-skill generate-image
                 "Generate an image and send it to the user. Use when the user asks you to create, draw, generate, paint, or show a picture or image. Pass a vivid, detailed English description; the image is generated and sent for you (example: generate-image a red panda astronaut floating in space, studio lighting)"
-                (description))
+                (image_description))
+     (add-skill speak
+                "Speak a reply aloud as a Telegram voice message. Use when the user asks you to say something out loud, reply with voice, or send a voice message. Pass the exact text to speak (example: speak Hello, I am Oma)"
+                (voice_text))
      (addTelegramPromptSection)
      ()))
 
@@ -47,3 +50,6 @@
 
 (= (generate-image $prompt)
    (py-call (media_handler.generate_and_send $prompt)))
+
+(= (speak $text)
+   (py-call (media_handler.speak $text)))

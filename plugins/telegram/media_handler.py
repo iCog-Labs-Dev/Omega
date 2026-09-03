@@ -264,10 +264,12 @@ def _generate_image_bytes(prompt):
 
 
 _live_send_photo = None
+_live_send_voice = None
+_live_send_chat_action = None
 _live_channel = None
 
 
-def register_channel(send_photo, channel):
+def register_channel(send_photo, send_voice, send_chat_action, channel):
     """Give this module a direct handle on the LIVE channel, called by the
     channel plugin's loadOmegaClawPlugin.
 
@@ -276,8 +278,10 @@ def register_channel(send_photo, channel):
     `import telegram` here would build a second, never-started copy whose
     bot and event loop are None — generated images would be produced and then
     dropped."""
-    global _live_send_photo, _live_channel
+    global _live_send_photo, _live_send_voice, _live_send_chat_action, _live_channel
     _live_send_photo = send_photo
+    _live_send_voice = send_voice
+    _live_send_chat_action = send_chat_action
     _live_channel = channel
 
 
@@ -332,3 +336,75 @@ def generate_and_send(prompt):
         logger.error(f"Failed to send generated image: {e}")
         return f"IMAGE_FAILED: generated but could not send: {e}"
     return f"IMAGE_SENT: {prompt}"
+
+# --- Text-to-speech (outbound) ---------------------------------------------
+# speak skill: synthesise a voice message and send it via sendVoice.
+# Uses edge-tts (free, no API key). Voice is configurable via EDGE_TTS_VOICE.
+
+DEFAULT_TTS_VOICE = "en-US-AriaNeural"
+MAX_TTS_CHARS = 4096
+
+
+def _tts_allowed():
+    """Read the allow_voice_reply gate from the active channel's reply
+    constraints. Fail closed (False) if unavailable."""
+    try:
+        constraints = getattr(_live_channel, "reply_constraints", None) or {}
+        return bool(constraints.get("allow_voice_reply", False))
+    except Exception as e:
+        logger.error(f"Could not read allow_voice_reply gate: {e}")
+        return False
+
+
+def _synthesise_speech(text, voice):
+    """Synthesise `text` via edge-tts and return raw MP3 bytes, or None on failure."""
+    try:
+        import asyncio, io, edge_tts
+        async def _run():
+            with io.BytesIO() as buf:
+                async for chunk in edge_tts.Communicate(text, voice=voice).stream():
+                    if chunk["type"] == "audio":
+                        buf.write(chunk["data"])
+                return buf.getvalue()
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, _run()).result()
+        except RuntimeError:
+            return asyncio.run(_run())
+    except Exception as e:
+        logger.error(f"TTS synthesis failed: {e}")
+        return None
+
+
+def speak(text):
+    from config import config_get_by_key
+    """speak skill: synthesise `text` as a voice message and send it to the
+    user via Telegram sendVoice. Returns a short status string (never raises)."""
+    text = (text or "").strip()
+    if not text:
+        return "VOICE_FAILED: empty text"
+    if len(text) > MAX_TTS_CHARS:
+        return f"VOICE_FAILED: text exceeds {MAX_TTS_CHARS} characters"
+    if not _tts_allowed():
+        return "VOICE_DISABLED: voice replies are turned off"
+    if _prompt_is_unsafe(text):
+        return "Refused: unsafe voice content"
+    if _live_send_chat_action is not None:
+        try:
+            _live_send_chat_action("record_voice")
+        except Exception as e:
+            logger.warning(f"Could not send record_voice chat action: {e}")
+    voice = config_get_by_key("EDGE_TTS_VOICE", DEFAULT_TTS_VOICE)
+    audio_bytes = _synthesise_speech(text, voice)
+    if not audio_bytes:
+        return "VOICE_FAILED: could not synthesise speech"
+    if _live_send_voice is None:
+        return "VOICE_FAILED: synthesised but no channel is registered to send it"
+    try:
+        _live_send_voice(audio_bytes)
+    except Exception as e:
+        logger.error(f"Failed to send voice message: {e}")
+        return f"VOICE_FAILED: synthesised but could not send: {e}"
+    return "VOICE_SENT"

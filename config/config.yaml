@@ -77,6 +77,9 @@ SL_POLL_INTERVAL: 60
 TG_CHAT_ID: ""
 # Telegram polling timeout in seconds.
 TG_POLL_TIMEOUT: 20
+# edge-tts voice for the speak skill. Any voice from `edge-tts --list-voices`.
+# Default: en-US-AriaNeural
+EDGE_TTS_VOICE: en-US-AriaNeural
 
 # WSchat
 # WebSocket endpoint URL (`ws://` or `wss://`). Required when `commchannel=websocket`.

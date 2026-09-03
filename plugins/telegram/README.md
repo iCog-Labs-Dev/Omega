@@ -1,8 +1,8 @@
 # omegaclaw-telegram
 
 A Telegram communication channel for OmegaClaw with media support: the agent can
-read images, PDFs and voice notes that users attach, and can generate images and
-send them back.
+read images, PDFs and voice notes that users attach, generate images, and send
+voice replies when enabled.
 
 This is the `telegram` channel. It replaces core's earlier HTTP-polling Telegram
 channel and keeps everything that one provided — the gateway proxy path, the
@@ -16,6 +16,7 @@ outbound retry queue, and the channel auth handshake.
 | Inbound PDF | Extracted text is inlined into the message |
 | Inbound voice / audio | Whisper transcript is inlined into the message |
 | Outbound image | The agent calls `generate-image`, which generates and sends the photo |
+| Outbound voice | The agent calls `speak`, which synthesizes and sends a Telegram voice message when enabled |
 | Admin commands | `/kill`, `/pause [chat_id]`, `/togglesearch`, `/purge` (admin IDs only) |
 | Safety | Ethics classification on inbound and outbound text, per-user spam throttling |
 | Scope limits | `prompt.txt` is added to the agent's prompt as its own section |
@@ -48,7 +49,8 @@ mounting over them works too and needs no configuration.
 **4. Fill in `telegram_profile.yaml`** — it ships permissive defaults that are
 **not safe for production**. Set `admin_controls.admin_ids` to the Telegram user
 IDs allowed to run admin commands, and `telegram.allowed_chats` to the chat IDs
-the bot may operate in. Both are empty by default.
+the bot may operate in. Both are empty by default. Voice replies are opt-in;
+set `telegram.reply_constraints.allow_voice_reply: true` to enable them.
 
 ## Use
 
@@ -77,6 +79,7 @@ they belong to the proxy, not here.
 | `ANTHROPIC_API_KEY` | for vision | Used by the default vision provider |
 | `OPENROUTER_API_KEY` | for image gen + Whisper | Also the vision key if `VISION_PROVIDER=OpenRouter` |
 | `OPENAI_API_KEY` | for safety checks | Moderation API; without it the ethics passes allow content through |
+| `EDGE_TTS_VOICE` | no | Voice for the `speak` skill; any voice from `edge-tts --list-voices`, defaults to `en-US-AriaNeural` |
 | `VISION_PROVIDER` | no | `Anthropic` (default) or `OpenRouter` |
 | `VISION_MODEL` | no | Overrides the provider's default vision model |
 | `IMAGE_PROVIDER` | no | `OpenRouter` (default, FLUX) or `OpenAI` |

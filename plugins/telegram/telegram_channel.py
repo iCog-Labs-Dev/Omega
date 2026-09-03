@@ -1095,6 +1095,42 @@ class _TelegramChannel:
         except PERMANENT_SEND_FAILURES as refusal:
             logging.error(f"Telegram refused this message outright, dropping it: {refusal}")
 
+    def send_voice(self, audio_bytes, caption=None, chat_id=None, reply_to_id=None):
+        """Send a voice message to the active chat."""
+        target_chat_id = chat_id or self.chat_id
+        self._stop_typing(str(target_chat_id))
+        target_reply_id = reply_to_id or (self._reply_to_id if target_chat_id == self.chat_id else None)
+
+        if not self.connected or self.bot is None or self.loop is None or target_chat_id is None:
+            raise RuntimeError(
+                f"send_voice preconditions not met (connected={self.connected}, "
+                f"bot={self.bot is not None}, loop={self.loop is not None}, chat_id={target_chat_id})")
+
+        voice = BufferedInputFile(audio_bytes, filename="voice.mp3")
+        fut = asyncio.run_coroutine_threadsafe(
+            self.bot.send_voice(chat_id=target_chat_id,
+                                voice=voice,
+                                caption=caption,
+                                reply_to_message_id=target_reply_id),
+            self.loop,
+        )
+        try:
+            fut.result(timeout=30)
+            logging.info(f"send_voice: delivered to {target_chat_id}")
+        except Exception as e:
+            logging.error(f"Failed to send voice (retrying without caption/reply): {e}")
+            fut_fallback = asyncio.run_coroutine_threadsafe(
+                self.bot.send_voice(chat_id=target_chat_id,
+                                    voice=BufferedInputFile(audio_bytes, filename="voice.mp3")),
+                self.loop,
+            )
+            try:
+                fut_fallback.result(timeout=30)
+                logging.info(f"send_voice: delivered to {target_chat_id} (fallback, no caption)")
+            except Exception as e2:
+                logging.error(f"Failed to send voice: {e2}")
+                raise
+
     def send_photo(self, image_bytes, caption=None, chat_id=None, reply_to_id=None):
         """Send a photo to the active chat, dispatched to the bot's event loop.
         Mirrors send_message's threading/targeting. Caption is sent plain (no
@@ -1250,6 +1286,31 @@ def send_photo(image_bytes, caption=None):
                         chat_id=_channel.chat_id,
                         reply_to_id=getattr(_channel, "_reply_to_id", None))
 
+def send_voice(audio_bytes, caption=None):
+    """Send a generated voice message to the active Telegram chat."""
+    _channel.send_voice(audio_bytes, caption=caption,
+                        chat_id=_channel.chat_id,
+                        reply_to_id=getattr(_channel, "_reply_to_id", None))
+
+
+def send_chat_action(action):
+    """Send a chat action (e.g. 'record_voice', 'typing') to the active chat.
+    When switching away from typing (e.g. to record_voice), the typing loop
+    thread is stopped first so it cannot race and re-send 'typing' afterwards."""
+    chat_id = _channel.chat_id
+    if not (_channel.connected and _channel.bot and _channel.loop and chat_id):
+        return
+    if action != "typing":
+        _channel._stop_typing(str(chat_id))
+    fut = asyncio.run_coroutine_threadsafe(
+        _channel.bot.send_chat_action(chat_id=chat_id, action=action),
+        _channel.loop,
+    )
+    try:
+        fut.result(timeout=30)
+    except Exception as e:
+        logging.warning(f"send_chat_action({action!r}) failed: {e}")
+
 def is_search_disabled():
     """Check if admin disabled searching."""
     return _channel.search_disabled
@@ -1317,7 +1378,7 @@ class TelegramChannel(channels.CommChannel):
 
 def loadOmegaClawPlugin():
     import media_handler
-    # Hand media_handler this module's live channel so generate-image can send
-    # the images it produces; it cannot find them by importing us by name.
-    media_handler.register_channel(send_photo, _channel)
+    # Hand media_handler this module's live channel so generate-image and
+    # speak can send their output; it cannot find them by importing us by name.
+    media_handler.register_channel(send_photo, send_voice, send_chat_action, _channel)
     channels.registerCommChannel("telegram", TelegramChannel())
