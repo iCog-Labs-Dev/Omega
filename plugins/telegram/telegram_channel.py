@@ -1202,7 +1202,7 @@ def send_chat_action(action):
         _channel.loop,
     )
     try:
-        fut.result(timeout=10)
+        fut.result(timeout=30)
     except Exception as e:
         logging.warning(f"send_chat_action({action!r}) failed: {e}")
 
