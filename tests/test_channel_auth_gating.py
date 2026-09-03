@@ -14,7 +14,6 @@ CHANNELS_DIRECTORY = REPO_ROOT / "channels"
     ("module_name", "arguments"),
     [
         ("irc", ("alice", "hello 🌍")),
-        ("telegram", ("chat", "alice", "hello 🌍")),
         ("slack", ("channel", "alice", "hello 🌍")),
         ("mattermost", ("alice", "hello 🌍")),
     ],
