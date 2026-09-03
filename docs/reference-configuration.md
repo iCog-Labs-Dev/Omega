@@ -37,7 +37,7 @@ This reads a command-line override via `argk` (`name=value` on the MeTTa command
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `releaseRepo` | `iCog-Labs-Dev/mettaclaw` | Repository whose release notes the agent summarizes on the first start-up of a released build, as `owner/name`. Production is tagged and released there — see [../scripts/deploy-prod.sh](../scripts/deploy-prod.sh). |
+| `releaseRepo` | `iCog-Labs-Dev/Omega` | Repository whose release notes the agent summarizes on the first start-up of a released build, as `owner/name`. Production is tagged and released there — see [../scripts/deploy-prod.sh](../scripts/deploy-prod.sh). |
 | `releaseApiURL` | `https://api.github.com` | Base URL of the GitHub API those notes are read from. |
 | `releaseTag` | *(empty — taken from the build)* | Release to announce, overriding the tag the build was cut from. Set it to see the announcement on a build that is not itself a release. |
 

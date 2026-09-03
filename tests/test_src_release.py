@@ -11,7 +11,7 @@ TAG = release.ReleaseTag("prod-2026-07-17")
 PAYLOAD = {
     "tag_name": "prod-2026-07-17",
     "name": "Oma-prod-2026-07-17",
-    "html_url": "https://github.com/iCog-Labs-Dev/mettaclaw/releases/tag/prod-2026-07-17",
+    "html_url": "https://github.com/iCog-Labs-Dev/Omega/releases/tag/prod-2026-07-17",
     "published_at": "2026-07-20T09:41:53Z",
     "body": "## [prod-2026-07-17]\n\n### Added\n- Telegram image support",
 }
@@ -116,8 +116,8 @@ def test_notes_with_no_blank_line_fall_back_to_a_line_break():
 
 
 def test_announcement_escapes_newlines_the_way_channels_expect():
-    assert release.announcement("Oma just updated\n- one thing\r\n- another") == \
-        "Oma just updated\\n- one thing\\n- another"
+    assert release.announcement("Omega just updated\n- one thing\r\n- another") == \
+        "Omega just updated\\n- one thing\\n- another"
 
 
 def test_a_heading_after_bullets_keeps_its_gap():
@@ -139,10 +139,10 @@ def test_announcement_of_an_unusable_summary():
 
 def test_announce_sends_once_and_records_it(marker, sent, released_build, monkeypatch):
     monkeypatch.setattr(release, "fetch_release", lambda tag: PAYLOAD)
-    monkeypatch.setattr(release, "_chat", lambda request: "Oma just updated\nsee the notes")
+    monkeypatch.setattr(release, "_chat", lambda request: "Omega just updated\nsee the notes")
 
-    assert release.announce() == "Oma just updated\\nsee the notes"
-    assert sent == ["Oma just updated\\nsee the notes"]
+    assert release.announce() == "Omega just updated\\nsee the notes"
+    assert sent == ["Omega just updated\\nsee the notes"]
     assert marker.read_text().strip() == "prod-2026-07-17"
 
     assert release.announce() == ""
@@ -219,7 +219,7 @@ def test_fetch_reads_the_tag_endpoint(monkeypatch):
     monkeypatch.setattr(release.json, "load", lambda response: PAYLOAD)
 
     assert release.fetch_release(TAG) == PAYLOAD
-    assert seen["url"] == ("https://api.github.com/repos/iCog-Labs-Dev/mettaclaw"
+    assert seen["url"] == ("https://api.github.com/repos/iCog-Labs-Dev/Omega"
                            "/releases/tags/prod-2026-07-17")
 
 

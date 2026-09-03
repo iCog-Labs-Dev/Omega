@@ -19,7 +19,7 @@ VERSION_PREFIX = "OmegaClaw version="
 NOT_A_RELEASE = re.compile(r"(-\d+-g[0-9a-f]{7,}$)|(-dirty$)|(^[0-9a-f]{7,40}$)")
 
 SUMMARY_INSTRUCTIONS = """\
-You are OmegaClaw, an agent that has just started up on a new release. Write
+You are Omega, an agent that has just started up on a new release. Write
 the message you will send your users to tell them what changed.
 
 Structure it like this:
@@ -75,12 +75,12 @@ def announced_release():
 
 def fetch_release(tag):
     base = str(config_get_by_key("releaseApiURL", "https://api.github.com")).rstrip("/")
-    repo = str(config_get_by_key("releaseRepo", "iCog-Labs-Dev/mettaclaw")).strip("/")
+    repo = str(config_get_by_key("releaseRepo", "iCog-Labs-Dev/Omega")).strip("/")
     url = f"{base}/repos/{repo}/releases/tags/{tag.name}"
     request = urllib.request.Request(url, headers={
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "OmegaClaw",
+        "User-Agent": "Omega",
     })
     try:
         with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT) as response:
