@@ -10,7 +10,7 @@ TAG = release.ReleaseTag("prod-2026-07-17")
 
 PAYLOAD = {
     "tag_name": "prod-2026-07-17",
-    "name": "Oma-prod-2026-07-17",
+    "name": "Omega-prod-2026-07-17",
     "html_url": "https://github.com/iCog-Labs-Dev/Omega/releases/tag/prod-2026-07-17",
     "published_at": "2026-07-20T09:41:53Z",
     "body": "## [prod-2026-07-17]\n\n### Added\n- Telegram image support",
@@ -41,11 +41,11 @@ def sent(monkeypatch):
 @pytest.fixture
 def released_build(monkeypatch):
     monkeypatch.setattr(release, "omegaclaw_version",
-                        lambda: "OmegaClaw version=prod-2026-07-17")
+                        lambda: "Omega version=prod-2026-07-17")
 
 
 def build(version):
-    return release.ReleaseTag.of_build(f"OmegaClaw version={version}")
+    return release.ReleaseTag.of_build(f"Omega version={version}")
 
 
 def test_tag_of_a_released_build():
@@ -61,13 +61,20 @@ def test_no_tag_when_the_build_is_not_a_release():
     assert build("v0.1.19-dirty") is None
     assert build("8822974") is None
     assert build("") is None
-    assert release.ReleaseTag.of_build("OmegaClaw unknown") is None
+    assert release.ReleaseTag.of_build("Omega unknown") is None
+
+
+def test_the_words_before_the_version_do_not_matter():
+    # helper.omegaclaw_version() puts the project name in front of the tag, and
+    # images built before a rename carry the older one, so only the marker counts.
+    assert release.ReleaseTag.of_build("Omega version=prod-2026-07-17") == TAG
+    assert release.ReleaseTag.of_build("Anything at all version=prod-2026-07-17") == TAG
 
 
 def test_a_named_release_overrides_the_tag_of_the_build(monkeypatch):
     monkeypatch.setenv("OMEGACLAW_releaseTag", "prod-2026-07-17")
     monkeypatch.setattr(release, "omegaclaw_version",
-                        lambda: "OmegaClaw version=prod-2026-07-17-45-g1234567")
+                        lambda: "Omega version=prod-2026-07-17-45-g1234567")
     assert release.announcing_tag() == TAG
 
 
@@ -151,7 +158,7 @@ def test_announce_sends_once_and_records_it(marker, sent, released_build, monkey
 
 def test_announce_stays_quiet_on_a_build_that_is_not_a_release(marker, sent, monkeypatch):
     monkeypatch.setattr(release, "omegaclaw_version",
-                        lambda: "OmegaClaw version=prod-2026-07-17-45-g1234567")
+                        lambda: "Omega version=prod-2026-07-17-45-g1234567")
     monkeypatch.setattr(release, "fetch_release",
                         lambda tag: pytest.fail("asked GitHub about a non-release"))
     monkeypatch.setattr(release, "_chat", lambda request: pytest.fail("asked the model"))

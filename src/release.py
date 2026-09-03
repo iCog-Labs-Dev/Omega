@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 FETCH_TIMEOUT = 10.0
 MAX_NOTES_CHARS = 20000
 MARKER_FILE = "announced_release"
-VERSION_PREFIX = "OmegaClaw version="
+VERSION_MARKER = "version="
 NOT_A_RELEASE = re.compile(r"(-\d+-g[0-9a-f]{7,}$)|(-dirty$)|(^[0-9a-f]{7,40}$)")
 
 SUMMARY_INSTRUCTIONS = """\
@@ -49,9 +49,10 @@ class ReleaseTag:
     @classmethod
     def of_build(cls, version=None):
         version = omegaclaw_version() if version is None else str(version)
-        if not version.startswith(VERSION_PREFIX):
+        _, marker, name = version.partition(VERSION_MARKER)
+        if not marker:
             return None
-        name = version[len(VERSION_PREFIX):].strip()
+        name = name.strip()
         if not name or NOT_A_RELEASE.search(name):
             return None
         return cls(name)
