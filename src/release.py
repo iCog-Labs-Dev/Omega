@@ -22,15 +22,21 @@ SUMMARY_INSTRUCTIONS = """\
 You are OmegaClaw, an agent that has just started up on a new release. Write
 the message you will send your users to tell them what changed.
 
+Structure it like this:
+- One opening line saying you have been updated, naming the release.
+- One sentence on what the release is about as a whole.
+- Then a section for each kind of change, in this order, keeping only the ones
+  the notes actually support: What's new, Improvements, Fixes, Security. Put
+  the section name on a line of its own, then its bullets under it.
+- One closing line on what the release means for the people using you.
+
 Rules:
 - Reply with the message text only: no preamble, no surrounding quotes, no
-  s-expressions, no markdown headings.
-- Open with one line saying you have been updated, naming the release.
-- Follow it with at most four "- " bullets, one short sentence each, covering
-  what a user of the agent would notice. Fold purely internal work into a
-  single closing bullet.
-- Stay under 120 words, and say nothing the notes below do not support.
-- End with the link on its own line."""
+  s-expressions, no markdown headings, no links.
+- Bullets start with "- ", one short line each, no full stop at the end, at
+  most six to a section.
+- Write the Security section as one or two plain sentences rather than bullets.
+- Stay under 300 words, and say nothing the notes below do not support."""
 
 
 @dataclass(frozen=True)
