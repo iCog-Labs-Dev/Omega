@@ -44,6 +44,15 @@ securityPolicyPath: "./repos/OmegaClaw-Core/profile/policy.yaml"
 # (internal) URL to the Nginx proxy isolating API keys from agent
 #GATEWAY_URL:
 
+# Release announcement
+
+# Repository the release notes are read from, as owner/name
+releaseRepo: "iCog-Labs-Dev/Omega"
+# Base URL of the GitHub API serving them
+releaseApiURL: "https://api.github.com"
+# Release to announce, overriding the tag the build was cut from
+#releaseTag:
+
 # Channels
 
 # Type of the communication channel for agent to use

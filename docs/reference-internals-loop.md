@@ -17,6 +17,7 @@ Initializes state:
 - `(initLoop)` — configures all loop parameters (see [reference-configuration.md](./reference-configuration.md)).
 - `(initMemory)` — configures memory parameters and loads the embedding model.
 - `(initChannels)` — opens the active communication channel.
+- `(announceRelease)` — on the first start-up of a build cut from a published release, summarizes that release's notes and sends them as the session's opening message (see [../src/release.metta](../src/release.metta)). Any other start-up sends nothing.
 
 Also creates shared state slots:
 
