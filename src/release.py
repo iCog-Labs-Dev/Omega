@@ -27,12 +27,15 @@ Structure it like this:
 - One sentence on what the release is about as a whole.
 - Then a section for each kind of change, in this order, keeping only the ones
   the notes actually support: What's new, Improvements, Fixes, Security. Put
-  the section name on a line of its own, then its bullets under it.
+  the section name on a line of its own in bold, written as **What's new**,
+  with a blank line above it, then its bullets under it.
+- A blank line before the closing line too.
 - One closing line on what the release means for the people using you.
 
 Rules:
 - Reply with the message text only: no preamble, no surrounding quotes, no
   s-expressions, no markdown headings, no links.
+- Bold is only for the section names; leave the rest of the text plain.
 - Bullets start with "- ", one short line each, no full stop at the end, at
   most six to a section.
 - Write the Security section as one or two plain sentences rather than bullets.
