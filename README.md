@@ -1,5 +1,3 @@
-![Omega banner](/docs/assets/banner.png)
-
 # Meet Oma
 
 Oma is the first Telegram agent built on the Omega framework. Interacting
@@ -41,10 +39,6 @@ sudo apt-get install git python3 python3-dev python3-pip python3-venv build-esse
 
 Get [SWI-Prolog 10.0.2 or later](https://www.swi-prolog.org/).
 
-> **Note.** The `singnet/Omega` repository and the `singularitynet/omega` image are part of an
-> in-progress rename. Until they are published, use `singnet/Omega` and
-> `singularitynet/omega` in the commands below.
-
 Install Omega:
 ```
 git clone https://github.com/trueagi-io/PeTTa
@@ -83,7 +77,7 @@ curl -fsSL https://raw.githubusercontent.com/singnet/Omega/refs/heads/main/scrip
 
 To run a specific version of Omega set version in `TAG` environment variable and run the following command:
 ```
-export TAG=v0.1.17; curl -fsSL  https://github.com/singnet/Omega/raw/refs/tags/$TAG/scripts/omega | bash -s -- singularitynet/omega:$TAG
+export TAG=<version>; curl -fsSL  https://github.com/singnet/Omega/raw/refs/tags/$TAG/scripts/omega | bash -s -- singularitynet/omega:$TAG
 ```
 
 To stop the Omega Docker container:
@@ -99,6 +93,25 @@ docker start omega
 To reset Omega's memory:
 ```
 docker volume rm omega-memory
+```
+
+### Memory portability
+
+Memory export is disabled by default. See the [memory portability reference](./docs/reference-memory-portability.md)
+for setup, export controls, archive contents, and import modes.
+
+> **Current limitation:** Memory import does not work in a standalone Omega
+> run. Import and interrupted-import recovery are supported only through Docker
+> using `scripts/omega`, because both operations run from the container
+> entrypoint before the agent loop starts.
+
+To restore an archive while upgrading to a tagged image, use the same transfer directory:
+
+```sh
+scripts/omega start -d singularitynet/omega:<tag> -p OpenAI -t telegram \
+  --memory-transfer-dir "$HOME/omega-transfers" \
+  --memory-import omegaclaw-memory-<timestamp>.tar.gz \
+  --memory-mode overwrite
 ```
 
 ---
@@ -177,4 +190,4 @@ tutorials, and API reference as a flat set of markdown files.
 
 ### Disclaimer
 
-<sub>Omega is experimental, open-source software developed by SingularityNET Foundation, a Swiss foundation, and distributed and promoted by Superintelligence Alliance Ltd., a Singapore company (collectively, the "Parties"), and is provided "AS IS" and "AS AVAILABLE," without warranty of any kind, express or implied, including but not limited to the implied warranties of merchantability, fitness for a particular purpose, and non-infringement. Omega is an autonomous AI agent that is designed to independently set goals, make decisions, and take actions (including actions that the user did not specifically request or anticipate) and whose behavior is influenced by large language models provided by third parties, the outputs of which are inherently non-deterministic. Depending on its configuration and the permissions granted to it, Omega may execute operating-system shell commands, read, write, modify, or delete files, access network resources, send and receive messages through connected communication channels, and modify its own skills, memory, and operational logic at runtime. Omega may also be susceptible to prompt injection and other adversarial manipulation techniques whereby malicious content embedded in data sources consumed by the agent could influence its behavior in unintended ways. Omega supports third-party skills and extensions that have not necessarily been reviewed, audited, or endorsed by either of the Parties and that may introduce security vulnerabilities, cause data loss, or result in unintended behavior including data exfiltration. Omega relies on third-party services, including large language model providers, whose availability, accuracy, cost, and conduct are outside the control of the Parties and whose use is subject to their respective terms, conditions, and privacy policies. The user is solely responsible for configuring appropriate access controls, sandboxing, and permission boundaries, for monitoring, supervising, and constraining Omega's actions, for ensuring that no sensitive personal data is exposed to the agent without adequate safeguards, and for all actions taken by Omega on the user's systems or on the user's behalf, including communications sent and files modified. The user is strongly advised to run Omega in an isolated environment with the minimum permissions necessary for the intended use case. To the maximum extent permitted by applicable law, in no event shall the Parties, their respective board members, directors, contributors, employees, or affiliates be liable for any direct, indirect, incidental, special, consequential, or exemplary damages (including but not limited to damages for loss of data, loss of profits, business interruption, unauthorized transactions, reputational harm, or any damages arising from the autonomous actions taken by Omega) however caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or otherwise), even if advised of the possibility of such damages. By downloading, installing, running, or otherwise using Omega, the user acknowledges that they have read, understood, and agreed to this disclaimer in its entirety. This disclaimer supplements but does not replace the terms of the MIT License under which Omega is released.</sub>
+<sub>Omega is experimental, open-source software developed by SingularityNET Foundation, a Swiss foundation, and distributed and promoted by Superintelligence Alliance Ltd., a Singapore company (collectively, the "Parties"), and is provided "AS IS" and "AS AVAILABLE," without warranty of any kind, express or implied, including but not limited to the implied warranties of merchantability, fitness for a particular purpose, and non-infringement. Omega is an autonomous AI agent that is designed to independently set goals, make decisions, and take actions (including actions that the user did not specifically request or anticipate) and whose behavior is influenced by large language models provided by third parties, the outputs of which are inherently non-deterministic. Depending on its configuration and the permissions granted to it, Omega may execute operating-system shell commands, read, write, modify, or delete files, access network resources, send and receive messages through connected communication channels, and modify its own skills, memory, and operational logic at runtime. Omega may also be susceptible to prompt injection and other adversarial manipulation techniques whereby malicious content embedded in data sources consumed by the agent could influence its behavior in unintended ways. Omega supports third-party skills and extensions that have not necessarily been reviewed, audited, or endorsed by either of the Parties and that may introduce security vulnerabilities, cause data loss, or result in unintended behavior including data exfiltration. Omega relies on third-party services, including large language model providers, whose availability, accuracy, cost, and conduct are outside the control of the Parties and whose use is subject to their respective terms, conditions, and privacy policies. The user is solely responsible for configuring appropriate access controls, sandboxing, and permission boundaries, for monitoring, supervising, and constraining Omega's actions, for ensuring that no sensitive personal data is exposed to the agent without adequate safeguards, and for all actions taken by Omega on the user's systems or on the user's behalf, including communications sent and files modified. The user is strongly advised to run Omega in an isolated environment with the minimum permissions necessary for the intended use case. To the maximum extent permitted by applicable law, in no event shall the Parties, their respective board members, directors, contributors, employees, or affiliates be liable for any direct, indirect, incidental, special, consequential, or exemplary damages (including but not limited to damages for loss of data, loss of profits, business interruption, unauthorized transactions, reputational harm, or any damages arising from the autonomous actions taken by Omega) however caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or otherwise), even if advised of the possibility of such damages. By downloading, installing, running, or otherwise using Omega, the user acknowledges that they have read, understood, and agreed to this disclaimer in its entirety. This disclaimer supplements but does not replace the terms of the Apache License, Version 2.0, under which Omega is released.</sub>
