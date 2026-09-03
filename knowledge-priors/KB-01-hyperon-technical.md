@@ -1,6 +1,6 @@
 # KB-01: Hyperon Technical Stack
 
-**scope:** Everything about the Hyperon AGI platform — MeTTa language, Atomspace/MORK/DAS knowledge representations, cognitive algorithms (PLN, ECAN, MOSES, MetaMo, SubRep, TransWeave), PRIMUS architecture, and the OmegaClaw agent profile.
+**scope:** Everything about the Hyperon AGI platform — MeTTa language, Atomspace/MORK/DAS knowledge representations, cognitive algorithms (PLN, ECAN, MOSES, MetaMo, SubRep, TransWeave), PRIMUS architecture, and the Omega agent profile.
 **excludes:** ASI:Chain / shard deployment architecture (→ KB-02); ethical and motivational philosophy (→ KB-06); tokenomics and economics (→ KB-03).
 
 **confidence:** High for documented components. Medium for roadmap items and prototype-stage systems. Items marked [UNCERTAIN] are explicitly under development or not yet validated.
@@ -21,7 +21,7 @@
 
 **DAS (Distributed AtomSpace)** is the large-scale distributed counterpart to MORK. It operates as a distributed knowledge management system over massive mutable hypergraphs stored in MongoDB/Redis backends. DAS separates Long-Term Importance (persistent distributed storage) from Short-Term Importance (high-speed RAM attention), governed by an Attention Broker that prevents combinatorial explosion during inference.
 
-**OmegaClaw Agent** is an agent evolving toward AGI through dynamic orchestration of the Hyperon stack. OmegaClaw is not a separate theory from Hyperon — it is a specific agent-driven deployment that uses MeTTa as orchestration language, Atomspace/MORK/DAS as cognitive memory, ECAN/PLN/MOSES/MetaMo as cognitive functionality, and ASI:Chain for auditable decentralized runtime where needed.
+**Omega Agent** is an agent evolving toward AGI through dynamic orchestration of the Hyperon stack. Omega is not a separate theory from Hyperon — it is a specific agent-driven deployment that uses MeTTa as orchestration language, Atomspace/MORK/DAS as cognitive memory, ECAN/PLN/MOSES/MetaMo as cognitive functionality, and ASI:Chain for auditable decentralized runtime where needed.
 
 ---
 
@@ -103,7 +103,7 @@ The Action-Ontology supplement clarifies PRIMUS world modeling through Turchin's
 **TransWeave:** [UNCERTAIN] Knowledge transfer framework with bounded degradation guarantees.
 **PRIMUS:** Proposed cognitive architecture configuration for AGI.
 **QuantiMORK:** [UNCERTAIN] Native neural-symbolic computation within the metagraph.
-**OmegaClaw:** The AGI agent built atop the Hyperon stack.
+**Omega:** The AGI agent built atop the Hyperon stack.
 **SENF:** Semantic Elegant Normal Form — canonical representation for language parsed into Atomspace.
 **Weakness prior:** Bias toward simpler, more general programs — see GLOSSARY for quantale formalization.
 **ENF:** Elegant Normal Form — MOSES's canonical program representation to collapse equivalent programs.
@@ -130,13 +130,13 @@ The Action-Ontology supplement clarifies PRIMUS world modeling through Turchin's
 
 **What is TransWeave?** TransWeave is a framework [UNCERTAIN — research stage] for measuring and enabling knowledge transfer between domains. It provides formal bounds on how much performance degrades when a learned capability is applied in a new context.
 
-**What is OmegaClaw?** OmegaClaw is an AGI agent under development that orchestrates the Hyperon stack — MeTTa for cognitive calculus, Atomspace for memory, ECAN/PLN/MOSES/MetaMo for cognition, ASI:Chain for auditable runtime.
+**What is Omega?** Omega is an AGI agent under development that orchestrates the Hyperon stack — MeTTa for cognitive calculus, Atomspace for memory, ECAN/PLN/MOSES/MetaMo for cognition, ASI:Chain for auditable runtime.
 
 **What is SubRep?** SubRep [UNCERTAIN — research stage] is a system for learning subgoals with formal certification. It lets the agent safely decompose complex goals into achievable intermediate steps with verifiable guarantees.
 
 **What is PRIMUS?** PRIMUS is Hyperon's proposed cognitive architecture — a specific configuration of the stack (perception, symbolic manipulation, planning, attention, motivation) believed capable of giving rise to AGI.
 
-**How does OmegaClaw relate to Hyperon?** OmegaClaw is not separate from Hyperon — it is an agent-driven deployment of the Hyperon stack. Where Hyperon describes the platform and components, OmegaClaw describes a specific agent-oriented orchestration of those components.
+**How does Omega relate to Hyperon?** Omega is not separate from Hyperon — it is an agent-driven deployment of the Hyperon stack. Where Hyperon describes the platform and components, Omega describes a specific agent-oriented orchestration of those components.
 
 ---
 

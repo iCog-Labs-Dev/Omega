@@ -7,7 +7,7 @@
 
 ;; No import! of the .py files is needed: the loader puts this folder on
 ;; sys.path, and py-call imports a module on first use. Keeping the plugin free
-;; of (library OmegaClaw-Core ./plugins/...) paths is what lets it live outside
+;; of (library Omega ./plugins/...) paths is what lets it live outside
 ;; the core tree.
 ;;
 ;; The channel module is NOT called telegram.py. The plugin folder is appended
@@ -19,10 +19,10 @@
 (= (pluginTelegramPromptPath)
    (py-call (telegram_channel.prompt_path)))
 
-(= (loadOmegaClawPlugin)
+(= (loadOmegaPlugin)
    (progn
      (log INFO "telegram-plugin" "Registering Telegram communication channel")
-     (let $rc (py-call (telegram_channel.loadOmegaClawPlugin)) ())
+     (let $rc (py-call (telegram_channel.loadOmegaPlugin)) ())
      (add-skill describe-image
                 "See/read an image the user attached. Call when a message shows [image] and you need its contents; optionally pass what to look for (example: describe-image what error is shown)"
                 (image_query))

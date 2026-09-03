@@ -1,6 +1,6 @@
-# omegaclaw-telegram
+# omega-telegram
 
-A Telegram communication channel for OmegaClaw with media support: the agent can
+A Telegram communication channel for Omega with media support: the agent can
 read images, PDFs and voice notes that users attach, generate images, and send
 voice replies when enabled.
 
@@ -42,7 +42,7 @@ media skills are added with `add-skill`, not written into `src/skills.metta`.
 
 **3. Point at your own config if you want to** — `TG_PROFILE_PATH` and
 `TG_POLICY_PATH` override where the plugin reads `telegram_profile.yaml` and
-`policy.md`, resolved by core from the command line, an `OMEGACLAW_`-prefixed
+`policy.md`, resolved by core from the command line, an `OMEGA_`-prefixed
 environment variable, or `config.yaml`. The files shipped here are the defaults;
 mounting over them works too and needs no configuration.
 
@@ -101,7 +101,7 @@ on the path, so `location` in `plugins.yaml` can be any absolute path:
 ```yaml
 - name: telegram
   loader: metta
-  location: "/opt/omegaclaw-telegram"
+  location: "/opt/omega-telegram"
 ```
 
 Verified by loading it from outside the repository with the in-tree copy removed.

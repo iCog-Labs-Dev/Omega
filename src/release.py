@@ -7,7 +7,7 @@ from pathlib import Path
 
 import channels
 from config import config_get_by_key
-from helper import omegaclaw_version, projectRootDirectory
+from helper import omega_version, projectRootDirectory
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -48,7 +48,7 @@ class ReleaseTag:
 
     @classmethod
     def of_build(cls, version=None):
-        version = omegaclaw_version() if version is None else str(version)
+        version = omega_version() if version is None else str(version)
         _, marker, name = version.partition(VERSION_MARKER)
         if not marker:
             return None

@@ -26,9 +26,9 @@ jobs:
         run: |
           owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           tag="production-${{ github.sha }}"
-          echo "image_name=ghcr.io/${owner}/omegaclaw" >> "$GITHUB_OUTPUT"
+          echo "image_name=ghcr.io/${owner}/omega" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "image=ghcr.io/${owner}/omegaclaw:${tag}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${owner}/omega:${tag}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: prep
@@ -65,8 +65,8 @@ jobs:
           envs: IMAGE,GHCR_USER,GHCR_TOKEN,ASI_API_KEY,OPENAI_API_KEY,ANTHROPIC_API_KEY,OPENROUTER_API_KEY,TG_BOT_TOKEN,TG_CHAT_ID,LLM_PROVIDER,LLM_MODEL
           script: |
             set -e
-            mkdir -p /omegaclaw
-            tee /omegaclaw/.env > /dev/null <<EOF
+            mkdir -p /omega
+            tee /omega/.env > /dev/null <<EOF
             ASI_API_KEY=...${ASI_API_KEY: -5}
             OPENAI_API_KEY=...${OPENAI_API_KEY: -5}
             ANTHROPIC_API_KEY=...${ANTHROPIC_API_KEY: -5}
@@ -76,28 +76,28 @@ jobs:
             LLM_PROVIDER=${LLM_PROVIDER}
             LLM_MODEL=${LLM_MODEL}
             EOF
-            chmod 600 /omegaclaw/.env
+            chmod 600 /omega/.env
 
             mkdir -p /Backup/docker/PeTTa
 
             echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
             docker pull "${IMAGE}"
-            docker rm -f omegaclaw 2>/dev/null || true
+            docker rm -f omega 2>/dev/null || true
 
             # The prompt ships inside the plugin at plugins/telegram/prompt.txt and
             # is read from there by default, so it no longer has to be copied out
             # of the image and mounted back. To override it, mount a file and point
             # TG_PROMPT_PATH at it.
             docker run -d \
-              --name omegaclaw \
+              --name omega \
               --restart=always \
-              --env-file /omegaclaw/.env \
+              --env-file /omega/.env \
               -e ASI_API_KEY="${ASI_API_KEY}" \
               -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
               -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
               -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
               -e TG_BOT_TOKEN="${TG_BOT_TOKEN}" \
-              -v /Backup/docker/PeTTa:/PeTTa/repos/OmegaClaw-Core/memory \
+              -v /Backup/docker/PeTTa:/PeTTa/repos/Omega/memory \
               "${IMAGE}" \
               commchannel=telegram \
               TG_CHAT_ID=${TG_CHAT_ID} \

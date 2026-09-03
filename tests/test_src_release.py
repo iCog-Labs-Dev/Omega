@@ -40,7 +40,7 @@ def sent(monkeypatch):
 
 @pytest.fixture
 def released_build(monkeypatch):
-    monkeypatch.setattr(release, "omegaclaw_version",
+    monkeypatch.setattr(release, "omega_version",
                         lambda: "Omega version=prod-2026-07-17")
 
 
@@ -65,15 +65,15 @@ def test_no_tag_when_the_build_is_not_a_release():
 
 
 def test_the_words_before_the_version_do_not_matter():
-    # helper.omegaclaw_version() puts the project name in front of the tag, and
+    # helper.omega_version() puts the project name in front of the tag, and
     # images built before a rename carry the older one, so only the marker counts.
     assert release.ReleaseTag.of_build("Omega version=prod-2026-07-17") == TAG
     assert release.ReleaseTag.of_build("Anything at all version=prod-2026-07-17") == TAG
 
 
 def test_a_named_release_overrides_the_tag_of_the_build(monkeypatch):
-    monkeypatch.setenv("OMEGACLAW_releaseTag", "prod-2026-07-17")
-    monkeypatch.setattr(release, "omegaclaw_version",
+    monkeypatch.setenv("OMEGA_releaseTag", "prod-2026-07-17")
+    monkeypatch.setattr(release, "omega_version",
                         lambda: "Omega version=prod-2026-07-17-45-g1234567")
     assert release.announcing_tag() == TAG
 
@@ -157,7 +157,7 @@ def test_announce_sends_once_and_records_it(marker, sent, released_build, monkey
 
 
 def test_announce_stays_quiet_on_a_build_that_is_not_a_release(marker, sent, monkeypatch):
-    monkeypatch.setattr(release, "omegaclaw_version",
+    monkeypatch.setattr(release, "omega_version",
                         lambda: "Omega version=prod-2026-07-17-45-g1234567")
     monkeypatch.setattr(release, "fetch_release",
                         lambda tag: pytest.fail("asked GitHub about a non-release"))
@@ -237,8 +237,8 @@ def test_fetch_follows_the_configured_repository(monkeypatch):
         seen["url"] = request.full_url
         return _Answer()
 
-    monkeypatch.setenv("OMEGACLAW_releaseApiURL", "https://ghe.example.com/api/v3/")
-    monkeypatch.setenv("OMEGACLAW_releaseRepo", "/someone/elsewhere/")
+    monkeypatch.setenv("OMEGA_releaseApiURL", "https://ghe.example.com/api/v3/")
+    monkeypatch.setenv("OMEGA_releaseRepo", "/someone/elsewhere/")
     monkeypatch.setattr(release.urllib.request, "urlopen", answer)
     monkeypatch.setattr(release.json, "load", lambda response: PAYLOAD)
 

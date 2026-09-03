@@ -166,7 +166,7 @@ This glossary contains terms that appear across multiple KB files. For any term,
 
 **Occasions of experience:** Hyperseed ontology's fundamental ontological primitives — momentary units of awareness at all scales of reality. Canonical home: KB-05.
 
-**OmegaClaw:** The AGI agent built atop the Hyperon stack — dynamic orchestration of MeTTa, Atomspace, cognitive algorithms, and (optionally) ASI:Chain. Canonical home: KB-01.
+**Omega:** The AGI agent built atop the Hyperon stack — dynamic orchestration of MeTTa, Atomspace, cognitive algorithms, and (optionally) ASI:Chain. Canonical home: KB-01.
 
 **Omega Shard:** [UNCERTAIN — draft] AGI frontier research shard on ASI:Chain targeting HLAGI and ASI development. Canonical home: KB-02.
 

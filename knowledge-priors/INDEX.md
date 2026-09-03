@@ -12,7 +12,7 @@
 ## KB-01: Hyperon Technical Stack
 
 **file:** `KB-01-hyperon-technical.md`
-**scope:** Hyperon platform internals — MeTTa language, Atomspace, MORK, DAS, cognitive algorithms (PLN, ECAN, MOSES, MetaMo), PRIMUS architecture, OmegaClaw agent, TransWeave, SubRep.
+**scope:** Hyperon platform internals — MeTTa language, Atomspace, MORK, DAS, cognitive algorithms (PLN, ECAN, MOSES, MetaMo), PRIMUS architecture, Omega agent, TransWeave, SubRep.
 **confidence:** High for documented components. Medium for roadmap items.
 
 **routing_keywords:**
@@ -25,7 +25,7 @@
 - MOSES, GEO-EVO, evolutionary search, program synthesis
 - MetaMo, OpenPsi, MAGUS, motivation, motivational framework
 - PRIMUS, cognitive architecture
-- OmegaClaw, OmegaClaw agent
+- Omega, Omega agent
 - SubRep, subgoal learning
 - TransWeave, knowledge transfer
 - NACE, causal learning, causal explorer
@@ -40,7 +40,7 @@
 - what is Hyperon, how does Hyperon work, Hyperon explained
 - what is MeTTa, what is an Atomspace, how does reasoning work
 
-**see_also:** KB-02 (ASI:Chain deployment), KB-06 (ethical grounding for OmegaClaw), GLOSSARY
+**see_also:** KB-02 (ASI:Chain deployment), KB-06 (ethical grounding for Omega), GLOSSARY
 
 ---
 
@@ -67,7 +67,7 @@
 - layer 1, AI-native blockchain
 - Casanova consensus, Casper CBC
 - how does ASI Chain work, what are ASI Chain shards
-- does OmegaClaw need blockchain, when to use ASI Chain
+- does Omega need blockchain, when to use ASI Chain
 
 **see_also:** KB-01 (Hyperon technical stack), KB-03 (shard economics), GLOSSARY
 
@@ -404,7 +404,7 @@ Use this when a query clearly spans multiple KB files:
 
 | Topic | Primary File | Secondary File |
 |---|---|---|
-| How OmegaClaw works | KB-01 | KB-02, KB-06 |
+| How Omega works | KB-01 | KB-02, KB-06 |
 | MeTTa language | KB-01 | GLOSSARY |
 | ASI:Chain deployment | KB-02 | KB-01 |
 | Shard architecture | KB-02 | KB-03 |

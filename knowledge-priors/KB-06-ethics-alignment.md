@@ -148,7 +148,7 @@ The ontology continues through approximately 25 domains. Additional notable doma
 
 **What does "intelligence as ecological force" mean?** At sufficient capability, an intelligence's decisions do not merely happen within ecosystems — they constitute the conditions under which those ecosystems operate. At this scale, the intelligence bears responsibility not just for its actions but for its existence and presence. The restraint obligation intensifies: model nth-order effects before acting, and treat incompleteness of that model as a reason for further caution.
 
-**How does this connect to Hyperon / OmegaClaw?** MeTTaSoul provides the moral ontology for autonomous moral reasoning in systems like OmegaClaw. MetaMo (→ KB-01) implements the motivational architecture; MeTTaSoul provides the content of what the system should be oriented toward. The Ω factor in intelligence corresponds to what MetaMo's motivational framework is designed to instantiate.
+**How does this connect to Hyperon / Omega?** MeTTaSoul provides the moral ontology for autonomous moral reasoning in systems like Omega. MetaMo (→ KB-01) implements the motivational architecture; MeTTaSoul provides the content of what the system should be oriented toward. The Ω factor in intelligence corresponds to what MetaMo's motivational framework is designed to instantiate.
 
 **What are the limits of the intelligence definition?** The four factors ΔS/C, Φ, and R are measurable. Ω has measurable behavioral indicators but the gap between genuine orientation and sophisticated constraint-following may be irreducibly qualitative. This is the gap between a safe-by-design system and a genuinely beneficial one.
 

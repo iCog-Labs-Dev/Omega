@@ -1,5 +1,5 @@
 # plugins.yaml lists all plugins available to the agent.  Agent reads this file
-# on start and loads all listed plugins by calling `loadOmegaClawPlugin`
+# on start and loads all listed plugins by calling `loadOmegaPlugin`
 # function.
 #
 # Plugin can be implemented as a MeTTa module, a single Python file or
@@ -9,7 +9,7 @@
 # load the plugin
 # - location - optional field, should be specified if plugin is a single Python
 # file; can include `{REPO}` placeholder to designate the root folder of the
-# OmegaClaw source repository.
+# Omega source repository.
 
 - name: irc
   loader: python

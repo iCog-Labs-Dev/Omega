@@ -17,7 +17,7 @@
 
 **BlockDAG structure** allows thousands of non-conflicting AI processes to execute in parallel, breaking the sequential bottleneck of legacy blockchains like Ethereum. This makes the architecture suited to the massively parallel, concurrent workloads of AGI.
 
-**Decentralized deployment is one of three pillars** of the path from Hyperon to beneficial AGI. Decentralization prevents monopolistic control of AGI infrastructure, provides auditability of cognitive state transitions, and enables multi-party execution. ASI:Chain is not mandatory for every Hyperon/OmegaClaw deployment — it can also run on a single machine or private network where decentralization is not required.
+**Decentralized deployment is one of three pillars** of the path from Hyperon to beneficial AGI. Decentralization prevents monopolistic control of AGI infrastructure, provides auditability of cognitive state transitions, and enables multi-party execution. ASI:Chain is not mandatory for every Hyperon/Omega deployment — it can also run on a single machine or private network where decentralization is not required.
 
 **The shard model** extends ASI:Chain with purpose-specialized sub-chains. Each shard optimizes for a different workload. Shards interoperate and can delegate tasks across the ecosystem. All current shard papers are initial drafts [UNCERTAIN].
 
@@ -155,7 +155,7 @@ Multiple consensus mechanisms appear across the ecosystem. Understanding which a
 
 **What is MeTTaCycle?** MeTTaCycle is the AGI-specific execution layer on ASI:Chain. It takes validated instructions from F1R3FLY and runs Hyperon cognitive workloads — managing knowledge synthesis, semantic operations, and reasoning across the network.
 
-**Does OmegaClaw require ASI:Chain?** No. ASI:Chain can run on a single machine, a private network, or the public chain. ASI:Chain deployment is required when auditability, multi-party execution, or decentralized governance is needed — but not for all local or private deployments.
+**Does Omega require ASI:Chain?** No. ASI:Chain can run on a single machine, a private network, or the public chain. ASI:Chain deployment is required when auditability, multi-party execution, or decentralized governance is needed — but not for all local or private deployments.
 
 **What is the Omega Shard?** [UNCERTAIN — initial draft] The Omega Shard is a specialized section of ASI:Chain reserved for the most advanced AGI research. It runs both fast real-time consensus (for urgent queries) and slow deep-compute background processing (for autonomous research and self-improvement experiments). It targets development of human-level AGI.
 

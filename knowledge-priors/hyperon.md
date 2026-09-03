@@ -19,7 +19,7 @@ Several frontier components named below are at different levels of maturity. Not
 7. [Self-Modification, Safety, and Governance](#7-self-modification-safety-and-governance)
 8. [Application Domains and Beneficial Grounding](#8-application-domains-and-beneficial-grounding)
 9. [Implementation Status and Near-Term Roadmap](#9-implementation-status-and-near-term-roadmap)
-10. [OmegaClaw Agent Reference Profile](#10-omegaclaw-agent-reference-profile)
+10. [Omega Agent Reference Profile](#10-omega-agent-reference-profile)
 11. [Source Basis](#11-source-basis)
 
 ---
@@ -50,16 +50,16 @@ The index is organized into the following key sections:
 - **Hyperon AI Algorithms**: Here we describe the core cognitive algorithms authored in MeTTa and executed on the Hyperon substrate. These algorithms represent the functional “modules” of intelligence: PLN for reasoning under uncertainty, ECAN for managing limited computational resources, MOSES for creative problem-solving and evolutionary methods, and related systems that deepen motivation, transfer, compression, and causal learning.
 - **Cognitive Architecture & Research**: This section provides an overview of the PRIMUS cognitive architecture, a carefully considered configuration of the layers and components outlined above that is viewed as likely to give rise to artificial general intelligence.
 
-### 1.2 OmegaClaw Agent in Context
+### 1.2 Omega Agent in Context
 
-For present purposes, the **OmegaClaw Agent** is best understood as an agent evolving toward AGI by making use of components and infrastructure from the Hyperon technology stack:
+For present purposes, the **Omega Agent** is best understood as an agent evolving toward AGI by making use of components and infrastructure from the Hyperon technology stack:
 
 - MeTTa serves as a useful cognitive calculus and orchestration language.
 - Atomspace, implemented through DAS and/or MORK, provides shared cognitive memory and transformation substrate.
 - ECAN, PLN, MOSES/GEO-EVO, MetaMo, SubRep, semantic parsing, and related subsystems provide cognitive functionality.
 - ASI:Chain / F1R3FLY / MeTTaCycle will provide an auditable decentralized runtime where local, private-network, or public-network deployment semantics are needed.
 
-This reference therefore treats OmegaClaw not as a separate theory from Hyperon, but as an agent-driven dynamic orchestration of the Hyperon stack.
+This reference therefore treats Omega not as a separate theory from Hyperon, but as an agent-driven dynamic orchestration of the Hyperon stack.
 
 ---
 
@@ -156,9 +156,9 @@ MeTTaTron is the F1R3FLY-native MeTTa compiler, providing a path from MeTTa into
 
 Where Hyperon Experimental functions as the reference implementation and PeTTa emphasizes high-performance symbolic execution, MeTTaTron is best understood as a compiler-oriented bridge between MeTTa source programs and the F1R3FLY-side execution model. This makes it especially relevant wherever MeTTa code must interoperate with MeTTa-IL, Rholang-adjacent infrastructure, or ASI:Chain-facing runtime components.
 
-### 2.4 Relevance to OmegaClaw Agent
+### 2.4 Relevance to Omega Agent
 
-For a OmegaClaw agent, MeTTa is not merely a convenience language. It is the medium in which symbolic control, orchestration, reflective rewriting, and cross-component coordination become uniform. In practice, OmegaClaw should be read as inheriting MeTTa’s role as shared cognitive calculus, with high-level agent logic remaining MeTTa-facing even when lower-level performance paths are delegated to PeTTa/MeTTaTron, MM2, MORK, or ASI:Chain-aligned execution routes.
+For a Omega agent, MeTTa is not merely a convenience language. It is the medium in which symbolic control, orchestration, reflective rewriting, and cross-component coordination become uniform. In practice, Omega should be read as inheriting MeTTa’s role as shared cognitive calculus, with high-level agent logic remaining MeTTa-facing even when lower-level performance paths are delegated to PeTTa/MeTTaTron, MM2, MORK, or ASI:Chain-aligned execution routes.
 
 ---
 
@@ -209,9 +209,9 @@ It receives precise, validated instructions via F1R3FLY’s MeTTa-IL mechanism, 
 
 MeTTaCycle also governs the dynamic evolution of Atomspaces — the fundamental structures of knowledge and meaning in the Hyperon ecosystem. Transcending the rigid arithmetic of financial ledgers, it orchestrates the fluid topology of thought, enabling the network to synthesize, merge, and refine semantic concepts. It uses ChromaDB to facilitate embeddings and semantic operations as well as PeTTa for reasoning and versatile cognitive calculi, contributing to the claim that ASI:Chain is an AGI inference-native blockchain.
 
-### 3.3 Runtime Relevance to OmegaClaw Agent
+### 3.3 Runtime Relevance to Omega Agent
 
-For the OmegaClaw agent, ASI:Chain is not mandatory in every deployment; the index is explicit that the runtime can operate on a single machine or a private network of machines. But where auditability, transactional cognition, multi-party execution, or decentralized governance matter, ASI:Chain provides the execution semantics by which cognitive state transitions can be recorded, validated, and reasoned over.
+For the Omega agent, ASI:Chain is not mandatory in every deployment; the index is explicit that the runtime can operate on a single machine or a private network of machines. But where auditability, transactional cognition, multi-party execution, or decentralized governance matter, ASI:Chain provides the execution semantics by which cognitive state transitions can be recorded, validated, and reasoned over.
 
 ---
 
@@ -229,7 +229,7 @@ The Atomspace eliminates these barriers by providing a universal substrate where
 - **Typed metagraph**: A rich type system supports diverse cognitive representations while maintaining consistency.
 - **Unified operations**: Pattern matching, unification, and rewriting work uniformly across all atom types, whether symbolic or neural.
 
-The Atomspace is fundamental for the OmegaClaw agent as a shared cognitive medium in which memory, code, motives, belief states, and self-modifying procedures become queryable and transformable.
+The Atomspace is fundamental for the Omega agent as a shared cognitive medium in which memory, code, motives, belief states, and self-modifying procedures become queryable and transformable.
 
 ### 4.2 DAS (Distributed AtomSpace)
 
@@ -320,9 +320,9 @@ The index lists the following MORK roadmap directions:
 - WASM and edge deployment optimizations
 - Community and third-party package ecosystem
 
-### 4.7 Relevance to OmegaClaw Agent
+### 4.7 Relevance to Omega Agent
 
-For OmegaClaw, DAS and MORK should be read as alternative or complementary memory/execution substrates depending on the deployment profile: DAS where large mutable distributed hypergraphs and attention-brokered persistence dominate, MORK where maximal local performance, concurrency, and direct cognitive-kernel execution are paramount. The deeper claim preserved across both documents is that code and data remain interchangeable inside a queryable metagraph, so that the agent’s own logic becomes inspectable and improvable.
+For Omega, DAS and MORK should be read as alternative or complementary memory/execution substrates depending on the deployment profile: DAS where large mutable distributed hypergraphs and attention-brokered persistence dominate, MORK where maximal local performance, concurrency, and direct cognitive-kernel execution are paramount. The deeper claim preserved across both documents is that code and data remain interchangeable inside a queryable metagraph, so that the agent’s own logic becomes inspectable and improvable.
 
 ---
 
@@ -544,9 +544,9 @@ This allows:
 - neural systems to use compression metrics to guide attention and pruning;
 - the broader stack to identify which patterns, tokens, heads, features, or subgraphs carry the most information-theoretic value.
 
-### 5.13 Relevance to OmegaClaw Agent
+### 5.13 Relevance to Omega Agent
 
-Taken together, these algorithms imply that the OmegaClaw agent is not restricted to being organized around a single monolithic planner. It can organize itself around recurrent interaction among attention, motivation, reasoning, transfer, causal learning, compression, and program synthesis over shared memory.
+Taken together, these algorithms imply that the Omega agent is not restricted to being organized around a single monolithic planner. It can organize itself around recurrent interaction among attention, motivation, reasoning, transfer, causal learning, compression, and program synthesis over shared memory.
 
 ---
 
@@ -702,9 +702,9 @@ The whitepaper frames governance as inseparable from safety. Every modification,
 
 The economic layer is intended to create positive incentives for safety: communities may require publication of safety certificates before granting compute resources; validators may simulate proposed modifications against public twins; markets can reward transparent safe improvements and penalize opaque risky ones.
 
-### 7.4 Relevance to OmegaClaw Agent
+### 7.4 Relevance to Omega Agent
 
-For the OmegaClaw agent, this section establishes the proper reading of reflective capability. Reflection is not merely “the agent can rewrite itself.” It is supposed to occur under typed, auditable, staged, and certifiable conditions. That distinction matters.
+For the Omega agent, this section establishes the proper reading of reflective capability. Reflection is not merely “the agent can rewrite itself.” It is supposed to occur under typed, auditable, staged, and certifiable conditions. That distinction matters.
 
 ---
 
@@ -730,9 +730,9 @@ Biology is described as fundamentally graph-structured — genes, proteins, path
 
 Hyperon is also aimed not only at theorem proving but at automated conjecturing: proposing new definitions, lemmas, and theorems worth proving. Pattern mining over proofs, geodesic search over candidate statements, and a proof kernel implemented directly on MORK are all part of this framing.
 
-### 8.5 Why This Matters for OmegaClaw
+### 8.5 Why This Matters for Omega
 
-For the OmegaClaw agent, these domains matter because they shape what the agent is for. They promise cognition in settings where evidence, testability, reproducibility, social appropriateness, and cumulative learning are not optional embellishments but native constraints.
+For the Omega agent, these domains matter because they shape what the agent is for. They promise cognition in settings where evidence, testability, reproducibility, social appropriateness, and cumulative learning are not optional embellishments but native constraints.
 
 ### 8.6 Technical Advantages Over Pure Scaling
 
@@ -791,6 +791,6 @@ Concrete targets named in the whitepaper include:
 
 ### Closing notes
 
-- Claw-specific wording is future-facing representing our intentions for the OmegaClaw roadmap.
+- Claw-specific wording is future-facing representing our intentions for the Omega roadmap.
 - Do not attempt to flatten research-stage material into production claims.
 - Not every named component in this profile is equally mature. Some are current operating parts of the stack; others are near-term engineering targets; others remain active research directions. The reference value of this document lies in preserving the intended architecture and careful relationships among components without overstating uniform implementation maturity.

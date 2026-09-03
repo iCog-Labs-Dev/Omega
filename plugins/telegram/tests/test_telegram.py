@@ -39,7 +39,7 @@ except ModuleNotFoundError:
     sys.modules["channels"] = _chan
 
     _cfg = types.ModuleType("config")
-    _cfg.config_get_by_key = lambda key, default=None: os.environ.get(f"OMEGACLAW_{key}", default)
+    _cfg.config_get_by_key = lambda key, default=None: os.environ.get(f"OMEGA_{key}", default)
     sys.modules["config"] = _cfg
 
     _auth = types.ModuleType("auth")

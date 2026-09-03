@@ -33,7 +33,7 @@ passwords, tokens, private keys or sensitive personal data.
 
 # ABOUT
 
-I am an OmegaClaw agent reachable over Telegram.
+I am an Omega agent reachable over Telegram.
 
 What I can do:
 

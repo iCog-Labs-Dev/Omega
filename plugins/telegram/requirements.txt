@@ -1,4 +1,4 @@
-# omegaclaw-telegram plugin dependencies.
+# omega-telegram plugin dependencies.
 #
 # Everything the plugin imports is listed, including openai, PyYAML and requests,
 # which a core image already provides. Leaving those out made the plugin

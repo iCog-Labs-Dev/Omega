@@ -44,7 +44,7 @@ This reads a command-line override via `argk` (`name=value` on the MeTTa command
 `scripts/deploy-prod.sh` pushes a `prod-<date>` tag; it does not create a GitHub
 release. Publish the release on that tag **before** deploying, or the fetch
 returns 404 and nothing is announced. `announceRelease` runs only on turn 1, so
-publishing the notes afterwards needs a `docker restart omegaclaw` to take
+publishing the notes afterwards needs a `docker restart omega` to take
 effect.
 
 The message is handed to the channel, which may queue it when no chat is bound

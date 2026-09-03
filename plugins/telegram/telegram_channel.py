@@ -164,7 +164,7 @@ class _TelegramChannel:
     def __init__(self, config_path=None):
         # The files shipped here are defaults. A deployment points at its own
         # with TG_PROFILE_PATH / TG_POLICY_PATH, which core resolves from the
-        # command line, an OMEGACLAW_-prefixed environment variable, or
+        # command line, an OMEGA_-prefixed environment variable, or
         # config.yaml - the same way it resolves TG_CHAT_ID. Mounting over the
         # shipped paths still works and needs no configuration at all.
         self.config_path = config_get_by_key("TG_PROFILE_PATH", _plugin_file("telegram_profile.yaml"))
@@ -1376,7 +1376,7 @@ class TelegramChannel(channels.CommChannel):
         return tool_name == "websearch" and is_search_disabled()
 
 
-def loadOmegaClawPlugin():
+def loadOmegaPlugin():
     import media_handler
     # Hand media_handler this module's live channel so generate-image and
     # speak can send their output; it cannot find them by importing us by name.

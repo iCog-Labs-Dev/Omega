@@ -93,7 +93,7 @@ The ASI Alliance is not a single company — it is a coalition of organizations 
 
 **What is the ASI token used for?** [CHECK LIVE for current utility details] As of knowledge cutoff: ASI is the utility and governance token of the ecosystem. It is used for paying for AI services, staking in network validation, participating in governance, and paying for compute on ASI:Cloud. Check https://superintelligence.io for current utility details.
 
-**What is the ASI Alliance's main product?** The alliance produces several joint products: ASI:One (unified AI interface), ASI:Create (AI agent launchpad), ASI:Cloud (decentralized GPU compute), and ASI:Chain (the blockchain substrate). Individual members also produce their own products — Agentverse and uAgents from Fetch.ai, Hyperon and OmegaClaw from SingularityNET.
+**What is the ASI Alliance's main product?** The alliance produces several joint products: ASI:One (unified AI interface), ASI:Create (AI agent launchpad), ASI:Cloud (decentralized GPU compute), and ASI:Chain (the blockchain substrate). Individual members also produce their own products — Agentverse and uAgents from Fetch.ai, Hyperon and Omega from SingularityNET.
 
 **How is the ASI Alliance different from OpenAI or DeepMind?** The alliance is explicitly decentralized and open-source-oriented, whereas OpenAI and DeepMind are centralized corporations or subsidiaries. The alliance's blockchain infrastructure (ASI:Chain) and token model are designed to prevent any single entity from monopolizing the path to superintelligence.
 

@@ -82,7 +82,7 @@ def vision_chat(image_parts, prompt, max_tokens=1024):
     return caption
 
 
-def loadOmegaClawPlugin():
+def loadOmegaPlugin():
     """Plugin entry point. Importing this module puts `plugins/telegram` on sys.path
     and imports media_handler, so `py-call (media_handler.describe_image ...)` in
     skills.metta resolves. describe_image calls vision_chat directly, so no

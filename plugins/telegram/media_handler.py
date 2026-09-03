@@ -271,7 +271,7 @@ _live_channel = None
 
 def register_channel(send_photo, send_voice, send_chat_action, channel):
     """Give this module a direct handle on the LIVE channel, called by the
-    channel plugin's loadOmegaClawPlugin.
+    channel plugin's loadOmegaPlugin.
 
     Registration is explicit rather than looked up by module name because the
     plugin loader execs plugin modules without adding them to sys.modules, so
