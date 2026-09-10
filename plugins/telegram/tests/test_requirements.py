@@ -20,6 +20,7 @@ _DISTRIBUTION = {
     "PIL": "Pillow",
     "yaml": "PyYAML",
     "telegramify_markdown": "telegramify-markdown",
+    "edge_tts": "edge-tts",
 }
 
 # Imported on purpose without being declared. See requirements.txt for why.
