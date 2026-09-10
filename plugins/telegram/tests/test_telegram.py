@@ -582,10 +582,13 @@ def test_policy_and_profile_paths_are_configurable():
     finally:
         restore()
 
-    # Default: the files shipped next to the module.
+    # Default: the files shipped next to the module. Asserted against the
+    # module's own directory rather than a fixed path, because the plugin is
+    # meant to work wherever it is installed.
+    beside_module = os.path.dirname(os.path.abspath(tm.__file__))
     ch = tm._TelegramChannel()
-    assert ch.policy_path.endswith("plugins/telegram/policy.md"), ch.policy_path
-    assert ch.config_path.endswith("plugins/telegram/telegram_profile.yaml"), ch.config_path
+    assert ch.policy_path == os.path.join(beside_module, "policy.md"), ch.policy_path
+    assert ch.config_path == os.path.join(beside_module, "telegram_profile.yaml"), ch.config_path
 
 
 def test_policy_sections_describe_what_the_bot_actually_does():
