@@ -285,6 +285,28 @@ elif [ "$DO_BUILD" = 1 ]; then
     run "mkdir -p '$CACHE_DIR'"
     run "cp -a '$PLUGIN_DIR' '$CTX/$PLUGIN_NAME'"
     if [ "$DRY_RUN" = 0 ]; then
+        # The manifest edit is a file rather than a heredoc inside RUN: a
+        # Dockerfile RUN ends at its last continuation, so an embedded heredoc
+        # makes the next line a Dockerfile instruction and the build dies on
+        # "unknown instruction". BuildKit has a heredoc form for this, but
+        # requiring a syntax directive on someone else's base image is worse
+        # than copying in a script.
+        cat > "$CTX/register-plugin.py" <<'PATCH'
+"""Point core's manifest at this plugin, dropping any entry with the same name.
+
+Runs inside the image during the overlay build. Core aborts when two entries
+share a name, so the existing claim is replaced rather than added to.
+"""
+import re
+import sys
+
+path, name = sys.argv[1], sys.argv[2]
+text = open(path).read()
+text = re.sub(r"^- name: %s\n(?:  .*\n)*" % re.escape(name), "", text, flags=re.M)
+entry = '- name: %s\n  loader: metta\n  location: "{REPO}/plugins/%s"\n' % (name, name)
+open(path, "w").write(text.rstrip("\n") + "\n\n" + entry)
+print("registered %s at {REPO}/plugins/%s" % (name, name))
+PATCH
         cat > "$CTX/Dockerfile" <<OVERLAY
 ARG BASE_IMAGE=$BASE_IMAGE
 FROM \${BASE_IMAGE}
@@ -292,20 +314,15 @@ USER root
 ARG OMEGA_ROOT=$omega_dir
 ARG PLUGIN=$PLUGIN_NAME
 COPY $PLUGIN_NAME \${OMEGA_ROOT}/plugins/\${PLUGIN}
+COPY register-plugin.py /tmp/register-plugin.py
 RUN rm -f \${OMEGA_ROOT}/channels/\${PLUGIN}.py \${OMEGA_ROOT}/memory/tg_prompt.txt \\
- && (command -v pip3 >/dev/null || (apt-get update \\
+ && (command -v pip3 >/dev/null 2>&1 || (apt-get update \\
       && apt-get install -y --no-install-recommends python3-pip \\
       && rm -rf /var/lib/apt/lists/*)) \\
  && python3 -m pip install --no-cache-dir --break-system-packages \\
       -r \${OMEGA_ROOT}/plugins/\${PLUGIN}/requirements.txt \\
- && python3 - \${OMEGA_ROOT}/config/plugins.yaml \${PLUGIN} <<'PY'
-import re, sys
-path, name = sys.argv[1], sys.argv[2]
-text = open(path).read()
-text = re.sub(r"^- name: %s\n(?:  .*\n)*" % re.escape(name), "", text, flags=re.M)
-text = text.rstrip("\n") + "\n\n- name: %s\n  loader: metta\n  location: \"{REPO}/plugins/%s\"\n" % (name, name)
-open(path, "w").write(text)
-PY
+ && python3 /tmp/register-plugin.py \${OMEGA_ROOT}/config/plugins.yaml \${PLUGIN} \\
+ && rm -f /tmp/register-plugin.py
 OVERLAY
     fi
     say "building $IMAGE on top of $BASE_IMAGE"
@@ -352,16 +369,20 @@ common=(
     --tmpfs /var/tmp:size=64m,mode=1777
 )
 
+# Everything but --name, for the throwaway containers.
+transient=("${common[@]:2}")
+
 case "$MODE" in
     test)
-        # The plugin's own suite, against the real core in the image.
+        # The plugin's own suite, against the real core in the image. Named
+        # apart from the bot so a --test run does not collide with one running.
         say "running the plugin's tests inside the container"
-        run "docker run --rm ${common[*]} --entrypoint python3 ${DOCKER_ARGS[*]:-} '$IMAGE' \
+        run "docker run --rm --name '$CONTAINER-test' ${transient[*]} --entrypoint python3 ${DOCKER_ARGS[*]:-} '$IMAGE' \
              -m pytest '$OMEGA_ROOT/plugins/$PLUGIN_NAME/tests' -q"
         ;;
     shell)
         say "opening a shell in the container"
-        run "docker run --rm -it ${common[*]} --entrypoint sh ${DOCKER_ARGS[*]:-} '$IMAGE'"
+        run "docker run --rm -it --name '$CONTAINER-shell' ${transient[*]} --entrypoint sh ${DOCKER_ARGS[*]:-} '$IMAGE'"
         ;;
     bot)
         args=("commchannel=$COMMCHANNEL")
