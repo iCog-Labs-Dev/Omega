@@ -1,0 +1,377 @@
+#!/usr/bin/env bash
+# Build and run an Omega core with this plugin plugged into it.
+#
+# The plugin is not usable on its own: it needs a core to load it, and core needs
+# four things changed before it will. This script makes those changes to a copy of
+# core rather than to core itself, so the plugin stays droppable and core stays
+# untouched. Point it at whichever core you want and it works out the rest:
+#
+#   ./run-plugin                                   # the fork's telegram branch, built from source
+#   ./run-plugin --base-image singularitynet/omega:v0.1.19   # published image, no core build
+#   ./run-plugin --core-remote https://github.com/singnet/Omega.git --core-ref main
+#   ./run-plugin --test                            # the plugin's own suite, inside the container
+#   ./run-plugin --dry-run                         # print the plan and stop
+#
+# What it changes in the copy of core, only when core needs it:
+#   - registers the plugin in config/plugins.yaml, dropping any entry that
+#     already claims its name (core aborts on a duplicate plugin name)
+#   - deletes channels/<name>.py, which would register the same channel id
+#   - installs each plugin's requirements.txt at build time
+#   - splices <plugin>/proxy.conf into the nginx server block, if the plugin
+#     ships one, so it can reach an upstream core does not already route
+#   - deletes memory/tg_prompt.txt, whose prompt section duplicates the
+#     plugin's own and is injected by core's run loop regardless of registration
+#
+# Paths inside the image are read from the image itself. They have changed once
+# already (/PeTTa/repos/OmegaClaw-Core became /PeTTa/repos/Omega) and hardcoding
+# them is what broke the previous launcher against newer core.
+set -euo pipefail
+
+CORE_REMOTE="https://github.com/iCog-Labs-Dev/mettaclaw.git"
+CORE_REF="telegram"
+CORE_DIR=""
+BASE_IMAGE=""
+PLUGIN_DIR=""
+PLUGIN_NAME=""
+ENV_FILE=".env"
+IMAGE=""
+CONTAINER=""
+MEMORY_DIR=""
+COMMCHANNEL=""
+EXTRA_ARGS=()
+DOCKER_ARGS=()
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omega-plugin-run"
+DO_BUILD=1
+DO_RUN=1
+MODE="bot"
+DRY_RUN=0
+REPLACE=0
+PREPARE_ONLY=0
+
+die() { printf 'run-plugin: %s\n' "$*" >&2; exit 1; }
+say() { printf '==> %s\n' "$*"; }
+run() { if [ "$DRY_RUN" = 1 ]; then printf '    + %s\n' "$*"; else eval "$@"; fi; }
+
+usage() {
+    sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; $d'
+    cat <<'USAGE'
+Options:
+  --core-remote URL     git remote to build core from (default: iCog-Labs-Dev/mettaclaw)
+  --core-ref REF        branch, tag or sha (default: telegram)
+  --core-dir PATH       use an existing core checkout instead of cloning
+  --base-image IMAGE    layer onto a published core image; skips the core build
+  --plugin-dir PATH     plugin source (default: ./telegram or ./plugins/telegram)
+  --plugin-name NAME    registered name and install directory (default: the plugin dir's name)
+  --env-file PATH       secrets and settings passed to the container (default: ./.env)
+  --image NAME          tag to build (default: omega-<name>:<core-ref>)
+  --container NAME      container name (default: omega-<name>)
+  --memory-dir PATH     host directory for the agent's memory
+  --commchannel NAME    channel to select at run time (default: the plugin name)
+  --arg K=V             extra run.metta argument, repeatable
+  --replace             remove an existing container of the same name first
+  --no-build            reuse the existing image
+  --no-run              build and stop
+  --test                run the plugin's test suite in the container instead of the bot
+  --shell               open a shell in the container instead of the bot
+  --prepare-only        assemble the patched build context and stop, without docker
+  --dry-run             print every step without doing it
+  -h, --help            this
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --core-remote) CORE_REMOTE="$2"; shift 2 ;;
+        --core-ref)    CORE_REF="$2"; shift 2 ;;
+        --core-dir)    CORE_DIR="$2"; shift 2 ;;
+        --base-image)  BASE_IMAGE="$2"; shift 2 ;;
+        --plugin-dir)  PLUGIN_DIR="$2"; shift 2 ;;
+        --plugin-name) PLUGIN_NAME="$2"; shift 2 ;;
+        --env-file)    ENV_FILE="$2"; shift 2 ;;
+        --image)       IMAGE="$2"; shift 2 ;;
+        --container)   CONTAINER="$2"; shift 2 ;;
+        --memory-dir)  MEMORY_DIR="$2"; shift 2 ;;
+        --commchannel) COMMCHANNEL="$2"; shift 2 ;;
+        --arg)         EXTRA_ARGS+=("$2"); shift 2 ;;
+        --replace)     REPLACE=1; shift ;;
+        --no-build)    DO_BUILD=0; shift ;;
+        --no-run)      DO_RUN=0; shift ;;
+        --test)        MODE="test"; shift ;;
+        --shell)       MODE="shell"; shift ;;
+        --dry-run)     DRY_RUN=1; shift ;;
+        --prepare-only) PREPARE_ONLY=1; DO_RUN=0; shift ;;
+        -h|--help)     usage; exit 0 ;;
+        --)            shift; DOCKER_ARGS=("$@"); break ;;
+        *)             die "unknown option $1 (try --help)" ;;
+    esac
+done
+
+# ---- resolve the plugin ----------------------------------------------------
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -z "$PLUGIN_DIR" ]; then
+    for candidate in "$here/telegram" "$here/plugins/telegram"; do
+        [ -d "$candidate" ] && { PLUGIN_DIR="$candidate"; break; }
+    done
+fi
+[ -n "$PLUGIN_DIR" ] || die "no plugin found; pass --plugin-dir"
+PLUGIN_DIR="$(cd "$PLUGIN_DIR" && pwd)"
+[ -n "$PLUGIN_NAME" ] || PLUGIN_NAME="$(basename "$PLUGIN_DIR")"
+
+# A plugin core can load is a directory holding <name>.metta or a Python module
+# with loadOmegaPlugin. Checking here turns a silent no-op at startup into an
+# error naming the directory.
+if [ ! -f "$PLUGIN_DIR/$PLUGIN_NAME.metta" ] && ! grep -rqs 'def loadOmegaPlugin' "$PLUGIN_DIR"; then
+    die "$PLUGIN_DIR has neither $PLUGIN_NAME.metta nor a loadOmegaPlugin function"
+fi
+
+[ -f "$ENV_FILE" ] || die "no env file at $ENV_FILE (pass --env-file)"
+ENV_FILE="$(cd "$(dirname "$ENV_FILE")" && pwd)/$(basename "$ENV_FILE")"
+
+: "${COMMCHANNEL:=$PLUGIN_NAME}"
+: "${CONTAINER:=omega-$PLUGIN_NAME}"
+: "${MEMORY_DIR:=${XDG_DATA_HOME:-$HOME/.local/share}/omega-$PLUGIN_NAME/memory}"
+if [ -z "$IMAGE" ]; then
+    if [ -n "$BASE_IMAGE" ]; then
+        IMAGE="omega-$PLUGIN_NAME:$(printf '%s' "$BASE_IMAGE" | tr '/:' '--')"
+    else
+        IMAGE="omega-$PLUGIN_NAME:$(printf '%s' "$CORE_REF" | tr '/' '-')"
+    fi
+fi
+
+say "plugin      $PLUGIN_DIR  (registers as '$PLUGIN_NAME')"
+say "env file    $ENV_FILE"
+say "image       $IMAGE"
+say "container   $CONTAINER"
+say "memory      $MEMORY_DIR"
+
+if [ "$PREPARE_ONLY" = 0 ]; then
+    command -v docker >/dev/null || die "docker is not installed"
+    if [ "$DRY_RUN" = 0 ] && ! docker info >/dev/null 2>&1; then
+        die "the docker daemon is not reachable; start it and try again"
+    fi
+fi
+
+# ---- build ----------------------------------------------------------------
+
+if [ "$DO_BUILD" = 1 ] && [ -z "$BASE_IMAGE" ]; then
+    # Building core from source. Assemble a context: core at the chosen ref, with
+    # the plugin overlaid and the four core-side changes applied to the copy.
+    if [ -n "$CORE_DIR" ]; then
+        CORE_DIR="$(cd "$CORE_DIR" && pwd)"
+        say "core        $CORE_DIR (existing checkout)"
+    else
+        CORE_DIR="$CACHE_DIR/core"
+        say "core        $CORE_REMOTE @ $CORE_REF"
+        if [ -d "$CORE_DIR/.git" ]; then
+            run "git -C '$CORE_DIR' remote set-url origin '$CORE_REMOTE'"
+            run "git -C '$CORE_DIR' fetch --quiet origin '$CORE_REF'"
+        else
+            run "mkdir -p '$CACHE_DIR'"
+            run "git clone --quiet '$CORE_REMOTE' '$CORE_DIR'"
+            run "git -C '$CORE_DIR' fetch --quiet origin '$CORE_REF'"
+        fi
+        run "git -C '$CORE_DIR' checkout --quiet --detach FETCH_HEAD"
+    fi
+
+    CTX="$CACHE_DIR/context"
+    say "context     $CTX"
+    run "mkdir -p '$CACHE_DIR'"
+    run "rm -rf '$CTX'"
+    # .git goes too: core's Dockerfile bakes its version from it.
+    run "cp -a '$CORE_DIR' '$CTX'"
+    run "rm -rf '$CTX/plugins/$PLUGIN_NAME'"
+    run "mkdir -p '$CTX/plugins'"
+    run "cp -a '$PLUGIN_DIR' '$CTX/plugins/$PLUGIN_NAME'"
+
+    if [ "$DRY_RUN" = 0 ]; then
+        manifest="$CTX/config/plugins.yaml"
+        [ -f "$manifest" ] || die "$CTX has no config/plugins.yaml; is this an Omega core?"
+
+        # Core aborts if two entries share a name, so an existing claim on this
+        # name is dropped rather than added to.
+        python3 - "$manifest" "$PLUGIN_NAME" <<'PY'
+import re, sys
+path, name = sys.argv[1], sys.argv[2]
+text = open(path).read()
+pattern = re.compile(r"^- name: %s\n(?:  .*\n)*" % re.escape(name), re.M)
+existing = pattern.search(text)
+if existing:
+    print(f"    - dropping core's own '{name}' entry")
+    text = pattern.sub("", text)
+entry = f'- name: {name}\n  loader: metta\n  location: "{{REPO}}/plugins/{name}"\n'
+text = text.rstrip("\n") + "\n\n" + entry
+open(path, "w").write(text)
+print(f"    - registered {name} at {{REPO}}/plugins/{name}")
+PY
+
+        if [ -f "$CTX/channels/$PLUGIN_NAME.py" ]; then
+            say "    - removing channels/$PLUGIN_NAME.py, which claims the same channel id"
+            rm -f "$CTX/channels/$PLUGIN_NAME.py"
+        fi
+
+        if ! grep -q 'plugins/\*/requirements.txt' "$CTX/Dockerfile"; then
+            say "    - teaching the Dockerfile to install plugin requirements"
+            python3 - "$CTX/Dockerfile" <<'PY'
+import re, sys
+path = sys.argv[1]
+text = open(path).read()
+block = (
+    "\n# Install each plugin's own dependencies, so enabling a plugin is the only\n"
+    "# step needed to run it. Added by run-plugin; core does not do this yet.\n"
+    "COPY ./plugins /tmp/plugins\n"
+    "RUN for req in /tmp/plugins/*/requirements.txt; do \\\n"
+    "      if [ -f \"$req\" ]; then \\\n"
+    "        python3 -m pip install --no-cache-dir --break-system-packages -r \"$req\"; \\\n"
+    "      fi; \\\n"
+    "    done \\\n"
+    " && rm -rf /tmp/plugins\n"
+)
+# After the last pip install of the builder stage, before the runtime stage.
+marker = re.search(r"^FROM .* AS (?!builder)", text, re.M)
+at = marker.start() if marker else len(text)
+open(path, "w").write(text[:at] + block + "\n" + text[at:])
+PY
+        fi
+
+        template="$CTX/proxy/nginx.conf.template"
+        if [ -f "$PLUGIN_DIR/proxy.conf" ] && [ -f "$template" ]; then
+            if ! grep -q "$PLUGIN_NAME-file/" "$template"; then
+                say "    - splicing $PLUGIN_NAME/proxy.conf into the nginx server block"
+                python3 - "$template" "$PLUGIN_DIR/proxy.conf" <<'PY'
+import sys
+template, fragment = sys.argv[1], sys.argv[2]
+text = open(template).read()
+at = text.rfind("}")            # closing brace of server { }
+at = text.rfind("}", 0, at)     # the one before it, i.e. inside server
+open(template, "w").write(text[:at] + "\n" + open(fragment).read() + "\n" + text[at:])
+PY
+            fi
+        elif [ -f "$template" ] && ! grep -q "$PLUGIN_NAME-file/" "$template"; then
+            say "    ! no /$PLUGIN_NAME-file/ route in core's nginx template."
+            say "      Media downloads through the proxy will 404. Ship a proxy.conf"
+            say "      in the plugin directory and this script will splice it in."
+        fi
+
+        if [ -f "$CTX/memory/tg_prompt.txt" ]; then
+            say "    - removing core's memory/tg_prompt.txt, which duplicates the plugin's prompt"
+            rm -f "$CTX/memory/tg_prompt.txt"
+        fi
+    fi
+
+    if [ "$PREPARE_ONLY" = 1 ]; then
+        say "context ready at $CTX; not building"
+        exit 0
+    fi
+    say "building $IMAGE from source (cold builds take about ten minutes)"
+    run "docker build -t '$IMAGE' '$CTX'"
+
+elif [ "$DO_BUILD" = 1 ]; then
+    # Layering onto a published image. The plugin and the manifest change inside
+    # the image, so nothing needs core's build context.
+    say "core        $BASE_IMAGE (published image)"
+    if [ "$DRY_RUN" = 0 ]; then
+        docker image inspect "$BASE_IMAGE" >/dev/null 2>&1 || run "docker pull '$BASE_IMAGE'"
+    fi
+    omega_dir="$(docker image inspect "$BASE_IMAGE" \
+        --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+        | sed -n 's/^OMEGA\(CLAW\)\?_DIR=//p' | head -1 || true)"
+    : "${omega_dir:=/PeTTa/repos/Omega}"
+    say "in-image root $omega_dir (read from the image)"
+
+    CTX="$CACHE_DIR/overlay"
+    run "rm -rf '$CTX'"
+    run "mkdir -p '$CTX'"
+    run "mkdir -p '$CACHE_DIR'"
+    run "cp -a '$PLUGIN_DIR' '$CTX/$PLUGIN_NAME'"
+    if [ "$DRY_RUN" = 0 ]; then
+        cat > "$CTX/Dockerfile" <<OVERLAY
+ARG BASE_IMAGE=$BASE_IMAGE
+FROM \${BASE_IMAGE}
+USER root
+ARG OMEGA_ROOT=$omega_dir
+ARG PLUGIN=$PLUGIN_NAME
+COPY $PLUGIN_NAME \${OMEGA_ROOT}/plugins/\${PLUGIN}
+RUN rm -f \${OMEGA_ROOT}/channels/\${PLUGIN}.py \${OMEGA_ROOT}/memory/tg_prompt.txt \\
+ && (command -v pip3 >/dev/null || (apt-get update \\
+      && apt-get install -y --no-install-recommends python3-pip \\
+      && rm -rf /var/lib/apt/lists/*)) \\
+ && python3 -m pip install --no-cache-dir --break-system-packages \\
+      -r \${OMEGA_ROOT}/plugins/\${PLUGIN}/requirements.txt \\
+ && python3 - \${OMEGA_ROOT}/config/plugins.yaml \${PLUGIN} <<'PY'
+import re, sys
+path, name = sys.argv[1], sys.argv[2]
+text = open(path).read()
+text = re.sub(r"^- name: %s\n(?:  .*\n)*" % re.escape(name), "", text, flags=re.M)
+text = text.rstrip("\n") + "\n\n- name: %s\n  loader: metta\n  location: \"{REPO}/plugins/%s\"\n" % (name, name)
+open(path, "w").write(text)
+PY
+OVERLAY
+    fi
+    say "building $IMAGE on top of $BASE_IMAGE"
+    run "docker build -t '$IMAGE' '$CTX'"
+fi
+
+[ "$DO_RUN" = 1 ] || { say "built; not running"; exit 0; }
+
+# ---- run ------------------------------------------------------------------
+
+# Ask the built image where its tree lives, rather than assuming.
+if [ "$DRY_RUN" = 0 ]; then
+    OMEGA_ROOT="$(docker image inspect "$IMAGE" \
+        --format '{{range .Config.Env}}{{println .}}{{end}}' \
+        | sed -n 's/^OMEGA\(CLAW\)\?_DIR=//p' | head -1)"
+    : "${OMEGA_ROOT:=/PeTTa/repos/Omega}"
+else
+    OMEGA_ROOT="/PeTTa/repos/Omega"
+fi
+say "in-image root $OMEGA_ROOT"
+
+if [ "$DRY_RUN" = 0 ] && docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+    if [ "$REPLACE" = 1 ]; then
+        say "removing the existing $CONTAINER"
+        docker rm -f "$CONTAINER" >/dev/null
+    else
+        die "a container named $CONTAINER already exists; pass --replace to replace it"
+    fi
+fi
+
+run "mkdir -p '$MEMORY_DIR'"
+# The agent runs as nobody, so the memory directory has to be writable by it.
+run "chmod 0777 '$MEMORY_DIR'"
+
+common=(
+    --name "$CONTAINER"
+    --env-file "$ENV_FILE"
+    --security-opt no-new-privileges:true
+    --init
+    --add-host=host.docker.internal:host-gateway
+    --volume "$MEMORY_DIR:$OMEGA_ROOT/memory"
+    --tmpfs /tmp:size=64m,mode=1777
+    --tmpfs /run:size=16m,mode=755
+    --tmpfs /var/tmp:size=64m,mode=1777
+)
+
+case "$MODE" in
+    test)
+        # The plugin's own suite, against the real core in the image.
+        say "running the plugin's tests inside the container"
+        run "docker run --rm ${common[*]} --entrypoint python3 ${DOCKER_ARGS[*]:-} '$IMAGE' \
+             -m pytest '$OMEGA_ROOT/plugins/$PLUGIN_NAME/tests' -q"
+        ;;
+    shell)
+        say "opening a shell in the container"
+        run "docker run --rm -it ${common[*]} --entrypoint sh ${DOCKER_ARGS[*]:-} '$IMAGE'"
+        ;;
+    bot)
+        args=("commchannel=$COMMCHANNEL")
+        for extra in ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; do args+=("$extra"); done
+        say "starting the bot with: ${args[*]}"
+        # Core's own entrypoint runs: it starts the credential proxy while the
+        # keys are still in the environment, scrubs them, then drops to nobody.
+        # The plugin reads its upstreams through that proxy, so no key reaches
+        # the agent and the entrypoint does not need bypassing.
+        run "docker run -d ${common[*]} ${DOCKER_ARGS[*]:-} '$IMAGE' ${args[*]}"
+        [ "$DRY_RUN" = 1 ] || say "started. logs: docker logs -f $CONTAINER"
+        ;;
+esac

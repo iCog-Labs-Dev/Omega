@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Build and start the SNET Telegram bot.
+#
+# Fill in the values below, then run ./Omega_Telegram_SNET
+set -euo pipefail
+
+TG_BOT_TOKEN="..."
+TG_CHAT_ID="..."
+ANTHROPIC_API_KEY="..."
+OPENROUTER_API_KEY="..."
+OPENAI_API_KEY="..."
+
+# Core is built from source rather than pulled from a published tag: the plugin
+# system this bot needs (config/plugins.yaml, src/channels.py) is not in a
+# release yet. v0.1.17 has neither.
+CORE_REPO="https://github.com/singnet/Omega.git"
+CORE_COMMIT="7f0d33f"
+
+BASE_IMAGE="omega-core:${CORE_COMMIT}"
+BOT_IMAGE="omega-telegram-snet:latest"
+CONTAINER="omega"
+
+# 1. Build the core image once, at the pinned commit.
+if ! docker image inspect "${BASE_IMAGE}" >/dev/null 2>&1; then
+    echo "==> Building core ${CORE_COMMIT} (one time, takes a while)"
+    BUILD_DIR="$(mktemp -d)"
+    trap 'rm -rf "${BUILD_DIR}"' EXIT
+    git clone --quiet "${CORE_REPO}" "${BUILD_DIR}"
+    git -C "${BUILD_DIR}" checkout --quiet "${CORE_COMMIT}"
+    docker build -t "${BASE_IMAGE}" "${BUILD_DIR}"
+fi
+
+# 2. Layer this plugin's Python dependencies on top.
+echo "==> Building ${BOT_IMAGE}"
+docker build -t "${BOT_IMAGE}" --build-arg "BASE_IMAGE=${BASE_IMAGE}" .
+
+# 3. Run, with each customization mounted over its path inside the image.
+#
+# memoryDirectory must be set. It defaults to ./, which resolves to /PeTTa, and
+# profile/policy.yaml lists /PeTTa as read-only while only
+# /PeTTa/repos/OmegaClaw-Core/memory is writable. Landlock enforces that against
+# root as well, so without this the workflow plugin dies creating its
+# ./workflow_space directory: "make_directory ... Permission denied".
+#
+# --entrypoint sh skips core's entrypoint.sh, which scrubs the environment down
+# to an allowlist that excludes TG_BOT_TOKEN and the API keys. Core's own
+# channels read their secrets from the nginx proxy it starts instead; this
+# aiogram channel reads the environment, so the entrypoint is bypassed and the
+# proxy is not used. Two consequences: the keys stay in the agent's environment,
+# and GATEWAY_URL is unset so providers call their APIs directly.
+#
+# Skipping the entrypoint also skips the `su nobody` it ends with, which would
+# leave the agent running as root. The su below restores that, so only the
+# secrets handling differs from a stock run. TG_CHAT_ID is passed as an
+# environment variable so this whole command can be single-quoted: the
+# container's root shell expands $MEMORY_DIR and $TG_CHAT_ID, and nobody's shell
+# receives them already resolved.
+echo "==> Starting ${CONTAINER}"
+docker run -d -it \
+    --name "${CONTAINER}" \
+    --security-opt no-new-privileges:true \
+    --init \
+    --add-host=host.docker.internal:host-gateway \
+    --volume omegaclaw-telegram-memory:/PeTTa/repos/OmegaClaw-Core/memory \
+    --volume "./knowledge-priors:/PeTTa/repos/OmegaClaw-Core/knowledge-priors:ro" \
+    --volume "./telegram:/PeTTa/repos/OmegaClaw-Core/plugins/telegram:ro" \
+    --volume "./plugins.yaml:/PeTTa/repos/OmegaClaw-Core/config/plugins.yaml:ro" \
+    --volume "./skills.metta:/PeTTa/repos/OmegaClaw-Core/src/skills.metta:ro" \
+    --tmpfs /tmp:size=64m,mode=1777 \
+    --tmpfs /run:size=16m,mode=755 \
+    --tmpfs /var/tmp:size=64m,mode=1777 \
+    -e TG_BOT_TOKEN="${TG_BOT_TOKEN}" \
+    -e TG_CHAT_ID="${TG_CHAT_ID}" \
+    -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
+    -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
+    -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+    --entrypoint sh \
+    "${BOT_IMAGE}" -c '
+        exec su nobody -s /bin/sh -c "cd /PeTTa && exec sh run.sh run.metta \
+            memoryDirectory=$MEMORY_DIR \
+            commchannel=telegram_media \
+            provider=OpenRouter \
+            embeddingprovider=Local \
+            securityPolicyPath=/PeTTa/repos/OmegaClaw-Core/profile/policy.yaml \
+            wakeupInterval=2400 \
+            TG_CHAT_ID=$TG_CHAT_ID"
+    '
+
+echo "==> Started. Logs: docker logs -f ${CONTAINER}"
