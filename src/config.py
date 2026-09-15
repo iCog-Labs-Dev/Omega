@@ -37,8 +37,15 @@ def config_get_by_key(key, default=None):
         return _CONFIG.get(key)
     if key in _COMMAND_LINE:
         return _cache_config(key, _COMMAND_LINE.get(key), "command line")
+    # The documented speech setting also accepts its unprefixed environment
+    # name. Keep this alias specific; other configuration keeps its contract.
+    if key == "EDGE_TTS_VOICE":
+        for name in ("OMEGA_EDGE_TTS_VOICE", "EDGE_TTS_VOICE"):
+            value = os.environ.get(name, "").strip()
+            if value:
+                return _cache_config(key, value, "environment variable")
     envkey = f"OMEGA_{key}"
-    if envkey in os.environ:
+    if envkey in os.environ and key != "EDGE_TTS_VOICE":
         return _cache_config(key, os.environ.get(envkey), "environment variable")
     if key in _CONFIG_FILE:
         return _cache_config(key, _CONFIG_FILE.get(key), "config file")

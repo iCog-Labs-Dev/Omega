@@ -77,7 +77,7 @@ def prompt_path():
 
 
 # Telegram refuses a text message over 4096 characters.
-TELEGRAM_TEXT_LIMIT = 4096
+from text_splitter import TELEGRAM_TEXT_LIMIT, split_for_telegram
 
 # A send that fails with one of these is wrong in a way no retry can fix: the
 # text, the chat, or the bot's access to it. Anything else - a timeout, a 5xx, a
@@ -91,66 +91,6 @@ PERMANENT_SEND_FAILURES = (
 )
 
 
-def _pack(parts, separator, fits):
-    """Rejoin consecutive parts for as long as the result still fits."""
-    run = ""
-    for part in parts:
-        candidate = f"{run}{separator}{part}" if run else part
-        if fits(candidate):
-            run = candidate
-            continue
-        if run:
-            yield run
-        run = part
-    if run:
-        yield run
-
-
-def _hard_cut(text, fits):
-    """Slice a run with no boundary left to break on, shrinking each slice until
-    it fits. Rendering only grows text, so a raw 4096 characters is the ceiling
-    worth trying first."""
-    while text:
-        take = min(len(text), TELEGRAM_TEXT_LIMIT)
-        while take > 1 and not fits(text[:take]):
-            take = take * 3 // 4
-        yield text[:take]
-        text = text[take:]
-
-
-def split_for_telegram(text, fits=None):
-    """Break text into pieces that each fit in one Telegram message.
-
-    Cuts on the largest boundary that fits - a blank line first, then a single
-    line, then mid-line as a last resort - so a long answer arrives as readable
-    paragraphs instead of arbitrary slices. Text that already fits comes back
-    unchanged, as one piece.
-
-        split_for_telegram("short")     # ["short"]
-        split_for_telegram("a" * 9000)  # three pieces, in order
-
-    `fits` decides whether one piece can be sent, and defaults to counting raw
-    characters. The channel passes the rendered length instead, because that is
-    what Telegram measures.
-
-    Pieces holding nothing but whitespace are dropped: Telegram rejects a blank
-    message, and that refusal is not worth queueing.
-    """
-    if fits is None:
-        def fits(piece):
-            return len(piece) <= TELEGRAM_TEXT_LIMIT
-
-    pieces = []
-    for paragraph in _pack(text.split("\n\n"), "\n\n", fits):
-        if fits(paragraph):
-            pieces.append(paragraph)
-            continue
-        for line in _pack(paragraph.split("\n"), "\n", fits):
-            if fits(line):
-                pieces.append(line)
-            else:
-                pieces.extend(_hard_cut(line, fits))
-    return [piece for piece in pieces if piece.strip()]
 
 
 class _TelegramChannel:
@@ -350,6 +290,7 @@ class _TelegramChannel:
         """Retrieve and consume the most recent processed window, thread-safe.
         Doubles as the outbox pump: the agent calls this once per loop from its
         own thread, which is where a blocking delivery is safe to run."""
+        media_handler.next_turn()
         self._flush_outbox()
         with self.msg_lock:
             if self._message_queue:
@@ -1115,21 +1056,13 @@ class _TelegramChannel:
             self.loop,
         )
         try:
-            fut.result(timeout=30)
+            result = fut.result(timeout=30)
             logging.info(f"send_voice: delivered to {target_chat_id}")
+            return getattr(result, "message_id", None)
         except Exception as e:
-            logging.error(f"Failed to send voice (retrying without caption/reply): {e}")
-            fut_fallback = asyncio.run_coroutine_threadsafe(
-                self.bot.send_voice(chat_id=target_chat_id,
-                                    voice=BufferedInputFile(audio_bytes, filename="voice.mp3")),
-                self.loop,
-            )
-            try:
-                fut_fallback.result(timeout=30)
-                logging.info(f"send_voice: delivered to {target_chat_id} (fallback, no caption)")
-            except Exception as e2:
-                logging.error(f"Failed to send voice: {e2}")
-                raise
+            fut.cancel()
+            logging.error(f"Voice delivery uncertain; not uploading again: {e}")
+            raise
 
     def send_photo(self, image_bytes, caption=None, chat_id=None, reply_to_id=None):
         """Send a photo to the active chat, dispatched to the bot's event loop.
@@ -1288,7 +1221,7 @@ def send_photo(image_bytes, caption=None):
 
 def send_voice(audio_bytes, caption=None):
     """Send a generated voice message to the active Telegram chat."""
-    _channel.send_voice(audio_bytes, caption=caption,
+    return _channel.send_voice(audio_bytes, caption=caption,
                         chat_id=_channel.chat_id,
                         reply_to_id=getattr(_channel, "_reply_to_id", None))
 
@@ -1307,8 +1240,9 @@ def send_chat_action(action):
         _channel.loop,
     )
     try:
-        fut.result(timeout=30)
+        fut.result(timeout=3)
     except Exception as e:
+        fut.cancel()
         logging.warning(f"send_chat_action({action!r}) failed: {e}")
 
 def is_search_disabled():

@@ -273,6 +273,8 @@ def test_speak_disabled():
 
 
 def test_speak_synthesis_failure():
+    orig_parts = mh.speech_parts
+    mh.speech_parts = lambda text, voice: [(text, voice)]
     orig_allowed = mh._tts_allowed
     orig_unsafe = mh._prompt_is_unsafe
     orig_synth = mh._synthesise_speech
@@ -283,12 +285,15 @@ def test_speak_synthesis_failure():
         out = mh.speak("hello")
         assert out.startswith("VOICE_FAILED"), out
     finally:
+        mh.speech_parts = orig_parts
         mh._tts_allowed = orig_allowed
         mh._prompt_is_unsafe = orig_unsafe
         mh._synthesise_speech = orig_synth
 
 
 def test_speak_success():
+    orig_parts = mh.speech_parts
+    mh.speech_parts = lambda text, voice: [(text, voice)]
     orig_allowed = mh._tts_allowed
     orig_unsafe = mh._prompt_is_unsafe
     orig_synth = mh._synthesise_speech
@@ -307,6 +312,7 @@ def test_speak_success():
         assert sent["bytes"] == b"audio-bytes", sent
         assert "record_voice" in actions, actions
     finally:
+        mh.speech_parts = orig_parts
         mh._tts_allowed = orig_allowed
         mh._prompt_is_unsafe = orig_unsafe
         mh._synthesise_speech = orig_synth

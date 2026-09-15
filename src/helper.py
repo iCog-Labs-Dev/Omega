@@ -152,6 +152,11 @@ def balance_parentheses(s):
             # loop turns this into ALERT_FAILED feedback for the next turn.
             sexprs.append(f"(Error UNKNOWN_SKILL_CALL {quote_arg(line)})")
             continue
+        if cmd == "speak" and not rest:
+            # Missing text must reach the skill's validation, not an
+            # unevaluated zero-argument call that triggers model retries.
+            sexprs.append('(speak "")')
+            continue
         if cmd in TWO_ARG_COMMANDS:
             if not rest:
                 sexprs.append(f"({cmd})")

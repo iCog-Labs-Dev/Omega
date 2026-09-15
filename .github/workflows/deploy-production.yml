@@ -62,7 +62,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: IMAGE,GHCR_USER,GHCR_TOKEN,ASI_API_KEY,OPENAI_API_KEY,ANTHROPIC_API_KEY,OPENROUTER_API_KEY,TG_BOT_TOKEN,TG_CHAT_ID,LLM_PROVIDER,LLM_MODEL
+          envs: IMAGE,GHCR_USER,GHCR_TOKEN,ASI_API_KEY,OPENAI_API_KEY,ANTHROPIC_API_KEY,OPENROUTER_API_KEY,TG_BOT_TOKEN,TG_CHAT_ID,LLM_PROVIDER,LLM_MODEL,EDGE_TTS_VOICE
           script: |
             set -e
             mkdir -p /omega
@@ -75,6 +75,7 @@ jobs:
             TG_CHAT_ID=${TG_CHAT_ID}
             LLM_PROVIDER=${LLM_PROVIDER}
             LLM_MODEL=${LLM_MODEL}
+            EDGE_TTS_VOICE=${EDGE_TTS_VOICE}
             EOF
             chmod 600 /omega/.env
 
@@ -116,3 +117,4 @@ jobs:
           TG_CHAT_ID: ${{ env.CHAT_ID }}
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
+          EDGE_TTS_VOICE: ${{ vars.EDGE_TTS_VOICE }}
