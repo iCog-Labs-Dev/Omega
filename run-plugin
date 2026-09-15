@@ -17,8 +17,6 @@
 #     already claims its name (core aborts on a duplicate plugin name)
 #   - deletes channels/<name>.py, which would register the same channel id
 #   - installs each plugin's requirements.txt at build time
-#   - splices <plugin>/proxy.conf into the nginx server block, if the plugin
-#     ships one, so it can reach an upstream core does not already route
 #   - deletes memory/tg_prompt.txt, whose prompt section duplicates the
 #     plugin's own and is injected by core's run loop regardless of registration
 #
@@ -235,22 +233,10 @@ PY
         fi
 
         template="$CTX/proxy/nginx.conf.template"
-        if [ -f "$PLUGIN_DIR/proxy.conf" ] && [ -f "$template" ]; then
-            if ! grep -q "$PLUGIN_NAME-file/" "$template"; then
-                say "    - splicing $PLUGIN_NAME/proxy.conf into the nginx server block"
-                python3 - "$template" "$PLUGIN_DIR/proxy.conf" <<'PY'
-import sys
-template, fragment = sys.argv[1], sys.argv[2]
-text = open(template).read()
-at = text.rfind("}")            # closing brace of server { }
-at = text.rfind("}", 0, at)     # the one before it, i.e. inside server
-open(template, "w").write(text[:at] + "\n" + open(fragment).read() + "\n" + text[at:])
-PY
-            fi
-        elif [ -f "$template" ] && ! grep -q "$PLUGIN_NAME-file/" "$template"; then
+        if [ -f "$template" ] && ! grep -q "$PLUGIN_NAME-file/" "$template"; then
             say "    ! no /$PLUGIN_NAME-file/ route in core's nginx template."
-            say "      Media downloads through the proxy will 404. Ship a proxy.conf"
-            say "      in the plugin directory and this script will splice it in."
+            say "      Media downloads through the proxy will 404 on this core;"
+            say "      text will keep working. Use a core that carries the route."
         fi
 
         if [ -f "$CTX/memory/tg_prompt.txt" ]; then
