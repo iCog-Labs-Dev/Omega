@@ -28,7 +28,7 @@ def _hard_cut(text, fits):
         while take > 1 and not fits(text[:take]):
             take = take * 3 // 4
         if take < len(text):
-            sentences = list(re.finditer(r"[.!?。！？]\s+", text[:take]))
+            sentences = list(re.finditer(r"[.!?]\s+|[。！？]\s*", text[:take]))
             spaces = list(re.finditer(r"\s+", text[:take]))
             boundaries = sentences or spaces
             if boundaries:

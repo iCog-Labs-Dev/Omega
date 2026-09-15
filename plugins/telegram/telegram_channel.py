@@ -290,6 +290,7 @@ class _TelegramChannel:
         """Retrieve and consume the most recent processed window, thread-safe.
         Doubles as the outbox pump: the agent calls this once per loop from its
         own thread, which is where a blocking delivery is safe to run."""
+        media_handler.next_turn()
         self._flush_outbox()
         with self.msg_lock:
             if self._message_queue:

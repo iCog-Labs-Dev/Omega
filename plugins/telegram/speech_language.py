@@ -9,12 +9,12 @@ from text_splitter import split_for_telegram
 
 
 def speech_chunks(parts):
-    """Pack indexed sentence pieces without crossing voices or the text limit."""
+    """Pack indexed sentence pieces without crossing the text limit."""
     chunk = []
     size = 0
     for part in parts:
-        _, text, voice = part
-        if chunk and (voice != chunk[-1][2] or size + len(text) > 4096):
+        _, text, _ = part
+        if chunk and size + len(text) > 4096:
             yield chunk
             chunk, size = [], 0
         chunk.append(part)
@@ -25,6 +25,28 @@ def speech_chunks(parts):
 logger = logging.getLogger(__name__)
 DEFAULT_VOICE = "en-US-AriaNeural"
 PREFERRED_VOICES = {"en": DEFAULT_VOICE, "ru": "ru-RU-SvetlanaNeural"}
+PREFERRED_LOCALES = {"en": "en-US", "pt": "pt-BR", "ar": "ar-SA", "ur": "ur-PK"}
+_SCRIPTS = {
+    "cyrillic": r"[\u0400-\u052f]",
+    "kana": r"[\u3040-\u30ff]",
+    "hangul": r"[\uac00-\ud7af]",
+    "han": r"[\u3400-\u9fff]",
+    "arabic": r"[\u0600-\u06ff]",
+    "hebrew": r"[\u0590-\u05ff]",
+    "greek": r"[\u0370-\u03ff]",
+    "devanagari": r"[\u0900-\u097f]",
+    "thai": r"[\u0e00-\u0e7f]",
+}
+_IDEOGRAPHIC_SCRIPTS = {"kana", "hangul", "han"}
+_SCRIPT_LANGUAGES = {"kana": "ja", "hangul": "ko", "han": "zh", "arabic": "ar",
+                     "hebrew": "he", "greek": "el", "devanagari": "hi", "thai": "th"}
+_VOICE_SCRIPTS = {
+    **dict.fromkeys(("ru", "uk", "bg", "be", "mk", "sr", "kk", "mn"), {"cyrillic"}),
+    **dict.fromkeys(("ar", "fa", "ur", "ps"), {"arabic"}),
+    **dict.fromkeys(("hi", "mr", "ne"), {"devanagari"}),
+    "zh": {"han"}, "ja": {"kana", "han"}, "ko": {"hangul", "han"},
+    "he": {"hebrew"}, "el": {"greek"}, "th": {"thai"},
+}
 
 
 @lru_cache(maxsize=1)
@@ -88,6 +110,53 @@ def _language(code):
     return {"nb": "no", "nn": "no"}.get(code, code)
 
 
+def _present(text, script):
+    pattern = _SCRIPTS[script]
+    return re.search(pattern if script in _IDEOGRAPHIC_SCRIPTS else pattern + "{2,}", text)
+
+
+def _count(text, script):
+    return len(re.findall(_SCRIPTS[script], text))
+
+
+def _cyrillic_language(text):
+    text = " ".join(re.findall(r"[\u0400-\u052f]+", text))
+    if re.search(r"[іїєґІЇЄҐ]", text):
+        return "uk"
+    if re.search(r"[ыэёъЫЭЁЪ]", text):
+        return "ru"
+    scores = _cyrillic_detector().compute_language_confidence_values(text)
+    if scores and scores[0].value >= .60:
+        return scores[0].language.iso_code_639_1.name.lower()
+    return "ru"
+
+
+def _switch_language(text, voice):
+    own = _VOICE_SCRIPTS.get(_language(voice), set())
+    unreadable = [script for script in _SCRIPTS if script not in own and _present(text, script)]
+    if not unreadable:
+        return None
+    script = next((name for name in ("kana", "hangul") if name in unreadable),
+                  max(unreadable, key=lambda name: _count(text, name)))
+    if _count(text, script) <= sum(_count(text, name) for name in own):
+        return None
+    if script == "cyrillic":
+        return _cyrillic_language(text)
+    return _SCRIPT_LANGUAGES[script]
+
+
+def _segments(text):
+    segments = []
+    start = 0
+    for boundary in re.finditer(r"(?<=[.!?])\s+|[。！？]+[」』）〉》】”’)\]]*\s*|\n+", text):
+        if boundary.end() > start:
+            segments.append(text[start:boundary.end()])
+            start = boundary.end()
+    if start < len(text):
+        segments.append(text[start:])
+    return segments
+
+
 @lru_cache(maxsize=1)
 def available_voices():
     """Cache successful catalogue requests; a failed request can be retried."""
@@ -127,7 +196,10 @@ def select_voice(language, configured_voice):
         )
         return configured_voice
     preferred = PREFERRED_VOICES.get(language)
-    return preferred if preferred in candidates else candidates[0]
+    if preferred in candidates:
+        return preferred
+    locale = PREFERRED_LOCALES.get(language, f"{language}-{language.upper()}")
+    return next((voice for voice in candidates if voice.startswith(locale + "-")), candidates[0])
 
 
 @lru_cache(maxsize=64)
@@ -140,7 +212,7 @@ def validated_voice(configured_voice):
 
 
 def speech_parts(text, configured_voice=DEFAULT_VOICE):
-    """Select one voice for the whole reply; retain sentences for chunk retries."""
+    """Select the reply voice, switching sentences it cannot read; retain sentences for chunk retries."""
     configured_voice = validated_voice(configured_voice)
     language = detect_language(text)
     if language is None and _script_is_main(text, r"[\u0400-\u052f]+"):
@@ -149,12 +221,16 @@ def speech_parts(text, configured_voice=DEFAULT_VOICE):
             language = "ru"
     voice = select_voice(language, configured_voice)
     logger.info("Speech language=%s voice=%s", language or "uncertain", voice)
-    segments = []
-    start = 0
-    for boundary in re.finditer(r"(?<=[.!?。！？])\s+|\n+", text):
-        segments.append(text[start:boundary.end()])
-        start = boundary.end()
-    if start < len(text):
-        segments.append(text[start:])
-    return [(piece, voice) for segment in segments
-            for piece in split_for_telegram(segment)]
+    parts = []
+    for segment in _segments(text):
+        segment_voice = voice
+        if not any(char.isalnum() for char in segment):
+            if parts:
+                segment_voice = parts[-1][1]
+        else:
+            segment_language = _switch_language(segment, voice)
+            if segment_language:
+                segment_voice = select_voice(segment_language, configured_voice)
+                logger.info("Speech segment language=%s voice=%s", segment_language, segment_voice)
+        parts.extend((piece, segment_voice) for piece in split_for_telegram(segment))
+    return parts

@@ -83,11 +83,11 @@ class SpeechLanguageTests(unittest.TestCase):
                 {"Locale": "ru-RU", "ShortName": "ru-RU-SvetlanaNeural", "Gender": gender}]
             self.assertEqual(sl.select_voice("ru", sl.DEFAULT_VOICE), sl.DEFAULT_VOICE)
 
-    def test_whole_reply_keeps_one_male_voice(self):
+    def test_whole_reply_keeps_the_male_gender(self):
         text = "Hello, this is an English sentence.\n" + RUSSIAN + "\nHello, this is an English sentence."
         parts = sl.speech_parts(text, "en-US-GuyNeural")
         self.assertEqual([voice for _, voice in parts],
-                         ["en-US-GuyNeural"] * 4)
+                         ["en-US-GuyNeural", "ru-RU-DmitryNeural", "ru-RU-DmitryNeural", "en-US-GuyNeural"])
 
     def test_male_configuration_does_not_fall_back_to_female(self):
         self.assertEqual(sl.select_voice("uk", "en-US-GuyNeural"), "en-US-GuyNeural")
@@ -106,7 +106,7 @@ class SpeechLanguageTests(unittest.TestCase):
                 patch.object(mh, "_live_send_voice") as send:
             self.assertEqual(mh.speak(text), "VOICE_SENT")
             self.assertEqual([call.args[1] for call in synth.call_args_list],
-                             [sl.DEFAULT_VOICE] * 4)
+                             [sl.DEFAULT_VOICE, sl.DEFAULT_VOICE, "ru-RU-SvetlanaNeural", sl.DEFAULT_VOICE])
             detect.assert_called_once_with(text)
             self.assertEqual("\n".join(call.args[0].strip() for call in synth.call_args_list), text)
             self.assertEqual(send.call_count, 4)
@@ -125,16 +125,18 @@ class SpeechLanguageTests(unittest.TestCase):
         text = "Hello, this is an English sentence.\n" + RUSSIAN + "\nHello, this is an English sentence."
         parts = sl.speech_parts(text)
         self.assertEqual([voice for _, voice in parts],
-                         [sl.DEFAULT_VOICE] * 4)
+                         [sl.DEFAULT_VOICE, "ru-RU-SvetlanaNeural", "ru-RU-SvetlanaNeural", sl.DEFAULT_VOICE])
 
     def test_main_language_is_not_the_first_phrase_or_first_4096_characters(self):
         english = "The weather is sunny today and we are going to walk through the park together. "
-        for prefix in ("Привет. ", "你好。 ", "Bonjour. "):
+        for prefix, first_voice in (("Привет. ", "ru-RU-DmitryNeural"), ("你好。 ", "en-US-GuyNeural"),
+                                    ("Bonjour. ", "en-US-GuyNeural")):
             text = prefix + english * 100
             with self.subTest(prefix=prefix):
                 self.assertEqual(sl.detect_language(text), "en")
                 parts = sl.speech_parts(text, "en-US-GuyNeural")
-                self.assertTrue(all(voice == "en-US-GuyNeural" for _, voice in parts))
+                self.assertEqual(parts[0], (prefix, first_voice))
+                self.assertTrue(all(voice == "en-US-GuyNeural" for _, voice in parts[1:]))
 
     def test_one_detection_and_voice_for_all_sentences(self):
         text = "Hello. Привет. Bonjour."

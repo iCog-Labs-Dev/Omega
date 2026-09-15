@@ -70,12 +70,12 @@ class SpeakTextTests(unittest.TestCase):
                 self.assertEqual(self.delivered(), [text.replace("\\n", "\n")])
 
     def test_synthesis_failure_continues(self):
-        self.synth.side_effect = [b"first", None, b"third"]
+        self.synth.side_effect = [b"first", None, None, b"third"]
         result = mh.speak("x" * 9000)
         self.assertIn("part 2/3", result)
         self.assertIn("2 parts already sent", result)
         self.assertEqual(self.delivered(), ["first", "third"])
-        self.assertEqual(self.synth.call_count, 3)
+        self.assertEqual(self.synth.call_count, 4)
 
     def test_send_failure_continues(self):
         self.send.side_effect = [None, RuntimeError("upload failed"), None]

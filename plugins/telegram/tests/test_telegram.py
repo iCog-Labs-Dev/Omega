@@ -1108,3 +1108,31 @@ def test_a_message_that_failed_on_a_bad_connection_stays_queued(caplog):
     assert bot.sent_messages == []
     assert len(ch._outbox) == 2, "a retryable failure must retain the whole queue"
     assert "stays queued" in caplog.text
+
+
+def test_agent_poll_separates_voice_turns():
+    ch = _new_channel()
+    ch.chat_id, ch._reply_to_id = 7, 8
+    sent = []
+    config = types.ModuleType("config")
+    config.config_get_by_key = lambda key, default=None: default
+    restore = _stub([
+        (mh, "_tts_allowed", lambda: True),
+        (mh, "_prompt_is_unsafe", lambda text: False),
+        (mh, "speech_parts", lambda text, voice: [(text, voice)]),
+        (mh, "_synthesise_speech", lambda text, voice: b"audio"),
+        (mh, "_live_send_voice", lambda audio: sent.append(audio) or len(sent)),
+        (mh, "_live_send_chat_action", None),
+        (mh, "_live_channel", ch),
+    ])
+    try:
+        with patch.dict(sys.modules, {"config": config}), \
+                patch.dict(mh._voice_requests, {}, clear=True):
+            assert mh.speak("Poll turn check") == "VOICE_SENT"
+            assert mh.speak("Poll turn check") == "VOICE_SENT"
+            assert len(sent) == 2
+            ch.get_last_message()
+            assert "already delivered" in mh.speak("Poll turn check")
+            assert len(sent) == 2
+    finally:
+        restore()
