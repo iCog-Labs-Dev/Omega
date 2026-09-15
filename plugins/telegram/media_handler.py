@@ -6,6 +6,7 @@ import logging
 import sys
 from contextlib import contextmanager
 from collections import OrderedDict
+from itertools import groupby
 from speech_text import prepare_speech
 from speech_language import speech_parts, speech_chunks
 
@@ -351,6 +352,12 @@ RECORDING_REFRESH_SECONDS = 4
 MAX_VOICE_REQUESTS = 100
 _voice_requests = OrderedDict()
 _voice_delivery_lock = threading.Lock()
+_turn = 0
+
+
+def next_turn():
+    global _turn
+    _turn += 1
 
 
 class SpeechDelivery:
@@ -384,6 +391,21 @@ class SpeechDelivery:
         with _voice_delivery_lock:
             self._touch()
             self._parts.update(updates)
+
+    def attempt(self):
+        with _voice_delivery_lock:
+            self._touch()
+            return self._parts.get("attempt")
+
+    def record_attempt(self, turn, complete, copies):
+        with _voice_delivery_lock:
+            self._touch()
+            self._parts["attempt"] = {"turn": turn, "complete": complete, "copies": copies}
+
+    def reset(self):
+        with _voice_delivery_lock:
+            self._touch()
+            self._parts.clear()
 
 
 @contextmanager
@@ -478,6 +500,8 @@ def speak(text=""):
         return "VOICE_FAILED: no channel is registered to send it"
     target = (_live_channel, getattr(_live_channel, "chat_id", None),
               getattr(_live_channel, "_reply_to_id", None))
+    turn = _turn
+    copies = 0
     ledger = None
     if target[1] is not None and target[2] is not None:
         request_id = hashlib.sha256(repr((target[1:], text, voice)).encode()).hexdigest()
@@ -486,27 +510,60 @@ def speak(text=""):
         except Exception:
             logger.exception("Could not initialize voice retry tracking")
             return "VOICE_FAILED: delivery checkpoint unavailable; no audio sent"
+        attempt = ledger.attempt()
+        copies = attempt["copies"] if attempt else 0
+        if attempt and attempt["turn"] == turn:
+            ledger.reset()
+        elif attempt and attempt["complete"]:
+            times = "once" if copies == 1 else f"{copies} times"
+            return f"VOICE_DUPLICATE: already delivered {times} for this message; not sent again"
     failures = []
     sent = 0
-    def deliver(chunk, allow_split=True):
+
+    def synthesise(chunk):
+        audio = b""
+        for chunk_voice, run in groupby(chunk, key=lambda part: part[2]):
+            run_text = "".join(piece for _, piece, _ in run)
+            try:
+                data = _synthesise_speech(run_text, chunk_voice) if chunk_voice else None
+            except Exception:
+                logger.exception("Speech chunk synthesis failed")
+                data = None
+            if not data:
+                return None
+            audio += data
+        return audio
+
+    def fail(part):
+        failures.append((part[0], part[1], "synthesis failed"))
+        if ledger:
+            ledger.set(part[0], "failed")
+
+    def deliver(chunk):
+        audio = synthesise(chunk) or synthesise(chunk)
+        if audio:
+            upload(chunk, audio)
+            return
+        if len(chunk) == 1:
+            fail(chunk[0])
+            return
+        group, group_audio = [], b""
+        for part in chunk:
+            audio = synthesise([part])
+            if audio:
+                group.append(part)
+                group_audio += audio
+                continue
+            if group:
+                upload(group, group_audio)
+                group, group_audio = [], b""
+            fail(part)
+        if group:
+            upload(group, group_audio)
+
+    def upload(chunk, audio):
         nonlocal sent
         indices = [i for i, _, _ in chunk]
-        chunk_text = "".join(piece for _, piece, _ in chunk)
-        chunk_voice = chunk[0][2]
-        try:
-            audio = _synthesise_speech(chunk_text, chunk_voice) if chunk_voice else None
-        except Exception:
-            logger.exception("Speech chunk synthesis failed")
-            audio = None
-        if not audio:
-            if allow_split and len(chunk) > 1:
-                for part in chunk:
-                    deliver([part], allow_split=False)
-            else:
-                failures.extend((i, piece, "synthesis failed") for i, piece, _ in chunk)
-                if ledger:
-                    ledger.set_many(indices, "failed")
-            return
         if (getattr(_live_channel, "chat_id", None),
                 getattr(_live_channel, "_reply_to_id", None)) != target[1:]:
             failures.extend((i, piece, "conversation changed") for i, piece, _ in chunk)
@@ -542,6 +599,8 @@ def speak(text=""):
             pending.append((index, piece, voice))
         for chunk in speech_chunks(pending):
             deliver(chunk)
+    if ledger:
+        ledger.record_attempt(turn, not failures, copies if failures else copies + 1)
     if failures:
         details = "; ".join(f"part {i + 1}/{len(pieces)}: {reason} ({piece[:80]})"
                             for i, piece, reason in failures)

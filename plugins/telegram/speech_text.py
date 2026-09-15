@@ -5,23 +5,25 @@ import re
 import pyromark
 import emoji
 
-# Deliberately conservative bare-domain suffixes: avoid treating arbitrary
-# dotted filenames/version strings as links. Schemed and www URLs need no list.
 _URL = re.compile(r"""
     (?<![\w@./-])
     (?:
         (?:https?://|www\.)[^\s<>"'\])}]+
         |
         (?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+
-        (?:com|org|net|edu|gov|io|ai|co|dev|app|info|biz|me|uk|de|fr|cn|ru|ua|et)
-        (?![\w-]|\.[a-z0-9])
-        (?::[0-9]+)?(?:[/?\#][^\s<>"'\])}]*)?
+        (?!(?:js|ts|py|rb|php|java|kt|cs|cpp|md|txt|pdf|docx?|xlsx?|csv|json|ya?ml|toml|ini|cfg|log|sh|html?|css|xml|png|jpe?g|gif|svg|mp[34]|zip)\b)
+        [a-z]{2,}
+        (?:
+            (?::[0-9]+)?(?:/|[?\#](?=[^\s.,;:!?]))[^\s<>"'\])}]*
+            |
+            :[0-9]+(?![\w.])
+        )
     )
 """, re.IGNORECASE | re.VERBOSE)
 
 
 def _remove_urls(text):
-    # Retain punctuation after a URL, e.g. "Read example.com." -> "Read .".
+    # Retain punctuation after a URL, e.g. "Read example.com/docs." -> "Read .".
     return _URL.sub(lambda match: match[0][len(match[0].rstrip(".,;:!?")):], text)
 
 
@@ -50,10 +52,12 @@ def _markdown_text(text):
     parts = []
     previous_end = 0
     image_depth = 0
+    lists = []
     options = (pyromark.Options.ENABLE_STRIKETHROUGH
                | pyromark.Options.ENABLE_TABLES
                | pyromark.Options.ENABLE_TASKLISTS)
     for event, span in pyromark.events_with_range(text, options=options):
+        end = span["end"]
         match event:
             case {"Start": {"Image": _}}:
                 image_depth += 1
@@ -63,6 +67,18 @@ def _markdown_text(text):
                 continue
             case _ if image_depth:
                 continue
+            case {"Start": {"List": first}}:
+                lists.append(first is not None)
+                continue
+            case {"End": {"List": _}}:
+                lists.pop()
+                continue
+            case {"Start": "Item"} if lists and lists[-1]:
+                marker = re.match(rb"[\s>]*(\d{1,9}[.)])", source[span["start"]:])
+                if not marker:
+                    continue
+                content = marker.group(1).decode() + " "
+                end = span["start"]
             case {"Text": content} | {"Code": content}:
                 pass
             case {"Html": content} | {"InlineHtml": content}:
@@ -81,7 +97,7 @@ def _markdown_text(text):
             elif b"|" in gap:
                 parts.append(" ")
         parts.append(content)
-        previous_end = span["end"]
+        previous_end = end
     return "".join(parts)
 
 

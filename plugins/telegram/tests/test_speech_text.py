@@ -9,19 +9,35 @@ from speech_text import prepare_speech
 
 class SpeechTextTests(unittest.TestCase):
     def test_url_filter_without_linkify(self):
-        for url in ('example.com', 'docs.example.org/guide?q=1#part',
+        for url in ('docs.example.org/guide?q=1#part',
                     'EXAMPLE.COM:8080/path', 'www.example.xyz/path',
-                    'https://example.xyz/path', 'http://localhost:8080/help'):
+                    'https://example.xyz/path', 'http://localhost:8080/help',
+                    'bit.ly/xyz', 'youtu.be/abc', 'discord.gg/abc', 't.me/omega_bot',
+                    'example.org?q=1', 'example.com:8080'):
             with self.subTest(url=url):
                 self.assertEqual(prepare_speech(f'Read {url} now'), 'Read now')
 
     def test_url_filter_preserves_nonlinks_and_sentence_punctuation(self):
         text = 'v2.0 3.14 report.pdf module.py user@example.com user@docs.example.com'
         self.assertEqual(prepare_speech(text), text)
-        self.assertEqual(prepare_speech('Visit example.com. Next sentence!'),
+        self.assertEqual(prepare_speech('Visit example.com/docs. Next sentence!'),
                          'Visit . Next sentence!')
         self.assertEqual(prepare_speech('example.unlisted example.com.unlisted'),
                          'example.unlisted example.com.unlisted')
+
+    def test_bare_domain_names_are_spoken(self):
+        for text in ('I bought it on Amazon.com.', 'Built with ASP.NET and C#',
+                     'Socket.io is great', 'Visit example.com. Next sentence!',
+                     'Did you buy it on Amazon.com?', 'Have you tried Node.js?',
+                     'Is the bug in main.py?', 'Built with Node.js/Express.',
+                     'See config.yaml#L10 now.', 'See report.pdf/page2 now.'):
+            with self.subTest(text=text):
+                self.assertEqual(prepare_speech(text), text)
+
+    def test_ordered_list_numbers_are_spoken(self):
+        for text in ('1939. The war began.\n1945. The war ended.', '1. Boil\n2. Add salt'):
+            with self.subTest(text=text):
+                self.assertEqual(prepare_speech(text), text)
 
     def test_nested_formatting_and_link_destination(self):
         self.assertEqual(prepare_speech(

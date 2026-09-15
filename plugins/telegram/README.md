@@ -97,21 +97,26 @@ Both environment names survive the container entrypoint. `scripts/omega`
 forwards the voice from its environment; staging/production deployments read
 the GitHub Actions variable `EDGE_TTS_VOICE`. Restart after changing the voice.
 
-- The whole reply's main language selects one voice, preserving configured gender.
-  Foreign words use that same voice; pronunciation or character coverage may vary.
-  Unsupported language/gender combinations use the configured voice; invalid
+- The whole reply's main language selects the reply voice, preserving configured
+  gender. A sentence written mostly in a script that voice cannot read, such as
+  Russian or Chinese inside an English reply, gets a voice of its own language in
+  the same voice message. Single letters of another alphabet (α, π) keep the reply
+  voice. Unsupported language/gender combinations use the configured voice; invalid
   voice names fall back to `en-US-AriaNeural` with a warning.
-- Markdown, image descriptions, common URLs and emoji are removed from speech,
-  not text replies. Link labels and paragraph breaks remain. Empty cleaned
-  input returns `VOICE_INVALID_INPUT`.
-- Same-voice sentences are grouped into text chunks of at most 4096 characters
-  and synthesized directly. Chunks end at sentence boundaries; oversized
-  sentences split at whitespace, with hard cuts only for oversized tokens.
-  No per-sentence voice switching is done. A failed chunk is retried sentence by
-  sentence. The recording indicator refreshes throughout processing.
+- Markdown, image descriptions, links and emoji are removed from speech, not text
+  replies. Link labels, paragraph breaks, bare domain names such as `example.com`
+  and ordered list numbers remain. Empty cleaned input returns `VOICE_INVALID_INPUT`.
+- Sentences are grouped into text chunks of at most 4096 characters. Chunks end at
+  sentence boundaries, and `。！？` need no following space; oversized sentences
+  split at whitespace, with hard cuts only for oversized tokens. A failed chunk is
+  retried once, then sentence by sentence, sending consecutive successful sentences
+  together. The recording indicator refreshes throughout processing.
 - Failed segments produce a text notice without discarding successful audio.
-  Exact-text retries for the same inbound message skip confirmed deliveries;
-  uncertain uploads are never automatically repeated while tracked. A voice-only
+  The same text spoken twice within one agent turn is sent twice. In a later turn,
+  an exact-text retry for the same inbound message sends only what was not
+  delivered, and a fully delivered request returns `VOICE_DUPLICATE` with the
+  number of copies delivered, without sending. Uncertain uploads
+  are never automatically repeated while tracked. A voice-only
   in-memory cache retains the 100 most recently used requests; restart or eviction
   loses retry protection. No database is used. New messages and paraphrased
   requests are not deduplicated; existing SQLite files are left untouched.

@@ -43,6 +43,9 @@ missing portions. Do not replay the whole reply or paraphrase it to retry.
 Never automatically retry a delivery-uncertain upload. For a synthesis failure,
 at most one retry with the exact same speak text can resume unsent parts; if it
 still fails, wait for the user. Do not loop on VOICE_FAILED.
+VOICE_DUPLICATE means that exact speech was already delivered for the current
+message, as many times as the status says, and was not sent again. Do not call
+speak with it again.
 
 SAFETY:
 
