@@ -208,7 +208,12 @@ PY
             rm -f "$CTX/channels/$PLUGIN_NAME.py"
         fi
 
-        if ! grep -q 'plugins/\*/requirements.txt' "$CTX/Dockerfile"; then
+        # Loose on purpose. Core is landing this, and patching a core that
+        # already does it installs the same files twice, each resolved on its
+        # own — the silent downgrade one invocation exists to prevent. Matching
+        # any plugin requirements path costs a missed patch on a core that
+        # mentions one without installing it, which nothing does.
+        if ! grep -q 'plugins.*requirements\.txt' "$CTX/Dockerfile"; then
             say "    - teaching the Dockerfile to install plugin requirements"
             python3 - "$CTX/Dockerfile" <<'PY'
 import re, sys
