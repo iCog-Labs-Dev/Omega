@@ -1,8 +1,11 @@
 name: Deploy (staging)
 
+# Deployment moved to singnet/Omega_CustomBots, which builds this core with the
+# Telegram plugin dropped in. The push trigger is gone so the two repositories
+# cannot both deploy to the same server. workflow_dispatch is what is left, and
+# GitHub reads dispatchable workflows only from the default branch, so this one
+# does not run at all until its trigger is put back.
 on:
-  push:
-    branches: [telegram]
   workflow_dispatch:
 
 concurrency:

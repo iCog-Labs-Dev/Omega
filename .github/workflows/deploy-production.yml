@@ -1,9 +1,12 @@
 name: Deploy (production)
 
+# Production is released from singnet/Omega_CustomBots. The prod-* tag trigger is
+# gone so a tag pushed here cannot overwrite that deployment: both target the same
+# Infisical environment, host and container name. workflow_dispatch is what is
+# left, and GitHub reads dispatchable workflows only from the default branch, so
+# this one does not run at all until its trigger is put back.
 on:
-  push:
-    tags:
-      - "prod-*"
+  workflow_dispatch:
 
 concurrency:
   group: deploy-production
