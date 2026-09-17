@@ -1,11 +1,16 @@
 name: release
 
+# Core's own releases are tagged v<version>. The Telegram bot publishes its
+# release notes here too, because it reads them anonymously and the repository
+# that deploys it is private, and those releases fired this workflow as well:
+# a full core build and the arm64 autotests, for notes that ship no core.
 on:
   release:
     types: [published]
 
 jobs:
   build:
+    if: startsWith(github.event.release.tag_name, 'v')
     uses: ./.github/workflows/common.yml
     with:
       publish_docker: true
