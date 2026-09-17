@@ -64,7 +64,9 @@ def chat(request, provider):
     import importlib
     import providers
 
-    sys.path.insert(0, str(ROOT / "providers"))
+    # Appended, never prepended: providers/openai.py would otherwise shadow the
+    # openai package that the provider modules themselves import.
+    sys.path.append(str(ROOT / "providers"))
     try:
         importlib.import_module(provider.lower()).loadOmegaPlugin()
     except ModuleNotFoundError as e:
