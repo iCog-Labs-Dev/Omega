@@ -17,17 +17,32 @@ name: publish-release
 # A pre-prod-* tag publishes the matching prod-* section as a prerelease, so a
 # rehearsal announces the very text the release will.
 
+# The automatic trigger is commented out until this has published a release for
+# real. Every release so far was published by hand, and the first production
+# release is not the place to find out how this differs. Publish by hand:
+#
+#   python3 scripts/changelog-section.py prod-2026-09-17 \
+#     | gh release create prod-2026-09-17 --repo iCog-Labs-Dev/Omega \
+#         --title prod-2026-09-17 --notes-file - --verify-tag
+#
+# then uncomment, cut a pre-prod-* rehearsal, and check it does the same thing.
 on:
-  push:
-    tags:
-      - "prod-*"
-      - "pre-prod-*"
+  # push:
+  #   tags:
+  #     - "prod-*"
+  #     - "pre-prod-*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: publish-release-${{ github.ref_name }}
+  group: publish-release-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
@@ -42,7 +57,7 @@ jobs:
       - name: Publish the release from CHANGELOG.md
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
