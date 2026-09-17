@@ -16,8 +16,8 @@ what the bot will actually see. `--prompt-only` stops before the model, needs no
 credentials and reaches no network.
 """
 import argparse
-import re
 import sys
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,59 +29,18 @@ sys.path.insert(0, str(ROOT / "src"))
 import config  # noqa: E402
 import release  # noqa: E402
 
-HEADING = re.compile(r"^##\s+\[?([^\]\s]+)\]?\s*$")
-REHEARSAL_ROUND = re.compile(r"\.\d+$")
-
-
-def released_version(tag):
-    """The section a tag ships. A pre-prod rehearsal reads the prod section."""
-    if not tag.startswith("pre-"):
-        return tag
-    return REHEARSAL_ROUND.sub("", tag[len("pre-"):])
+_section = SourceFileLoader(
+    "changelog_section", str(Path(__file__).resolve().parent / "changelog-section.py")
+).load_module()
 
 
 def changelog_section(tag):
-    lines = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8").splitlines()
-    version = released_version(tag)
-    for start, line in enumerate(lines):
-        found = HEADING.match(line)
-        if not found or found.group(1) != version:
-            continue
-        end = start + 1
-        while end < len(lines) and not HEADING.match(lines[end]):
-            end += 1
-        return "\n".join(lines[start + 1:end]).strip()
-    raise SystemExit(f"CHANGELOG.md has no '## {version}' section for tag {tag}")
-
-
-def chat(request, provider):
-    """Answer the request the way a running agent would.
-
-    Providers are plugins: a module under providers/ whose loadOmegaPlugin()
-    registers it under the name the command line selects. Start-up does that
-    through the plugin loader; here the one module that is needed is imported
-    directly, so a preview pulls in nothing else."""
-    import importlib
-    import providers
-
-    # Appended, never prepended: providers/openai.py would otherwise shadow the
-    # openai package that the provider modules themselves import.
-    sys.path.append(str(ROOT / "providers"))
-    try:
-        importlib.import_module(provider.lower()).loadOmegaPlugin()
-    except ModuleNotFoundError as e:
-        raise SystemExit(f"no provider module for {provider}: {e}")
-    if provider not in providers._llmProviderRegistry:
-        raise SystemExit(
-            f"{provider} did not register. Registered: "
-            f"{sorted(providers._llmProviderRegistry) or '(none)'}")
-
-    providers.llmProviderStart(provider)
-    try:
-        return release._chat(request)
-    except RuntimeError as e:
-        # Core says exactly which credential is missing; a traceback would bury it.
-        raise SystemExit(str(e))
+    """The CHANGELOG section a tag ships, read the way the publisher reads it."""
+    version = _section.released_version(tag)
+    body = _section.section((ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), version)
+    if not body:
+        raise SystemExit(f"CHANGELOG.md has no '## {version}' section for tag {tag}")
+    return body
 
 
 def main():

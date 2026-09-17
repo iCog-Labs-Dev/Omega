@@ -1,0 +1,66 @@
+name: publish-release
+
+# Publishes the release notes the bot reads on start-up.
+#
+# The bot fetches them from the GitHub release for its tag, unauthenticated, so
+# they have to live in a repository that answers anonymously. The repository
+# that deploys it is private, and a token there cannot write here, so the notes
+# are published from this side: CHANGELOG.md on this branch is the source, and
+# this repository's own token is enough.
+#
+# Tag here first, then tag the deployment repository. The bot looks the notes up
+# when its container starts, which is a build and a deploy later, so publishing
+# first is what keeps the announcement from finding nothing.
+#
+#   git tag prod-2026-09-17 && git push icog prod-2026-09-17
+#
+# A pre-prod-* tag publishes the matching prod-* section as a prerelease, so a
+# rehearsal announces the very text the release will.
+
+on:
+  push:
+    tags:
+      - "prod-*"
+      - "pre-prod-*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Publish the release from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Fails loudly when the section is missing, rather than publishing an
+          # empty release the bot would then summarise into nothing.
+          body=$(python3 scripts/changelog-section.py "$TAG")
+
+          prerelease=""
+          case "$TAG" in pre-prod-*) prerelease="--prerelease" ;; esac
+
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, updating its notes"
+            printf '%s\n' "$body" | gh release edit "$TAG" --repo "$REPO" \
+              --notes-file - --title "$TAG"
+          else
+            printf '%s\n' "$body" | gh release create "$TAG" --repo "$REPO" \
+              --title "$TAG" --notes-file - --verify-tag $prerelease
+          fi
+
+          echo "published $TAG to $REPO"
