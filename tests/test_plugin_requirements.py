@@ -27,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "install_dependencies.sh"
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 README = REPO_ROOT / "README.md"
+PLUGIN_API_DOC = REPO_ROOT / "docs" / "reference-plugin-api.md"
 CORE_REQUIREMENTS = REPO_ROOT / "requirements.txt"
 
 
@@ -228,3 +229,11 @@ def test_the_readme_installs_the_torch_version_core_pins():
         if "download.pytorch.org" in line:
             assert "requirements.txt" in line or line.rstrip().endswith("\\"), \
                 f"README installs torch without core's pin: {line}"
+
+
+def test_the_plugin_api_documents_declaring_dependencies():
+    """The contract a plugin author reads. Without it the file is a convention
+    that happens to work, which is how the gap went unnoticed."""
+    doc = PLUGIN_API_DOC.read_text(encoding="utf-8")
+    assert "requirements.txt" in doc
+    assert SCRIPT.name in doc
