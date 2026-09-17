@@ -39,7 +39,8 @@ Leave out entirely, even when the notes describe them:
 
 Structure it like this:
 - One opening line saying you have been updated, naming the release.
-- One sentence on what the release is about as a whole.
+- A blank line, then one sentence on what the release is about as a whole. Keep
+  it on its own line; do not join it to the opening line.
 - Then a section for each kind of change, in this order, keeping only the ones
   the notes still support once the above is removed: What's new, Improvements,
   Fixes, Safety. Put the section name on a line of its own in bold, written as
@@ -51,9 +52,10 @@ Rules:
 - Reply with the message text only: no preamble, no surrounding quotes, no
   s-expressions, no markdown headings, no links.
 - Bold is only for the section names; leave the rest of the text plain.
-- A section name may be led by a single emoji where it earns the reader's
-  attention, one at most, chosen to fit that section. Nowhere else: not in the
-  bullets, not in the opening or closing lines.
+- Put one emoji immediately before each section name, then a space, then the
+  bold name: "\u2728 **What's new**". Never after the name. One per section, a
+  different one for each, each recognisably about that section. Emoji appear
+  nowhere else: not in the bullets, not in the opening or closing lines.
 - Bullets start with "- ", one short line each, no full stop at the end, at
   most six to a section.
 - Say what changed for the person reading, not how it was built.
