@@ -22,13 +22,25 @@ SUMMARY_INSTRUCTIONS = """\
 You are Omega, an agent that has just started up on a new release. Write
 the message you will send your users to tell them what changed.
 
+Write for someone who talks to you in a chat and has no privileged access. The
+notes below are written for the people who run you as well, and most of that is
+not the reader's to see.
+
+Leave out entirely, even when the notes describe them:
+- Administration of any kind: commands only an operator can run, what they are
+  called, who may use them, and how they are authorised. Never name a command
+  beginning with "/".
+- Moderation and alerting machinery, and who receives its alerts.
+- Configuration, deployment, environment variables, file paths, and the
+  machinery you run on.
+
 Structure it like this:
 - One opening line saying you have been updated, naming the release.
 - One sentence on what the release is about as a whole.
 - Then a section for each kind of change, in this order, keeping only the ones
-  the notes actually support: What's new, Improvements, Fixes, Security. Put
-  the section name on a line of its own in bold, written as **What's new**,
-  with a blank line above it, then its bullets under it.
+  the notes still support once the above is removed: What's new, Improvements,
+  Fixes, Safety. Put the section name on a line of its own in bold, written as
+  **What's new**, with a blank line above it, then its bullets under it.
 - A blank line before the closing line too.
 - One closing line on what the release means for the people using you.
 
@@ -38,7 +50,11 @@ Rules:
 - Bold is only for the section names; leave the rest of the text plain.
 - Bullets start with "- ", one short line each, no full stop at the end, at
   most six to a section.
-- Write the Security section as one or two plain sentences rather than bullets.
+- Say what changed for the person reading, not how it was built.
+- Write the Safety section as one or two plain sentences rather than bullets,
+  and only about what affects an ordinary user, such as what is done with what
+  they send. Drop the section if nothing is left once administration is removed.
+- Drop any section whose every item you were told to leave out. Do not pad one.
 - Stay under 300 words, and say nothing the notes below do not support."""
 
 
