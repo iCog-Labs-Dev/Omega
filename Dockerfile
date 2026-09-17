@@ -52,12 +52,18 @@ RUN sh build.sh
 RUN mkdir -p /PeTTa/repos \
  && git clone --depth 1 --branch "${CHROMADB_REF}" "${CHROMADB_REPO}" /PeTTa/repos/petta_lib_chromadb
 
-COPY ./requirements.txt /tmp/requirements.txt
-RUN python3 -m pip install --no-cache-dir --break-system-packages \
+# Torch comes from the CPU wheel index; its version is read from requirements.txt, not repeated here.
+RUN --mount=type=bind,source=requirements.txt,target=/tmp/omega/requirements.txt \
+    python3 -m pip install --no-cache-dir --break-system-packages \
     --index-url https://download.pytorch.org/whl/cpu \
     --extra-index-url https://pypi.org/simple/ \
-    torch==2.12.1 \
- && python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
+    "$(grep -E '^torch(\[|[=<>!~]|$)' /tmp/omega/requirements.txt)"
+
+# Core's requirements and every plugin's, resolved together so a conflict fails the build.
+RUN --mount=type=bind,source=requirements.txt,target=/tmp/omega/requirements.txt \
+    --mount=type=bind,source=plugins,target=/tmp/omega/plugins \
+    --mount=type=bind,source=scripts/install_dependencies.sh,target=/tmp/omega/scripts/install_dependencies.sh \
+    /tmp/omega/scripts/install_dependencies.sh --no-cache-dir --break-system-packages
 
 # Pre-download the sentence-transformers model so runtime does not need network access.
 RUN mkdir -p "${HF_HOME}" "${SENTENCE_TRANSFORMERS_HOME}" \
