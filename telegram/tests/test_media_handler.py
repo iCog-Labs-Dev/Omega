@@ -124,6 +124,171 @@ def test_extract_pdf_text_failure_returns_marker_never_raises():
             del sys.modules["pypdf"]
 
 
+def test_extract_pdf_text_uses_text_layer_without_vision_call():
+    vision_called = []
+    orig_vision = mh._call_vision_model
+    mh._call_vision_model = lambda parts, prompt: vision_called.append((parts, prompt))
+
+    class FakePage:
+        def extract_text(self):
+            return "direct text from pdf layer"
+
+    class FakePdfReader:
+        def __init__(self, buf):
+            self.pages = [FakePage()]
+
+    fake_pypdf = types.ModuleType("pypdf")
+    fake_pypdf.PdfReader = FakePdfReader
+    sys.modules["pypdf"] = fake_pypdf
+    try:
+        out = mh.extract_pdf_text(b"pdf bytes", "text_doc.pdf")
+        assert "direct text from pdf layer" in out, out
+        assert "[PDF: text_doc.pdf]" in out, out
+        assert len(vision_called) == 0, "Vision model should not be called when text layer exists"
+    finally:
+        del sys.modules["pypdf"]
+        mh._call_vision_model = orig_vision
+
+
+def test_extract_pdf_text_scanned_pdf_renders_and_calls_vision():
+    vision_calls = []
+    orig_vision = mh._call_vision_model
+    orig_render = mh._render_pdf_to_images
+
+    def fake_vision(parts, prompt):
+        vision_calls.append((parts, prompt))
+        return "Transcribed OCR text from page 1"
+
+    mh._call_vision_model = fake_vision
+    mh._render_pdf_to_images = lambda b, max_p: (1, [b"fake-jpeg-bytes"])
+
+    class FakePage:
+        def extract_text(self):
+            return ""  # Scanned PDF has no text layer
+
+    class FakePdfReader:
+        def __init__(self, buf):
+            self.pages = [FakePage()]
+
+    fake_pypdf = types.ModuleType("pypdf")
+    fake_pypdf.PdfReader = FakePdfReader
+    sys.modules["pypdf"] = fake_pypdf
+    try:
+        out = mh.extract_pdf_text(b"scanned bytes", "scanned.pdf")
+        assert "[PDF: scanned.pdf]" in out, out
+        assert "Transcribed OCR text from page 1" in out, out
+        assert len(vision_calls) == 1
+        assert "Transcribe all visible text" in vision_calls[0][1]
+    finally:
+        del sys.modules["pypdf"]
+        mh._call_vision_model = orig_vision
+        mh._render_pdf_to_images = orig_render
+
+
+def test_extract_pdf_text_genuinely_blank_returns_blank_marker():
+    orig_vision = mh._call_vision_model
+    orig_render = mh._render_pdf_to_images
+
+    mh._call_vision_model = lambda parts, prompt: "[BLANK]"
+    mh._render_pdf_to_images = lambda b, max_p: (1, [b"fake-jpeg-bytes"])
+
+    class FakePage:
+        def extract_text(self):
+            return ""
+
+    class FakePdfReader:
+        def __init__(self, buf):
+            self.pages = [FakePage()]
+
+    fake_pypdf = types.ModuleType("pypdf")
+    fake_pypdf.PdfReader = FakePdfReader
+    sys.modules["pypdf"] = fake_pypdf
+    try:
+        out = mh.extract_pdf_text(b"blank bytes", "blank.pdf")
+        assert out == "[PDF: blank.pdf]\n[Document is blank]", out
+    finally:
+        del sys.modules["pypdf"]
+        mh._call_vision_model = orig_vision
+        mh._render_pdf_to_images = orig_render
+
+
+def test_extract_pdf_text_zero_pages_returns_blank_marker():
+    class EmptyPdfReader:
+        def __init__(self, buf):
+            self.pages = []
+
+    fake_pypdf = types.ModuleType("pypdf")
+    fake_pypdf.PdfReader = EmptyPdfReader
+    sys.modules["pypdf"] = fake_pypdf
+    try:
+        out = mh.extract_pdf_text(b"empty bytes", "empty.pdf")
+        assert out == "[PDF: empty.pdf]\n[Document is blank]", out
+    finally:
+        del sys.modules["pypdf"]
+
+
+def test_extract_pdf_text_page_cap_enforced_and_truncation_visible():
+    vision_calls = []
+    orig_vision = mh._call_vision_model
+    orig_render = mh._render_pdf_to_images
+
+    def fake_vision(parts, prompt):
+        vision_calls.append(len(vision_calls) + 1)
+        return f"Page {len(vision_calls)} content"
+
+    mh._call_vision_model = fake_vision
+    mh._render_pdf_to_images = lambda b, max_p: (5, [b"page1", b"page2"])
+
+    class FakePage:
+        def extract_text(self):
+            return ""
+
+    class FakePdfReader:
+        def __init__(self, buf):
+            self.pages = [FakePage()] * 5
+
+    fake_pypdf = types.ModuleType("pypdf")
+    fake_pypdf.PdfReader = FakePdfReader
+    sys.modules["pypdf"] = fake_pypdf
+    try:
+        out = mh.extract_pdf_text(b"many pages", "large_scan.pdf", max_pages=2)
+        assert len(vision_calls) == 2
+        assert "Page 1 content" in out
+        assert "Page 2 content" in out
+        assert "[truncated: scanned pages limited to first 2 of 5 pages]" in out, out
+    finally:
+        del sys.modules["pypdf"]
+        mh._call_vision_model = orig_vision
+        mh._render_pdf_to_images = orig_render
+
+
+def test_extract_pdf_text_with_real_pypdfium2_and_pypdf():
+    from pypdf import PdfWriter
+    import io
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    buf = io.BytesIO()
+    writer.write(buf)
+    pdf_bytes = buf.getvalue()
+
+    orig_vision = mh._call_vision_model
+    try:
+        # 1. Blank PDF returns blank marker
+        mh._call_vision_model = lambda parts, prompt: "[BLANK]"
+        out = mh.extract_pdf_text(pdf_bytes, "real_blank.pdf")
+        assert out == "[PDF: real_blank.pdf]\n[Document is blank]", out
+
+        # 2. Scanned page returns vision OCR text
+        mh._call_vision_model = lambda parts, prompt: "Scanned invoice total: $150.00"
+        out_ocr = mh.extract_pdf_text(pdf_bytes, "real_scan.pdf")
+        assert "Scanned invoice total: $150.00" in out_ocr, out_ocr
+        assert "[PDF: real_scan.pdf]" in out_ocr, out_ocr
+    finally:
+        mh._call_vision_model = orig_vision
+
+
+
 def test_transcribe_audio_success_with_stubbed_openai_client():
     import openai
 
@@ -350,6 +515,12 @@ if __name__ == "__main__":
     test_sanitize_image_roundtrips_to_jpeg()
     test_extract_pdf_text_success_with_stubbed_pypdf()
     test_extract_pdf_text_failure_returns_marker_never_raises()
+    test_extract_pdf_text_uses_text_layer_without_vision_call()
+    test_extract_pdf_text_scanned_pdf_renders_and_calls_vision()
+    test_extract_pdf_text_genuinely_blank_returns_blank_marker()
+    test_extract_pdf_text_zero_pages_returns_blank_marker()
+    test_extract_pdf_text_page_cap_enforced_and_truncation_visible()
+    test_extract_pdf_text_with_real_pypdfium2_and_pypdf()
     test_transcribe_audio_success_with_stubbed_openai_client()
     test_transcribe_audio_missing_key_returns_marker_never_raises()
     test_generate_and_send_disabled()

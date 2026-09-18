@@ -139,7 +139,47 @@ def sanitize_image(file_bytes, max_dim=2048, quality=85):
     return out.getvalue()
 
 
-def extract_pdf_text(file_bytes, filename, max_chars=20000):
+MAX_SCANNED_PDF_PAGES = 10
+SCAN_VISION_PROMPT = (
+    "Transcribe all visible text from this scanned document page verbatim. "
+    "Maintain reading order and formatting where possible. "
+    "Do not summarize or explain. "
+    "If the page is blank or has no readable text, respond with '[BLANK]'."
+)
+
+
+def _is_blank_ocr_response(text):
+    if not text:
+        return True
+    cleaned = text.strip()
+    if not cleaned:
+        return True
+    normalized = cleaned.lower().strip("[](). ")
+    if normalized in ("blank", "blank page", "empty", "empty page", "no text", "no readable text"):
+        return True
+    if normalized.startswith("this page is blank") or normalized.startswith("there is no text"):
+        return True
+    return False
+
+
+def _render_pdf_to_images(file_bytes, max_pages):
+    """Render up to max_pages of a PDF to JPEG byte strings using pypdfium2."""
+    import pypdfium2 as pdfium
+    from io import BytesIO
+
+    doc = pdfium.PdfDocument(BytesIO(file_bytes))
+    total_pages = len(doc)
+    page_bytes = []
+    for i in range(min(total_pages, max_pages)):
+        page = doc[i]
+        pil_img = page.render(scale=2.0).to_pil()
+        out = BytesIO()
+        pil_img.convert("RGB").save(out, format="JPEG", quality=85)
+        page_bytes.append(out.getvalue())
+    return total_pages, page_bytes
+
+
+def extract_pdf_text(file_bytes, filename, max_chars=20000, max_pages=MAX_SCANNED_PDF_PAGES):
     try:
         from pypdf import PdfReader
         from io import BytesIO
@@ -149,13 +189,55 @@ def extract_pdf_text(file_bytes, filename, max_chars=20000):
         for page in reader.pages:
             pages.append(page.extract_text() or "")
         text = "\n".join(pages)
-        if len(text) > max_chars:
-            text = text[:max_chars] + "\n[truncated]"
-        logger.info(f"Extracted text from {filename}: {len(text)}")
-        return f"[PDF: {filename}]\n{text}"
+
+        # If a readable text layer is present, use it directly (no vision call).
+        if text.strip():
+            if len(text) > max_chars:
+                text = text[:max_chars] + "\n[truncated]"
+            logger.info(f"Extracted text from {filename}: {len(text)}")
+            return f"[PDF: {filename}]\n{text}"
+
+        # No text layer or empty text layer: document may be a scan or genuinely blank.
+        if not reader.pages:
+            return f"[PDF: {filename}]\n[Document is blank]"
+
+        total_pages, rendered_pages = _render_pdf_to_images(file_bytes, max_pages)
+        if total_pages == 0 or not rendered_pages:
+            return f"[PDF: {filename}]\n[Document is blank]"
+
+        ocr_pages = []
+        for img_bytes in rendered_pages:
+            data_uri = image_to_data_uri(img_bytes, "image/jpeg")
+            image_parts = [{"type": "image_url", "image_url": {"url": data_uri}}]
+            try:
+                page_text = _call_vision_model(image_parts, SCAN_VISION_PROMPT)
+            except Exception as exc:
+                if "empty caption" in str(exc).lower():
+                    page_text = ""
+                else:
+                    raise exc
+
+            if not _is_blank_ocr_response(page_text):
+                ocr_pages.append(page_text.strip())
+
+        if not ocr_pages:
+            return f"[PDF: {filename}]\n[Document is blank]"
+
+        combined = "\n\n".join(ocr_pages)
+        if total_pages > max_pages:
+            combined += f"\n[truncated: scanned pages limited to first {max_pages} of {total_pages} pages]"
+        if len(combined) > max_chars:
+            combined = combined[:max_chars] + "\n[truncated]"
+
+        logger.info(
+            f"Extracted OCR text from scanned {filename}: {len(combined)} chars across {len(ocr_pages)} page(s)"
+        )
+        return f"[PDF: {filename}]\n{combined}"
+
     except Exception as e:
         logger.error(f"PDF extraction failed for {filename}: {e}")
         return f"[PDF: {filename}]\n[Could not extract text: {e}]"
+
 
 
 def transcribe_audio(file_bytes, filename, model="openai/whisper-large-v3", max_bytes=25 * 1024 * 1024, language=None, temperature=None):
