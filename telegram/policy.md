@@ -2,7 +2,7 @@
 
 This bot reads messages in the chats it is added to and replies only when
 directly tagged or replied to. It can read images, PDFs and voice notes you
-attach, generate images, and send voice replies when enabled. Do not share
+attach, generate images and PDFs, and send voice replies when enabled. Do not share
 passwords, tokens, private keys or sensitive personal data.
 
 **About this bot**
@@ -17,6 +17,8 @@ passwords, tokens, private keys or sensitive personal data.
 - Attached voice and audio notes are sent to an external transcription service.
 - It can generate an image from a description and send it back, using an external
   image service.
+- It can generate a PDF containing requested text and send it back. PDF creation
+  happens locally on the machine running the bot.
 - When voice replies are enabled, it can turn reply text into speech using an
   external text-to-speech service.
 - It may use limited web lookups to answer questions.
@@ -42,6 +44,7 @@ What I can do:
 - read text out of PDFs you attach
 - transcribe voice and audio notes you send, using an external service
 - generate an image from a description and send it to you
+- generate a PDF containing requested text and send it to you
 - send a spoken reply when voice replies are enabled
 - perform limited web lookups
 
