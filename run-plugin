@@ -353,6 +353,10 @@ common=(
     --env-file "$ENV_FILE"
     --security-opt no-new-privileges:true
     --init
+    # The core starts nginx as www-data and its nginx.conf logs to
+    # /dev/stderr. Its image grants www-data the tty group specifically for
+    # this, so allocate a TTY even for detached bot containers.
+    -t
     --add-host=host.docker.internal:host-gateway
     --volume "$MEMORY_DIR:$OMEGA_ROOT/memory"
     --tmpfs /tmp:size=64m,mode=1777
