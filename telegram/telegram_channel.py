@@ -356,7 +356,7 @@ class _TelegramChannel:
                 ready_chat_id, text, reply_id, payload = self._message_queue.pop(0)
 
                 if not self._is_allowed_chat(ready_chat_id) and ready_chat_id not in self.admin_ids:
-                        return None
+                        return ""
 
                 self.chat_id = ready_chat_id
                 self._reply_to_id = reply_id
@@ -375,7 +375,12 @@ class _TelegramChannel:
                 if context:
                     text = f"{text}\n\n{context}"
                 return f"[{ready_chat_id}] [{reply_id}] {text}"
-            return None
+            # Python None is rendered by PeTTa as ``(@ none)``.  The core then
+            # sees that non-empty representation as a brand-new human message,
+            # which starts an idle LLM loop and can exhaust an API quota before
+            # Telegram delivers a real message.  The channel protocol uses an
+            # empty string as its no-message sentinel.
+            return ""
     
     def _is_admin_dm(self, message: types.Message) -> bool:
         """Whether this is an admin's direct message. Admin commands are the most
