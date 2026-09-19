@@ -1136,6 +1136,42 @@ class _TelegramChannel:
                 logging.error(f"Failed to send voice: {e2}")
                 raise
 
+    def send_document(self, document_bytes, filename="document.pdf", caption=None,
+                      chat_id=None, reply_to_id=None):
+        """Send a document to the active chat from the bot event loop."""
+        target_chat_id = chat_id or self.chat_id
+        self._stop_typing(str(target_chat_id))
+        target_reply_id = reply_to_id or (
+            self._reply_to_id if target_chat_id == self.chat_id else None)
+
+        if not self.connected or self.bot is None or self.loop is None or target_chat_id is None:
+            raise RuntimeError(
+                f"send_document preconditions not met (connected={self.connected}, "
+                f"bot={self.bot is not None}, loop={self.loop is not None}, "
+                f"chat_id={target_chat_id})")
+
+        def submit(document, include_context=True):
+            kwargs = {"chat_id": target_chat_id, "document": document}
+            if include_context:
+                kwargs.update(caption=caption, reply_to_message_id=target_reply_id,
+                              allow_sending_without_reply=True)
+            return asyncio.run_coroutine_threadsafe(
+                self.bot.send_document(**kwargs), self.loop)
+
+        try:
+            submit(BufferedInputFile(document_bytes, filename=filename)).result(timeout=30)
+            logging.info(f"send_document: delivered to {target_chat_id}")
+        except Exception as error:
+            logging.error(
+                f"Failed to send document (retrying without caption/reply): {error}")
+            try:
+                submit(BufferedInputFile(document_bytes, filename=filename),
+                       include_context=False).result(timeout=30)
+                logging.info(f"send_document: delivered to {target_chat_id} (fallback)")
+            except Exception as fallback_error:
+                logging.error(f"Failed to send document: {fallback_error}")
+                raise
+
     def send_photo(self, image_bytes, caption=None, chat_id=None, reply_to_id=None):
         """Send a photo to the active chat, dispatched to the bot's event loop.
         Mirrors send_message's threading/targeting. Caption is sent plain (no
@@ -1298,6 +1334,13 @@ def send_voice(audio_bytes, caption=None):
                         reply_to_id=getattr(_channel, "_reply_to_id", None))
 
 
+def send_document(document_bytes, filename="document.pdf", caption=None):
+    """Send a generated document to the active Telegram chat."""
+    _channel.send_document(document_bytes, filename=filename, caption=caption,
+                           chat_id=_channel.chat_id,
+                           reply_to_id=getattr(_channel, "_reply_to_id", None))
+
+
 def send_chat_action(action):
     """Send a chat action (e.g. 'record_voice', 'typing') to the active chat.
     When switching away from typing (e.g. to record_voice), the typing loop
@@ -1385,5 +1428,6 @@ def loadOmegaPlugin():
     import media_handler
     # Hand media_handler this module's live channel so generate-image and
     # speak can send their output; it cannot find them by importing us by name.
-    media_handler.register_channel(send_photo, send_voice, send_chat_action, _channel)
+    media_handler.register_channel(send_photo, send_voice, send_document,
+                                   send_chat_action, _channel)
     channels.registerCommChannel("telegram", TelegramChannel())

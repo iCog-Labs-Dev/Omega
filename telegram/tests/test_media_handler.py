@@ -206,7 +206,8 @@ def test_generate_and_send_success():
     mh._prompt_is_unsafe = lambda prompt: False
     mh._generate_image_bytes = lambda prompt: b"img"
     mh.register_channel(lambda image_bytes, caption=None: sent.update(
-        bytes=image_bytes, caption=caption), lambda *a, **k: None, lambda *a, **k: None, object())
+        bytes=image_bytes, caption=caption), lambda *a, **k: None,
+        lambda *a, **k: None, lambda *a, **k: None, object())
     try:
         out = mh.generate_and_send("a cat")
         assert out.startswith("IMAGE_SENT"), out
@@ -247,7 +248,8 @@ def test_register_channel_wires_gate_and_sender():
     try:
         class Chan:
             reply_constraints = {"allow_image_generation": True}
-        mh.register_channel(lambda *a, **k: None, lambda *a, **k: None, lambda *a, **k: None, Chan())
+        mh.register_channel(lambda *a, **k: None, lambda *a, **k: None,
+                            lambda *a, **k: None, lambda *a, **k: None, Chan())
         assert mh._image_generation_allowed() is True
         Chan.reply_constraints = {"allow_image_generation": False}
         assert mh._image_generation_allowed() is False
@@ -258,6 +260,53 @@ def test_register_channel_wires_gate_and_sender():
 def test_generate_and_send_empty_prompt():
     out = mh.generate_and_send("   ")
     assert out == "IMAGE_FAILED: empty prompt", out
+
+
+# --- PDF generation skill tests -------------------------------------------
+
+def test_generate_pdf_bytes_has_pdf_signature():
+    result = mh._generate_pdf_bytes("A short PDF report")
+    assert isinstance(result, bytes), result
+    assert result.startswith(b"%PDF"), result[:16]
+
+def test_generate_and_send_pdf_success():
+    original = (mh._pdf_generation_allowed, mh._prompt_is_unsafe,
+                mh._generate_pdf_bytes, mh._live_send_document)
+    sent = {}
+    mh._pdf_generation_allowed = lambda: True
+    mh._prompt_is_unsafe = lambda content: False
+    mh._generate_pdf_bytes = lambda content: b"%PDF-test"
+    mh._live_send_document = lambda data, filename: sent.update(data=data, filename=filename)
+    try:
+        assert mh.generate_and_send_pdf("A concise report") == "PDF_SENT"
+        assert sent == {"data": b"%PDF-test", "filename": "Omega_Document.pdf"}
+    finally:
+        (mh._pdf_generation_allowed, mh._prompt_is_unsafe,
+         mh._generate_pdf_bytes, mh._live_send_document) = original
+
+
+def test_generate_and_send_pdf_checks_gate_and_content():
+    original = mh._pdf_generation_allowed, mh._prompt_is_unsafe
+    mh._pdf_generation_allowed = lambda: False
+    mh._prompt_is_unsafe = lambda content: False
+    try:
+        assert mh.generate_and_send_pdf("report") == "PDF_DISABLED: PDF generation is turned off"
+        assert mh.generate_and_send_pdf(" ") == "PDF_FAILED: empty content"
+        mh._pdf_generation_allowed = lambda: True
+        assert mh.generate_and_send_pdf("x" * (mh.MAX_PDF_CHARS + 1)) == (
+            f"PDF_FAILED: content exceeds {mh.MAX_PDF_CHARS} characters")
+    finally:
+        mh._pdf_generation_allowed, mh._prompt_is_unsafe = original
+
+
+def test_generate_and_send_pdf_refuses_unsafe_content():
+    original = mh._pdf_generation_allowed, mh._prompt_is_unsafe
+    mh._pdf_generation_allowed = lambda: True
+    mh._prompt_is_unsafe = lambda content: True
+    try:
+        assert mh.generate_and_send_pdf("unsafe report") == "Refused: unsafe PDF content"
+    finally:
+        mh._pdf_generation_allowed, mh._prompt_is_unsafe = original
 
 
 # --- speak skill tests -------------------------------------------------------
@@ -359,6 +408,10 @@ if __name__ == "__main__":
     test_generate_and_send_without_registered_channel()
     test_register_channel_wires_gate_and_sender()
     test_generate_and_send_empty_prompt()
+    test_generate_pdf_bytes_has_pdf_signature()
+    test_generate_and_send_pdf_success()
+    test_generate_and_send_pdf_checks_gate_and_content()
+    test_generate_and_send_pdf_refuses_unsafe_content()
     test_speak_disabled()
     test_speak_synthesis_failure()
     test_speak_success()
