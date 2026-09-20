@@ -192,6 +192,37 @@ def test_an_install_failure_stops_before_the_check(tmp_path):
     assert not [call for call in calls if "pip check" in call]
 
 
+def test_a_plugin_cannot_choose_where_packages_come_from(tmp_path):
+    """pip reads an option written inside a requirements file as an instruction
+    for the whole invocation, and it beats the same option on the command line.
+    A plugin shipping one picks the index core's own pinned packages come from,
+    and the install still succeeds, so the file is refused before pip runs."""
+    hijack = "--index-url https://elsewhere.example/simple\nrequests\n"
+    _, result, calls = _install(tmp_path, {"greedy": hijack})
+
+    assert result.returncode != 0, "the install went ahead"
+    assert not _installs(calls), "pip installed something anyway"
+
+
+def test_the_refused_line_is_quoted(tmp_path):
+    """Whoever wrote the plugin has to be able to find it, so core names the
+    file, the line number and the line itself."""
+    carried = "requests\n--extra-index-url https://elsewhere.example\n"
+    _, result, _ = _install(tmp_path, {"greedy": carried})
+
+    assert "plugins/greedy/requirements.txt" in result.stderr
+    assert "2:--extra-index-url https://elsewhere.example" in result.stderr
+
+
+def test_a_comment_is_not_an_option(tmp_path):
+    """Refusing options must not refuse an ordinary file that explains itself."""
+    ordinary = "# what the plugin imports\n\nrequests>=2.0\n"
+    _, result, calls = _install(tmp_path, {"polite": ordinary})
+
+    assert result.returncode == 0, result.stderr
+    assert _installs(calls), "an ordinary plugin file was not installed"
+
+
 def test_the_script_names_no_plugin():
     """Core walks whatever is there. Naming a plugin would make the next one a
     core change again, which is the whole problem."""

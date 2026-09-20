@@ -48,6 +48,13 @@ fails the install with a conflict rather than replacing it. Declare ranges wide
 enough to include Omega's pin — `openai>=1.0.0` rather than `openai==2.1.0` —
 and list only what the plugin actually imports.
 
+The file holds requirements and nothing else. pip reads an option written inside
+a requirements file — `--index-url` and `--extra-index-url` above all — as an
+instruction for the whole invocation rather than for the file carrying it, which
+would let one plugin choose where Omega's own packages are fetched from. Sharing
+one invocation is what makes Omega's pins win, so there is nowhere to scope such
+a line to, and a plugin that carries one stops the install with the line quoted.
+
 Two limits are worth knowing. A plugin that pins a package Omega depends on
 *indirectly* can change it without any error, because nothing is violated: keep
 the list short for this reason. And a plugin mounted into an already built image
