@@ -93,6 +93,21 @@ def _installs(calls):
     return [call for call in calls if "pip install" in call]
 
 
+def _unwrapped(text):
+    """The text's lines, with a command wrapped over several read as the one it is.
+
+    A shell command in the README wraps with a trailing backslash, so the pin an
+    install carries often sits on a different line from the command's name.
+    """
+    commands = []
+    for line in text.splitlines():
+        if commands and commands[-1].endswith("\\"):
+            commands[-1] = commands[-1][:-1].rstrip() + " " + line.strip()
+        else:
+            commands.append(line)
+    return commands
+
+
 def test_core_and_every_plugin_resolve_in_one_invocation(tmp_path):
     """Separate pip runs resolve separately, and the loser is silent.
 
@@ -185,7 +200,10 @@ def test_the_script_names_no_plugin():
     )
     assert present, "no plugins in the tree; this test has nothing to check"
     text = SCRIPT.read_text(encoding="utf-8") + DOCKERFILE.read_text(encoding="utf-8")
-    named = [name for name in present if name in text.split()]
+    named = [
+        name for name in present
+        if re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text)
+    ]
     assert not named, f"plugins named by hand: {named}"
 
 
@@ -225,10 +243,10 @@ def test_the_readme_installs_the_torch_version_core_pins():
     """The CPU wheel index serves a newer torch than core pins, so installing it
     unpinned and then installing requirements.txt swaps the CPU build for PyPI's
     CUDA one — a multi-gigabyte download, no error, and the wrong wheel."""
-    for line in README.read_text(encoding="utf-8").splitlines():
-        if "download.pytorch.org" in line:
-            assert "requirements.txt" in line or line.rstrip().endswith("\\"), \
-                f"README installs torch without core's pin: {line}"
+    for command in _unwrapped(README.read_text(encoding="utf-8")):
+        if "download.pytorch.org" in command:
+            assert "requirements.txt" in command, \
+                f"README installs torch without core's pin: {command}"
 
 
 def test_the_plugin_api_documents_declaring_dependencies():
