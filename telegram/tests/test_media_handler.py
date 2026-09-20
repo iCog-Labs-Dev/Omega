@@ -1,5 +1,6 @@
 import io
 import os, sys
+import time
 import types
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -69,6 +70,97 @@ def test_describe_never_raises_on_malformed_media():
     finally:
         mh.clear_pending()
         mh.set_pending_media(None)
+
+
+def _real_image_data_uri(size=(64, 64)):
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", size, "white").save(buf, format="JPEG")
+    return mh.image_to_data_uri(buf.getvalue(), "image/jpeg")
+
+
+def _describing(tmp_path, caption="a QR code on a white card"):
+    """Point the media directory at the test's own folder and stub the vision
+    call, restoring both afterwards."""
+    class _Ctx:
+        def __enter__(self):
+            self.dir, self.vision = mh.MEDIA_DIR, mh._call_vision_model
+            mh.MEDIA_DIR = str(tmp_path / "media")
+            mh._call_vision_model = lambda parts, prompt: caption
+            return self
+
+        def __exit__(self, *exc):
+            mh.MEDIA_DIR, mh._call_vision_model = self.dir, self.vision
+            mh.clear_pending()
+            mh.set_pending_media(None)
+
+    return _Ctx()
+
+
+def _file_line(result):
+    for line in result.splitlines():
+        if line.startswith("[IMAGE FILE: "):
+            return line[len("[IMAGE FILE: "):-1]
+    return None
+
+
+def test_describe_leaves_the_image_where_a_shell_tool_can_open_it(tmp_path):
+    """The image otherwise exists only as base64 inside this process, which the
+    decoder - a separate process - cannot reach."""
+    with _describing(tmp_path):
+        mh.set_pending_media([{"type": "image_url",
+                               "image_url": {"url": _real_image_data_uri()}}])
+        path = _file_line(mh.describe_image(""))
+        assert path, "no [IMAGE FILE:] line in the description"
+        assert os.path.isfile(path)
+
+        from PIL import Image
+        with Image.open(path) as written:
+            assert written.size == (64, 64)
+
+
+def test_no_file_is_offered_when_the_bytes_are_not_an_image(tmp_path):
+    """Better to offer no path at all than one that sends the decoder at
+    garbage; a caller can put anything in the pending slot."""
+    with _describing(tmp_path):
+        mh.set_pending_media([{"type": "image_url",
+                               "image_url": {"url": "data:image/jpeg;base64,AAAA"}}])
+        assert _file_line(mh.describe_image("")) is None
+
+
+def test_describing_one_image_twice_reuses_one_file(tmp_path):
+    with _describing(tmp_path):
+        mh.set_pending_media([{"type": "image_url",
+                               "image_url": {"url": _real_image_data_uri()}}])
+        first = _file_line(mh.describe_image(""))
+        second = _file_line(mh.describe_image("what does the code say"))
+        assert first == second
+        assert len(os.listdir(os.path.dirname(first))) == 1
+
+
+def test_images_from_earlier_turns_are_cleaned_up(tmp_path):
+    """A bot runs for weeks. Without this, every photo anyone ever sent stays
+    in /tmp for the life of the process."""
+    with _describing(tmp_path):
+        os.makedirs(mh.MEDIA_DIR, exist_ok=True)
+        stale = os.path.join(mh.MEDIA_DIR, "stale.jpg")
+        open(stale, "wb").close()
+        old = time.time() - mh.MEDIA_TTL_SECONDS - 60
+        os.utime(stale, (old, old))
+
+        mh.set_pending_media([{"type": "image_url",
+                               "image_url": {"url": _real_image_data_uri()}}])
+        fresh = _file_line(mh.describe_image(""))
+
+        assert not os.path.exists(stale)
+        assert os.path.exists(fresh), "the image being described must survive"
+
+
+def test_vision_is_asked_to_name_a_qr_code():
+    """The agent only knows to decode because the description says there is a
+    code, so the request for that has to stay in the prompt."""
+    assert "QR code" in mh.VISION_PROMPT
 
 
 def test_sanitize_image_roundtrips_to_jpeg():

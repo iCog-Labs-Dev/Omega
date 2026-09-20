@@ -1,6 +1,8 @@
 import base64
 import hashlib
+import os
 import threading
+import time
 import logging
 import sys
 
@@ -21,8 +23,19 @@ _pending_description = {}       # (image_key, query) -> caption, per-turn memo
 
 VISION_PROMPT = (
     "Describe this image for a text-only assistant. Report objects, any visible "
-    "text verbatim, layout, and notable details. Be concise and factual."
+    "text verbatim, layout, and notable details. Be concise and factual. "
+    "If a QR code is present, say so in plain words and do not guess what it "
+    "encodes - it gets decoded separately."
 )
+
+# Where describe-image leaves a copy of the image for a shell tool to open.
+# /tmp because the sandbox policy allows writing there and little else.
+MEDIA_DIR = "/tmp/omega-media"
+
+# The agent opens the file in the cycle after describe-image, so an hour is
+# already generous. Past that it is somebody's photo sitting on disk for no
+# reason, and a long-running bot would never stop collecting them.
+MEDIA_TTL_SECONDS = 3600
 
 
 def set_pending_media(media):
@@ -77,6 +90,57 @@ def _image_key(image_parts):
     return hashlib.sha256(urls.encode("utf-8")).hexdigest()
 
 
+def _prune_old_images():
+    """Drop images left behind by earlier turns. Never raises: a file that
+    cannot be removed is not a reason to fail describing the current one."""
+    cutoff = time.time() - MEDIA_TTL_SECONDS
+    try:
+        names = os.listdir(MEDIA_DIR)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(MEDIA_DIR, name)
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.remove(path)
+        except OSError:
+            pass
+
+
+def _materialize_image(image_parts, image_key):
+    """Write the pending image to disk and return its path, or None.
+
+    The image otherwise lives only as base64 inside this process, which a shell
+    tool running as a separate process cannot reach. Written under the key of
+    its own contents, so describing the same image twice reuses one file.
+
+    None means there was nothing openable to point at: the part carried no
+    inline data, or the bytes are not a decodable image. Better to offer no
+    path than one that sends a tool at garbage.
+    """
+    from io import BytesIO
+
+    marker = ";base64,"
+    url = (image_parts[0].get("image_url") or {}).get("url", "")
+    if marker not in url:
+        return None
+    try:
+        raw = base64.b64decode(url.split(marker, 1)[1], validate=True)
+        from PIL import Image
+        with Image.open(BytesIO(raw)) as probe:
+            probe.verify()
+        os.makedirs(MEDIA_DIR, exist_ok=True)
+        _prune_old_images()
+        path = os.path.join(MEDIA_DIR, f"{image_key[:16]}.jpg")
+        if not os.path.exists(path):
+            with open(path, "wb") as f:
+                f.write(raw)
+        return path
+    except Exception as e:
+        logger.info("[IMGDBG] no file written for pending image: %s", e)
+        return None
+
+
 def _call_vision_model(image_parts, prompt):
     """Vision call via the configured vision provider. Isolated so tests stub it."""
     from vision import vision_chat
@@ -96,7 +160,8 @@ def describe_image(query=""):
             logger.info("[IMGDBG] describe_image: no pending image available")
             return "[NO_IMAGE: nothing is attached to describe]"
 
-        key = (_image_key(parts), query)
+        image_key = _image_key(parts)
+        key = (image_key, query)
         with _lock:
             cached = _pending_description.get(key)
         if cached is not None:
@@ -105,6 +170,9 @@ def describe_image(query=""):
         prompt = VISION_PROMPT if not query else f"{VISION_PROMPT} Focus on: {query}"
         caption = _call_vision_model(parts, prompt)
         result = f"[IMAGE DESCRIPTION]\n{caption}"
+        path = _materialize_image(parts, image_key)
+        if path:
+            result += f"\n[IMAGE FILE: {path}]"
         with _lock:
             _pending_description[key] = result
         logger.info("Described pending image: %d chars", len(caption))

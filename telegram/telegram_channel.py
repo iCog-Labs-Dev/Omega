@@ -5,6 +5,7 @@ import logging
 import yaml
 import os
 import re
+import tempfile
 from io import BytesIO
 
 from aiogram import Bot, Dispatcher, types, F
@@ -66,6 +67,9 @@ def _plugin_file(name):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
 
 
+QR_DECODER = "tools/decode-qr"
+
+
 def prompt_path():
     """Where the channel's prompt section lives, for the MeTTa side to read.
 
@@ -73,7 +77,31 @@ def prompt_path():
     root, so the plugin works wherever it is checked out - including outside the
     core tree, which is the point of it being a plugin.
     """
-    return config_get_by_key("TG_PROMPT_PATH", _plugin_file("prompt.txt"))
+    return _render_prompt(config_get_by_key("TG_PROMPT_PATH",
+                                            _plugin_file("prompt.txt")))
+
+
+def _render_prompt(path):
+    """Fill a {DECODER} placeholder with where the decoder actually sits.
+
+    The prompt names a program the agent runs through the shell skill, and that
+    program moves with the plugin, so its path cannot be written into the file
+    for the same reason prompt_path does not assume a repository root. A prompt
+    without the placeholder - anyone's TG_PROMPT_PATH override - is handed back
+    untouched rather than copied.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError as e:
+        logging.warning(f"Could not read prompt section {path}: {e}")
+        return path
+    if "{DECODER}" not in text:
+        return path
+    rendered = os.path.join(tempfile.gettempdir(), "omega-telegram-prompt.txt")
+    with open(rendered, "w", encoding="utf-8") as f:
+        f.write(text.replace("{DECODER}", _plugin_file(QR_DECODER)))
+    return rendered
 
 
 # Telegram refuses a text message over 4096 characters.
