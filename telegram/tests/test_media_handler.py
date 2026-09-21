@@ -2,7 +2,8 @@ import io
 import os, sys
 import types
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+from pypdf import PdfReader
+from io import BytesIO
 import media_handler as mh
 
 
@@ -307,6 +308,52 @@ def test_generate_and_send_pdf_refuses_unsafe_content():
         assert mh.generate_and_send_pdf("unsafe report") == "Refused: unsafe PDF content"
     finally:
         mh._pdf_generation_allowed, mh._prompt_is_unsafe = original
+
+def test_generate_pdf_bytes_preserves_unicode_text():
+    content = (
+        'Curly quotes: “Hello”\n'
+        'Em dash: —\n'
+        'Bullet: •\n'
+        'Cyrillic: Привет мир\n'
+        'Amharic: ሰላም ዓለም\n'
+        'Chinese: 你好世界'
+    )
+
+    result = mh._generate_pdf_bytes(content)
+
+    assert isinstance(result, bytes), result
+    assert result.startswith(b"%PDF"), result[:16]
+
+    reader = PdfReader(BytesIO(result))
+    extracted = "\n".join(page.extract_text() or "" for page in reader.pages)
+
+    assert "“Hello”" in extracted
+    assert "—" in extracted
+    assert "•" in extracted
+    assert "Привет мир" in extracted
+    assert "ሰላም ዓለም" in extracted
+    assert "你好世界" in extracted
+
+def test_pdf_generation_gate_defaults_and_overrides():
+    orig_chan = mh._live_channel
+    class FakeChannel:
+        pass
+    mh._live_channel = FakeChannel()
+    try:
+        # Missing key -> defaults to True
+        FakeChannel.reply_constraints = {}
+        assert mh._pdf_generation_allowed() is True
+
+        # Explicit False -> False
+        FakeChannel.reply_constraints = {"allow_pdf_generation": False}
+        assert mh._pdf_generation_allowed() is False
+
+        # Explicit True -> True
+        FakeChannel.reply_constraints = {"allow_pdf_generation": True}
+        assert mh._pdf_generation_allowed() is True
+    finally:
+        mh._live_channel = orig_chan
+
 
 
 # --- speak skill tests -------------------------------------------------------

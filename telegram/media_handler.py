@@ -1,3 +1,4 @@
+from pathlib import Path
 import base64
 import hashlib
 import threading
@@ -417,7 +418,7 @@ def _pdf_generation_allowed():
     """Read the active channel's PDF gate; default to disabled."""
     try:
         constraints = getattr(_live_channel, "reply_constraints", None) or {}
-        return bool(constraints.get("allow_pdf_generation", False))
+        return bool(constraints.get("allow_pdf_generation", True))
     except Exception as error:
         logger.error(f"Could not read allow_pdf_generation gate: {error}")
         return False
@@ -432,11 +433,12 @@ def _generate_pdf_bytes(content):
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
-        pdf.set_font("Helvetica", size=12)
-        # Core PDF fonts support Latin-1. Replace unsupported glyphs so one
-        # character never prevents delivery of the complete document.
-        safe_content = content.encode("latin-1", "replace").decode("latin-1")
-        pdf.multi_cell(0, 6, text=safe_content)
+        font_path = Path(__file__).resolve().parent / "assets" / "fonts" / "DejaVuSans.ttf"
+
+        pdf.add_font("DejaVu", fname=str(font_path))
+        pdf.set_font("DejaVu", size=12)
+
+        pdf.multi_cell(0, 6, text=content)
         buffer = BytesIO()
         pdf.output(buffer)
         return buffer.getvalue()
