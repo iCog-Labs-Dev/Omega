@@ -353,10 +353,6 @@ common=(
     --env-file "$ENV_FILE"
     --security-opt no-new-privileges:true
     --init
-    # The core starts nginx as www-data and its nginx.conf logs to
-    # /dev/stderr. Its image grants www-data the tty group specifically for
-    # this, so allocate a TTY even for detached bot containers.
-    -t
     --add-host=host.docker.internal:host-gateway
     --volume "$MEMORY_DIR:$OMEGA_ROOT/memory"
     --tmpfs /tmp:size=64m,mode=1777
@@ -387,7 +383,9 @@ case "$MODE" in
         # keys are still in the environment, scrubs them, then drops to nobody.
         # The plugin reads its upstreams through that proxy, so no key reaches
         # the agent and the entrypoint does not need bypassing.
-        run "docker run -d ${common[*]} ${DOCKER_ARGS[*]:-} '$IMAGE' ${args[*]}"
+        # Note: NGINX startup fails without a TTY in some environments,
+        # so -t is preserved here for the detached bot (but omitted from tests/shell).
+        run "docker run -d -t ${common[*]} ${DOCKER_ARGS[*]:-} '$IMAGE' ${args[*]}"
         [ "$DRY_RUN" = 1 ] || say "started. logs: docker logs -f $CONTAINER"
         ;;
 esac
