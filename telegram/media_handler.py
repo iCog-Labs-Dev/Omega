@@ -77,9 +77,11 @@ def _image_key(image_parts):
     return hashlib.sha256(urls.encode("utf-8")).hexdigest()
 
 
-def _call_vision_model(image_parts, prompt):
+def _call_vision_model(image_parts, prompt, max_tokens=None):
     """Vision call via the configured vision provider. Isolated so tests stub it."""
     from vision import vision_chat
+    if max_tokens is not None:
+        return vision_chat(image_parts, prompt, max_tokens=max_tokens)
     return vision_chat(image_parts, prompt)
 
 
@@ -140,6 +142,8 @@ def sanitize_image(file_bytes, max_dim=2048, quality=85):
 
 
 MAX_SCANNED_PDF_PAGES = 10
+SCAN_VISION_MAX_TOKENS = 4096
+MIN_CHARS_PER_PAGE = 50
 SCAN_VISION_PROMPT = (
     "Transcribe all visible text from this scanned document page verbatim. "
     "Maintain reading order and formatting where possible. "
@@ -175,7 +179,7 @@ def _render_pdf_to_images(file_bytes, max_pages):
         pil_img = page.render(scale=2.0).to_pil()
         out = BytesIO()
         pil_img.convert("RGB").save(out, format="JPEG", quality=85)
-        page_bytes.append(out.getvalue())
+        page_bytes.append(sanitize_image(out.getvalue()))
     return total_pages, page_bytes
 
 
@@ -191,7 +195,7 @@ def extract_pdf_text(file_bytes, filename, max_chars=20000, max_pages=MAX_SCANNE
         text = "\n".join(pages)
 
         # If a readable text layer is present, use it directly (no vision call).
-        if text.strip():
+        if text.strip() and len(text.strip()) >= MIN_CHARS_PER_PAGE * len(reader.pages):
             if len(text) > max_chars:
                 text = text[:max_chars] + "\n[truncated]"
             logger.info(f"Extracted text from {filename}: {len(text)}")
@@ -206,16 +210,22 @@ def extract_pdf_text(file_bytes, filename, max_chars=20000, max_pages=MAX_SCANNE
             return f"[PDF: {filename}]\n[Document is blank]"
 
         ocr_pages = []
-        for img_bytes in rendered_pages:
+        for i, img_bytes in enumerate(rendered_pages):
             data_uri = image_to_data_uri(img_bytes, "image/jpeg")
             image_parts = [{"type": "image_url", "image_url": {"url": data_uri}}]
             try:
-                page_text = _call_vision_model(image_parts, SCAN_VISION_PROMPT)
+                try:
+                    page_text = _call_vision_model(
+                        image_parts, SCAN_VISION_PROMPT, max_tokens=SCAN_VISION_MAX_TOKENS
+                    )
+                except TypeError:
+                    page_text = _call_vision_model(image_parts, SCAN_VISION_PROMPT)
             except Exception as exc:
                 if "empty caption" in str(exc).lower():
                     page_text = ""
                 else:
-                    raise exc
+                    logger.warning(f"OCR failed on page {i + 1} of {filename}: {exc}")
+                    page_text = f"[page {i + 1}: unreadable]"
 
             if not _is_blank_ocr_response(page_text):
                 ocr_pages.append(page_text.strip())
@@ -224,10 +234,10 @@ def extract_pdf_text(file_bytes, filename, max_chars=20000, max_pages=MAX_SCANNE
             return f"[PDF: {filename}]\n[Document is blank]"
 
         combined = "\n\n".join(ocr_pages)
-        if total_pages > max_pages:
-            combined += f"\n[truncated: scanned pages limited to first {max_pages} of {total_pages} pages]"
         if len(combined) > max_chars:
             combined = combined[:max_chars] + "\n[truncated]"
+        if total_pages > max_pages:
+            combined += f"\n[truncated: scanned pages limited to first {max_pages} of {total_pages} pages]"
 
         logger.info(
             f"Extracted OCR text from scanned {filename}: {len(combined)} chars across {len(ocr_pages)} page(s)"

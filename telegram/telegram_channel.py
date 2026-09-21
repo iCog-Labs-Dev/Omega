@@ -799,7 +799,7 @@ class _TelegramChannel:
         try:
             buf = BytesIO()
             await self.bot.download(message.document, destination=buf)
-            pdf_text = media_handler.extract_pdf_text(buf.getvalue(), filename)
+            pdf_text = await asyncio.to_thread(media_handler.extract_pdf_text, buf.getvalue(), filename)
         except Exception as e:
             logging.error(f"Failed to download/extract PDF: {e}")
             await self._send_block_notice(message, "Failed to process the PDF. Please try again.")
