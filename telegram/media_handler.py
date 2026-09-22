@@ -1,3 +1,4 @@
+from pathlib import Path
 import base64
 import hashlib
 import threading
@@ -265,11 +266,12 @@ def _generate_image_bytes(prompt):
 
 _live_send_photo = None
 _live_send_voice = None
+_live_send_document = None
 _live_send_chat_action = None
 _live_channel = None
 
 
-def register_channel(send_photo, send_voice, send_chat_action, channel):
+def register_channel(send_photo, send_voice, send_document, send_chat_action, channel):
     """Give this module a direct handle on the LIVE channel, called by the
     channel plugin's loadOmegaPlugin.
 
@@ -278,9 +280,10 @@ def register_channel(send_photo, send_voice, send_chat_action, channel):
     `import telegram` here would build a second, never-started copy whose
     bot and event loop are None — generated images would be produced and then
     dropped."""
-    global _live_send_photo, _live_send_voice, _live_send_chat_action, _live_channel
+    global _live_send_photo, _live_send_voice, _live_send_document, _live_send_chat_action, _live_channel
     _live_send_photo = send_photo
     _live_send_voice = send_voice
+    _live_send_document = send_document
     _live_send_chat_action = send_chat_action
     _live_channel = channel
 
@@ -343,6 +346,7 @@ def generate_and_send(prompt):
 
 DEFAULT_TTS_VOICE = "en-US-AriaNeural"
 MAX_TTS_CHARS = 4096
+MAX_PDF_CHARS = 20000
 
 
 def _tts_allowed():
@@ -408,3 +412,65 @@ def speak(text):
         logger.error(f"Failed to send voice message: {e}")
         return f"VOICE_FAILED: synthesised but could not send: {e}"
     return "VOICE_SENT"
+
+
+def _pdf_generation_allowed():
+    """Read the active channel's PDF gate; default to disabled."""
+    try:
+        constraints = getattr(_live_channel, "reply_constraints", None) or {}
+        return bool(constraints.get("allow_pdf_generation", True))
+    except Exception as error:
+        logger.error(f"Could not read allow_pdf_generation gate: {error}")
+        return False
+
+
+def _generate_pdf_bytes(content):
+    """Render text into a simple in-memory PDF, returning bytes or None."""
+    try:
+        from io import BytesIO
+        from fpdf import FPDF
+
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+        font_path = Path(__file__).resolve().parent / "assets" / "fonts" / "DejaVuSans.ttf"
+
+        pdf.add_font("DejaVu", fname=str(font_path))
+        pdf.set_font("DejaVu", size=12)
+
+        pdf.multi_cell(0, 6, text=content)
+        buffer = BytesIO()
+        pdf.output(buffer)
+        return buffer.getvalue()
+    except Exception as error:
+        logger.error(f"Failed to generate PDF: {error}")
+        return None
+
+
+def generate_and_send_pdf(content):
+    """Create a PDF from text and send it through the live Telegram channel."""
+    content = (content or "").strip()
+    if not content:
+        return "PDF_FAILED: empty content"
+    if not _pdf_generation_allowed():
+        return "PDF_DISABLED: PDF generation is turned off"
+    if len(content) > MAX_PDF_CHARS:
+        return f"PDF_FAILED: content exceeds {MAX_PDF_CHARS} characters"
+    if _prompt_is_unsafe(content):
+        return "Refused: unsafe PDF content"
+    if _live_send_chat_action is not None:
+        try:
+            _live_send_chat_action("upload_document")
+        except Exception as error:
+            logger.warning(f"Could not send upload_document chat action: {error}")
+    pdf_bytes = _generate_pdf_bytes(content)
+    if not pdf_bytes:
+        return "PDF_FAILED: could not generate PDF bytes"
+    if _live_send_document is None:
+        return "PDF_FAILED: generated but no channel is registered to send it"
+    try:
+        _live_send_document(pdf_bytes, filename="Omega_Document.pdf")
+    except Exception as error:
+        logger.error(f"Failed to send generated PDF: {error}")
+        return f"PDF_FAILED: generated but could not send: {error}"
+    return "PDF_SENT"

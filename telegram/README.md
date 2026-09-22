@@ -1,8 +1,8 @@
 # omega-telegram
 
 A Telegram communication channel for Omega with media support: the agent can
-read images, PDFs and voice notes that users attach, generate images, and send
-voice replies when enabled.
+read images, PDFs and voice notes that users attach, generate images and PDFs,
+and send voice replies when enabled.
 
 This is the `telegram` channel. It replaces core's earlier HTTP-polling Telegram
 channel and keeps everything that one provided — the gateway proxy path, the
@@ -16,6 +16,7 @@ outbound retry queue, and the channel auth handshake.
 | Inbound PDF | Extracted text is inlined into the message |
 | Inbound voice / audio | Whisper transcript is inlined into the message |
 | Outbound image | The agent calls `generate-image`, which generates and sends the photo |
+| Outbound PDF | The agent calls `generate-pdf`, which creates a local PDF and sends it as a Telegram document (up to 20,000 characters) |
 | Outbound voice | The agent calls `speak`, which synthesizes and sends a Telegram voice message when enabled |
 | Admin commands | `/kill`, `/pause [chat_id]`, `/togglesearch`, `/purge` (admin IDs only) |
 | Safety | Ethics classification on inbound and outbound text, per-user spam throttling |
@@ -50,6 +51,7 @@ mounting over them works too and needs no configuration.
 **not safe for production**. Set `admin_controls.admin_ids` to the Telegram user
 IDs allowed to run admin commands, and `telegram.allowed_chats` to the chat IDs
 the bot may operate in. Both are empty by default. Voice replies are opt-in;
+PDF generation is enabled by default; set telegram.reply_constraints.allow_pdf_generation: false to disable it.
 set `telegram.reply_constraints.allow_voice_reply: true` to enable them.
 
 ## Use
