@@ -2,7 +2,7 @@
 
 This bot reads messages in the chats it is added to and replies only when
 directly tagged or replied to. It can read images, PDFs and voice notes you
-attach, generate images and PDFs, and send voice replies when enabled. Do not share
+attach, generate images, PDFs, and send voice replies when enabled. Do not share
 passwords, tokens, private keys or sensitive personal data.
 
 **About this bot**
