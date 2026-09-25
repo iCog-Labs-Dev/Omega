@@ -77,9 +77,11 @@ def _image_key(image_parts):
     return hashlib.sha256(urls.encode("utf-8")).hexdigest()
 
 
-def _call_vision_model(image_parts, prompt):
+def _call_vision_model(image_parts, prompt, max_tokens=None):
     """Vision call via the configured vision provider. Isolated so tests stub it."""
     from vision import vision_chat
+    if max_tokens is not None:
+        return vision_chat(image_parts, prompt, max_tokens=max_tokens)
     return vision_chat(image_parts, prompt)
 
 
@@ -139,20 +141,137 @@ def sanitize_image(file_bytes, max_dim=2048, quality=85):
     return out.getvalue()
 
 
-def extract_pdf_text(file_bytes, filename, max_chars=20000):
+MAX_SCANNED_PDF_PAGES = 10
+SCAN_VISION_MAX_TOKENS = 4096
+MIN_CHARS_PER_PAGE = 50
+SCAN_VISION_PROMPT = (
+    "Transcribe all visible text from this scanned document page verbatim. "
+    "Maintain reading order and formatting where possible. "
+    "Do not summarize or explain. "
+    "If the page is blank or has no readable text, respond with '[BLANK]'."
+)
+
+
+def _is_blank_ocr_response(text):
+    if not text:
+        return True
+    cleaned = text.strip()
+    if not cleaned:
+        return True
+    normalized = cleaned.lower().strip("[](). ")
+    if normalized in ("blank", "blank page", "empty", "empty page", "no text", "no readable text"):
+        return True
+    if normalized.startswith("this page is blank") or normalized.startswith("there is no text"):
+        return True
+    return False
+
+
+def _render_pdf_pages(file_bytes, page_indexes):
+    """Render the given zero-based pages of a PDF to JPEG byte strings using pypdfium2."""
+    import pypdfium2 as pdfium
+    from io import BytesIO
+
+    doc = pdfium.PdfDocument(BytesIO(file_bytes))
+    page_bytes = []
+    for i in page_indexes:
+        pil_img = doc[i].render(scale=2.0).to_pil()
+        out = BytesIO()
+        pil_img.convert("RGB").save(out, format="JPEG", quality=85)
+        page_bytes.append(sanitize_image(out.getvalue()))
+    return page_bytes
+
+
+def _ocr_page(img_bytes, page_number, filename):
+    """Transcribe one rendered page. Returns "" for a blank page, a marker on failure."""
+    data_uri = image_to_data_uri(img_bytes, "image/jpeg")
+    image_parts = [{"type": "image_url", "image_url": {"url": data_uri}}]
+    try:
+        try:
+            page_text = _call_vision_model(
+                image_parts, SCAN_VISION_PROMPT, max_tokens=SCAN_VISION_MAX_TOKENS
+            )
+        except TypeError:
+            page_text = _call_vision_model(image_parts, SCAN_VISION_PROMPT)
+    except Exception as exc:
+        if "empty caption" in str(exc).lower():
+            return ""
+        logger.warning(f"OCR failed on page {page_number} of {filename}: {exc}")
+        return f"[page {page_number}: unreadable]"
+    return "" if _is_blank_ocr_response(page_text) else page_text.strip()
+
+
+def extract_pdf_text(file_bytes, filename, max_chars=20000, max_pages=MAX_SCANNED_PDF_PAGES):
+    """Turn an uploaded PDF into text the agent can read.
+
+    Each page is judged on its own. A page whose text layer has at least
+    MIN_CHARS_PER_PAGE characters is used as is; any other page is treated as a
+    scan, rendered to an image and transcribed by the vision model. This keeps
+    born-digital PDFs free (no vision call at all) while still reading scanned
+    pages that sit next to text pages in the same file.
+
+    When any page went through OCR, every page is labelled so the agent can tell
+    transcribed text, which may contain reading errors, from the text layer:
+
+        [page 1]
+        Quarterly report ...
+
+        [page 2, OCR]
+        Signed invoice total: $150.00
+
+    At most `max_pages` scanned pages are transcribed; a notice says when more
+    were skipped. The function never raises, it returns a marker instead.
+    """
     try:
         from pypdf import PdfReader
         from io import BytesIO
 
         reader = PdfReader(BytesIO(file_bytes))
-        pages = []
-        for page in reader.pages:
-            pages.append(page.extract_text() or "")
-        text = "\n".join(pages)
-        if len(text) > max_chars:
-            text = text[:max_chars] + "\n[truncated]"
-        logger.info(f"Extracted text from {filename}: {len(text)}")
-        return f"[PDF: {filename}]\n{text}"
+        page_texts = [page.extract_text() or "" for page in reader.pages]
+        if not page_texts:
+            return f"[PDF: {filename}]\n[Document is blank]"
+
+        needs_ocr = [i for i, t in enumerate(page_texts) if len(t.strip()) < MIN_CHARS_PER_PAGE]
+
+        # Every page has a real text layer: no vision call, same output as before OCR existed.
+        if not needs_ocr:
+            text = "\n".join(page_texts)
+            if len(text) > max_chars:
+                text = text[:max_chars] + "\n[truncated]"
+            logger.info(f"Extracted text from {filename}: {len(text)}")
+            return f"[PDF: {filename}]\n{text}"
+
+        to_ocr = needs_ocr[:max_pages]
+        rendered = _render_pdf_pages(file_bytes, to_ocr)
+        ocr_by_page = {
+            i: _ocr_page(img, i + 1, filename) for i, img in zip(to_ocr, rendered)
+        }
+
+        parts = []
+        for i, layer_text in enumerate(page_texts):
+            if i in ocr_by_page and ocr_by_page[i]:
+                parts.append(f"[page {i + 1}, OCR]\n{ocr_by_page[i]}")
+            elif layer_text.strip():
+                # Real text page, a page OCR found blank but which still carries a
+                # thin layer, or a scanned page past the OCR cap.
+                parts.append(f"[page {i + 1}]\n{layer_text.strip()}")
+
+        if not parts:
+            return f"[PDF: {filename}]\n[Document is blank]"
+
+        combined = "\n\n".join(parts)
+        if len(combined) > max_chars:
+            combined = combined[:max_chars] + "\n[truncated]"
+        if len(needs_ocr) > max_pages:
+            combined += (
+                f"\n[truncated: scanned pages limited to first {max_pages} of {len(needs_ocr)} pages]"
+            )
+
+        logger.info(
+            f"Extracted text from {filename}: {len(combined)} chars, "
+            f"{len(ocr_by_page)} of {len(page_texts)} page(s) via OCR"
+        )
+        return f"[PDF: {filename}]\n{combined}"
+
     except Exception as e:
         logger.error(f"PDF extraction failed for {filename}: {e}")
         return f"[PDF: {filename}]\n[Could not extract text: {e}]"
