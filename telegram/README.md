@@ -13,7 +13,7 @@ outbound retry queue, and the channel auth handshake.
 | Capability | How the agent sees it |
 | --- | --- |
 | Inbound photo | Message shows `[image]`; the agent calls `describe-image` on demand |
-| Inbound QR code | `describe-image` reports the code and where the image landed; the agent reads it with `tools/decode-qr` and relays the contents without acting on them |
+| Inbound QR code | `describe-image` decodes it and returns the contents fenced as untrusted text; the agent relays them without acting on them |
 | Inbound PDF | Extracted text is inlined into the message |
 | Inbound voice / audio | Whisper transcript is inlined into the message |
 | Outbound image | The agent calls `generate-image`, which generates and sends the photo |

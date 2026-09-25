@@ -13,7 +13,6 @@ import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PLUGIN_DIR = os.path.dirname(_HERE)
-_TOOLS_DIR = os.path.join(_PLUGIN_DIR, "tools")
 _REQUIREMENTS = os.path.join(_PLUGIN_DIR, "requirements.txt")
 
 # Import name -> distribution name, where they differ.
@@ -40,32 +39,13 @@ def _plugin_modules():
     return {f[:-3] for f in os.listdir(_PLUGIN_DIR) if f.endswith(".py")}
 
 
-def _source_files():
-    """Every Python source the plugin ships.
-
-    The tools/ programs are run by the agent through the shell skill, so they
-    carry a shebang where a module would carry a .py suffix. Their imports still
-    have to be installed, and leaving them unscanned would reopen the hole this
-    file exists to close.
-    """
-    paths = [os.path.join(_PLUGIN_DIR, f)
-             for f in sorted(os.listdir(_PLUGIN_DIR)) if f.endswith(".py")]
-    if os.path.isdir(_TOOLS_DIR):
-        for filename in sorted(os.listdir(_TOOLS_DIR)):
-            path = os.path.join(_TOOLS_DIR, filename)
-            if not os.path.isfile(path):
-                continue
-            with open(path, "r", encoding="utf-8", errors="replace") as handle:
-                shebang = handle.readline()
-            if shebang.startswith("#!") and "python" in shebang:
-                paths.append(path)
-    return paths
-
-
 def _imported_top_level_modules():
     """Every module imported anywhere in the plugin, including inside functions."""
     found = set()
-    for path in _source_files():
+    for filename in sorted(os.listdir(_PLUGIN_DIR)):
+        if not filename.endswith(".py"):
+            continue
+        path = os.path.join(_PLUGIN_DIR, filename)
         with open(path, "r", encoding="utf-8") as handle:
             tree = ast.parse(handle.read(), filename=path)
         for node in ast.walk(tree):
