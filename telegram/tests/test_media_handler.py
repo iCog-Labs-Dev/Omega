@@ -153,14 +153,14 @@ def test_extract_pdf_text_uses_text_layer_without_vision_call():
 def test_extract_pdf_text_scanned_pdf_renders_and_calls_vision():
     vision_calls = []
     orig_vision = mh._call_vision_model
-    orig_render = mh._render_pdf_to_images
+    orig_render = mh._render_pdf_pages
 
     def fake_vision(parts, prompt):
         vision_calls.append((parts, prompt))
         return "Transcribed OCR text from page 1"
 
     mh._call_vision_model = fake_vision
-    mh._render_pdf_to_images = lambda b, max_p: (1, [b"fake-jpeg-bytes"])
+    mh._render_pdf_pages = lambda b, idx: [f"page{i + 1}".encode() for i in idx]
 
     class FakePage:
         def extract_text(self):
@@ -182,15 +182,15 @@ def test_extract_pdf_text_scanned_pdf_renders_and_calls_vision():
     finally:
         del sys.modules["pypdf"]
         mh._call_vision_model = orig_vision
-        mh._render_pdf_to_images = orig_render
+        mh._render_pdf_pages = orig_render
 
 
 def test_extract_pdf_text_genuinely_blank_returns_blank_marker():
     orig_vision = mh._call_vision_model
-    orig_render = mh._render_pdf_to_images
+    orig_render = mh._render_pdf_pages
 
     mh._call_vision_model = lambda parts, prompt: "[BLANK]"
-    mh._render_pdf_to_images = lambda b, max_p: (1, [b"fake-jpeg-bytes"])
+    mh._render_pdf_pages = lambda b, idx: [f"page{i + 1}".encode() for i in idx]
 
     class FakePage:
         def extract_text(self):
@@ -209,7 +209,7 @@ def test_extract_pdf_text_genuinely_blank_returns_blank_marker():
     finally:
         del sys.modules["pypdf"]
         mh._call_vision_model = orig_vision
-        mh._render_pdf_to_images = orig_render
+        mh._render_pdf_pages = orig_render
 
 
 def test_extract_pdf_text_zero_pages_returns_blank_marker():
@@ -230,14 +230,14 @@ def test_extract_pdf_text_zero_pages_returns_blank_marker():
 def test_extract_pdf_text_page_cap_enforced_and_truncation_visible():
     vision_calls = []
     orig_vision = mh._call_vision_model
-    orig_render = mh._render_pdf_to_images
+    orig_render = mh._render_pdf_pages
 
     def fake_vision(parts, prompt):
         vision_calls.append(len(vision_calls) + 1)
         return f"Page {len(vision_calls)} content"
 
     mh._call_vision_model = fake_vision
-    mh._render_pdf_to_images = lambda b, max_p: (5, [b"page1", b"page2"])
+    mh._render_pdf_pages = lambda b, idx: [f"page{i + 1}".encode() for i in idx]
 
     class FakePage:
         def extract_text(self):
@@ -259,7 +259,7 @@ def test_extract_pdf_text_page_cap_enforced_and_truncation_visible():
     finally:
         del sys.modules["pypdf"]
         mh._call_vision_model = orig_vision
-        mh._render_pdf_to_images = orig_render
+        mh._render_pdf_pages = orig_render
 
 
 def test_extract_pdf_text_with_real_pypdfium2_and_pypdf():
@@ -291,14 +291,14 @@ def test_extract_pdf_text_with_real_pypdfium2_and_pypdf():
 def test_extract_pdf_text_thin_text_layer_triggers_ocr():
     vision_calls = []
     orig_vision = mh._call_vision_model
-    orig_render = mh._render_pdf_to_images
+    orig_render = mh._render_pdf_pages
 
     def fake_vision(parts, prompt, **kw):
         vision_calls.append((parts, prompt))
         return "Transcribed OCR text from page with watermark"
 
     mh._call_vision_model = fake_vision
-    mh._render_pdf_to_images = lambda b, max_p: (1, [b"fake-jpeg-bytes"])
+    mh._render_pdf_pages = lambda b, idx: [f"page{i + 1}".encode() for i in idx]
 
     class FakePage:
         def extract_text(self):
@@ -319,12 +319,12 @@ def test_extract_pdf_text_thin_text_layer_triggers_ocr():
     finally:
         del sys.modules["pypdf"]
         mh._call_vision_model = orig_vision
-        mh._render_pdf_to_images = orig_render
+        mh._render_pdf_pages = orig_render
 
 
 def test_extract_pdf_text_page_failure_records_unreadable_and_continues():
     orig_vision = mh._call_vision_model
-    orig_render = mh._render_pdf_to_images
+    orig_render = mh._render_pdf_pages
 
     def fake_vision(parts, prompt, **kw):
         if getattr(fake_vision, "called", False):
@@ -333,7 +333,7 @@ def test_extract_pdf_text_page_failure_records_unreadable_and_continues():
         return "Page 1 transcribed content"
 
     mh._call_vision_model = fake_vision
-    mh._render_pdf_to_images = lambda b, max_p: (2, [b"page1-bytes", b"page2-bytes"])
+    mh._render_pdf_pages = lambda b, idx: [f"page{i + 1}".encode() for i in idx]
 
     class FakePage:
         def extract_text(self):
@@ -354,15 +354,15 @@ def test_extract_pdf_text_page_failure_records_unreadable_and_continues():
     finally:
         del sys.modules["pypdf"]
         mh._call_vision_model = orig_vision
-        mh._render_pdf_to_images = orig_render
+        mh._render_pdf_pages = orig_render
 
 
 def test_extract_pdf_text_page_cap_preserved_when_max_chars_exceeded():
     orig_vision = mh._call_vision_model
-    orig_render = mh._render_pdf_to_images
+    orig_render = mh._render_pdf_pages
 
     mh._call_vision_model = lambda parts, prompt, **kw: "x" * 500
-    mh._render_pdf_to_images = lambda b, max_p: (5, [b"page1", b"page2"])
+    mh._render_pdf_pages = lambda b, idx: [f"page{i + 1}".encode() for i in idx]
 
     class FakePage:
         def extract_text(self):
@@ -382,7 +382,7 @@ def test_extract_pdf_text_page_cap_preserved_when_max_chars_exceeded():
     finally:
         del sys.modules["pypdf"]
         mh._call_vision_model = orig_vision
-        mh._render_pdf_to_images = orig_render
+        mh._render_pdf_pages = orig_render
 
 
 def test_call_vision_model_passes_max_tokens():
@@ -403,7 +403,52 @@ def test_call_vision_model_passes_max_tokens():
         vision.vision_chat = orig
 
 
-def test_render_pdf_to_images_sanitizes_dimensions():
+def test_extract_pdf_text_mixed_document_ocrs_only_scanned_pages():
+    rendered, vision_calls = [], []
+    orig_vision = mh._call_vision_model
+    orig_render = mh._render_pdf_pages
+
+    def fake_render(b, idx):
+        rendered.append(list(idx))
+        return [f"page{i + 1}".encode() for i in idx]
+
+    def fake_vision(parts, prompt, **kw):
+        vision_calls.append(parts)
+        return "Signed invoice total: $150.00"
+
+    mh._call_vision_model = fake_vision
+    mh._render_pdf_pages = fake_render
+
+    text_page = "Quarterly report with a real text layer, long enough to pass the threshold."
+
+    class FakePage:
+        def __init__(self, text):
+            self.text = text
+
+        def extract_text(self):
+            return self.text
+
+    class FakePdfReader:
+        def __init__(self, buf):
+            self.pages = [FakePage(text_page), FakePage(""), FakePage(text_page)]
+
+    fake_pypdf = types.ModuleType("pypdf")
+    fake_pypdf.PdfReader = FakePdfReader
+    sys.modules["pypdf"] = fake_pypdf
+    try:
+        out = mh.extract_pdf_text(b"mixed bytes", "mixed.pdf")
+        assert rendered == [[1]], "only the scanned page should be rendered"
+        assert len(vision_calls) == 1
+        assert "[page 1]\n" + text_page in out, out
+        assert "[page 2, OCR]\nSigned invoice total: $150.00" in out, out
+        assert "[page 3]\n" + text_page in out, out
+    finally:
+        del sys.modules["pypdf"]
+        mh._call_vision_model = orig_vision
+        mh._render_pdf_pages = orig_render
+
+
+def test_render_pdf_pages_sanitizes_dimensions():
     from pypdf import PdfWriter
     from PIL import Image
     import io
@@ -414,8 +459,7 @@ def test_render_pdf_to_images_sanitizes_dimensions():
     writer.write(buf)
     pdf_bytes = buf.getvalue()
 
-    total_pages, rendered_pages = mh._render_pdf_to_images(pdf_bytes, max_pages=1)
-    assert total_pages == 1
+    rendered_pages = mh._render_pdf_pages(pdf_bytes, [0])
     assert len(rendered_pages) == 1
     img = Image.open(io.BytesIO(rendered_pages[0]))
     assert img.format == "JPEG"
@@ -659,7 +703,8 @@ if __name__ == "__main__":
     test_extract_pdf_text_page_failure_records_unreadable_and_continues()
     test_extract_pdf_text_page_cap_preserved_when_max_chars_exceeded()
     test_call_vision_model_passes_max_tokens()
-    test_render_pdf_to_images_sanitizes_dimensions()
+    test_render_pdf_pages_sanitizes_dimensions()
+    test_extract_pdf_text_mixed_document_ocrs_only_scanned_pages()
     test_transcribe_audio_success_with_stubbed_openai_client()
     test_transcribe_audio_missing_key_returns_marker_never_raises()
     test_generate_and_send_disabled()
