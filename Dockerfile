@@ -3,6 +3,22 @@
 # For maximum integrity, set this to an immutable digest in CI/CD.
 ARG SWIPL_IMAGE=docker.io/library/swipl:10.0.2
 
+# Only plugin requirements reach the install step, so editing plugin code keeps its cache.
+FROM ${SWIPL_IMAGE} AS plugin-requirements-collector
+
+COPY plugins /plugins
+RUN mkdir -p /plugin-requirements \
+ && for declared in /plugins/*/requirements.txt; do \
+      [ -f "$declared" ] || continue; \
+      plugin="$(basename "$(dirname "$declared")")"; \
+      mkdir -p "/plugin-requirements/$plugin"; \
+      cp -p "$declared" "/plugin-requirements/$plugin/requirements.txt"; \
+    done
+
+FROM scratch AS plugin-requirements
+
+COPY --from=plugin-requirements-collector /plugin-requirements /
+
 FROM ${SWIPL_IMAGE} AS builder
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -61,7 +77,7 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/omega/requirements.txt
 
 # Core's requirements and every plugin's, resolved together so a conflict fails the build.
 RUN --mount=type=bind,source=requirements.txt,target=/tmp/omega/requirements.txt \
-    --mount=type=bind,source=plugins,target=/tmp/omega/plugins \
+    --mount=type=bind,from=plugin-requirements,target=/tmp/omega/plugins \
     --mount=type=bind,source=scripts/install_dependencies.sh,target=/tmp/omega/scripts/install_dependencies.sh \
     /tmp/omega/scripts/install_dependencies.sh --no-cache-dir --break-system-packages
 

@@ -96,8 +96,9 @@ def _installs(calls):
 def _unwrapped(text):
     """The text's lines, with a command wrapped over several read as the one it is.
 
-    A shell command in the README wraps with a trailing backslash, so the pin an
-    install carries often sits on a different line from the command's name.
+    A shell command wraps with a trailing backslash, in the README and in the
+    Dockerfile alike, so what a command carries often sits on a different line
+    from the command's name.
     """
     commands = []
     for line in text.splitlines():
@@ -246,6 +247,38 @@ def test_the_image_build_installs_through_the_script():
     assert not re.search(r"-r\s+\S*requirements\.txt", dockerfile), \
         "the Dockerfile installs a requirements file itself"
     assert os.access(SCRIPT, os.X_OK), "the build runs the script directly"
+
+
+def _install_step():
+    """The Dockerfile's line that runs the script, wrapping read as one line."""
+    for command in _unwrapped(DOCKERFILE.read_text(encoding="utf-8")):
+        if SCRIPT.name in command and command.lstrip().startswith("RUN"):
+            return command
+    raise AssertionError("the Dockerfile does not run the script")
+
+
+def test_editing_a_plugin_does_not_reinstall_everything():
+    """The install step pulls down torch and transformers, so what its cache
+    turns on matters. Reading plugins/ here would key it on every file a plugin
+    carries, and editing a line of plugin code would fetch the lot again. It
+    sees a stage holding the declared requirements and nothing else."""
+    step = _install_step()
+
+    assert "source=plugins" not in step, \
+        "the install step reads plugins/ and reinstalls on any change under it"
+    assert "from=plugin-requirements" in step, \
+        "the install step does not read the collected requirements"
+
+
+def test_the_collected_requirements_keep_their_plugin_directories():
+    """The script walks plugins/*/requirements.txt, so flattening the files into
+    one directory would leave it finding nothing and quietly installing less."""
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "FROM scratch AS plugin-requirements\n" in dockerfile, \
+        "the collected requirements are not a stage of their own"
+    assert re.search(r'/plugin-requirements/\$plugin', dockerfile), \
+        "the collected files do not keep a directory per plugin"
 
 
 def test_the_source_install_goes_through_the_script():
