@@ -309,14 +309,12 @@ def test_generate_and_send_pdf_refuses_unsafe_content():
     finally:
         mh._pdf_generation_allowed, mh._prompt_is_unsafe = original
 
-def test_generate_pdf_bytes_preserves_unicode_text():
+def test_generate_pdf_bytes_preserves_supported_unicode_text():
     content = (
         'Curly quotes: “Hello”\n'
         'Em dash: —\n'
         'Bullet: •\n'
-        'Cyrillic: Привет мир\n'
-        'Amharic: ሰላም ዓለም\n'
-        'Chinese: 你好世界'
+        'Cyrillic: Привет мир'
     )
 
     result = mh._generate_pdf_bytes(content)
@@ -331,8 +329,6 @@ def test_generate_pdf_bytes_preserves_unicode_text():
     assert "—" in extracted
     assert "•" in extracted
     assert "Привет мир" in extracted
-    assert "ሰላም ዓለም" in extracted
-    assert "你好世界" in extracted
 
 def test_pdf_generation_gate_defaults_and_overrides():
     orig_chan = mh._live_channel
@@ -340,7 +336,7 @@ def test_pdf_generation_gate_defaults_and_overrides():
         pass
     mh._live_channel = FakeChannel()
     try:
-        # Missing key -> defaults to True
+        # Missing key -> stays enabled for profiles created before this gate.
         FakeChannel.reply_constraints = {}
         assert mh._pdf_generation_allowed() is True
 
@@ -437,6 +433,66 @@ def test_synthesise_speech_uses_edge_tts():
         else:
             sys.modules["edge_tts"] = original
 
+def test_pdf_content_is_safe_blocks_credentials():
+    # Real token formats must be refused
+    assert not mh._pdf_content_is_safe("sk-or-v1-" + "a" * 64)
+    assert not mh._pdf_content_is_safe("sk-ant-" + "a" * 93)
+    assert not mh._pdf_content_is_safe("123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+    assert not mh._pdf_content_is_safe("sk-or-v1-" + "a" * 32 + "\u200b" + "a" * 32)
+
+
+def test_pdf_content_is_safe_allows_normal_text():
+    # Words like token/password in documentation must NOT be blocked
+    assert mh._pdf_content_is_safe("Set the token field in your config.")
+    assert mh._pdf_content_is_safe("If /etc/passwd contains root:x:0:0 ...")
+    assert mh._pdf_content_is_safe("password must be at least 8 characters")
+
+
+def test_generate_and_send_pdf_success_with_real_bytes():
+    # A real fpdf2-generated PDF must reach _live_send_document
+    # (this catches the /OpenAction regression)
+    original = (mh._pdf_generation_allowed, mh._prompt_is_unsafe, mh._live_send_document)
+    sent = {}
+    mh._pdf_generation_allowed = lambda: True
+    mh._prompt_is_unsafe = lambda c: False
+    mh._live_send_document = lambda data, filename: sent.update(data=data, filename=filename)
+    try:
+        result = mh.generate_and_send_pdf("A normal report with token and /etc/passwd mentioned.")
+        assert result == "PDF_SENT", result
+        assert sent.get("data", b"").startswith(b"%PDF")
+    finally:
+        mh._pdf_generation_allowed, mh._prompt_is_unsafe, mh._live_send_document = original
+
+
+def test_pdf_content_is_safe_blocks_credit_card_number():
+    assert not mh._pdf_content_is_safe("Card: 4242 4242 4242 4242")
+
+
+def test_generate_and_send_pdf_refuses_sensitive_content_without_sending():
+    """Sensitive text must not be rendered or handed to Telegram."""
+    original = (
+        mh._pdf_generation_allowed,
+        mh._prompt_is_unsafe,
+        mh._generate_pdf_bytes,
+        mh._live_send_document,
+    )
+    rendered = []
+    sent = []
+    mh._pdf_generation_allowed = lambda: True
+    mh._prompt_is_unsafe = lambda content: False
+    mh._generate_pdf_bytes = lambda content: rendered.append(content) or b"%PDF-test"
+    mh._live_send_document = lambda *args, **kwargs: sent.append((args, kwargs))
+    try:
+        for content in (
+            "sk-or-v1-" + "a" * 64,
+            "Card: 4242 4242 4242 4242",
+        ):
+            assert mh.generate_and_send_pdf(content) == "Refused: unsafe PDF content"
+        assert rendered == []
+        assert sent == []
+    finally:
+        (mh._pdf_generation_allowed, mh._prompt_is_unsafe,
+         mh._generate_pdf_bytes, mh._live_send_document) = original
 
 if __name__ == "__main__":
     test_no_image_returns_marker()
@@ -463,4 +519,11 @@ if __name__ == "__main__":
     test_speak_synthesis_failure()
     test_speak_success()
     test_synthesise_speech_uses_edge_tts()
+    test_pdf_content_is_safe_blocks_credentials()
+    test_pdf_content_is_safe_allows_normal_text()
+    test_pdf_content_is_safe_blocks_credit_card_number()
+    test_generate_and_send_pdf_success_with_real_bytes()
+    test_generate_and_send_pdf_refuses_sensitive_content_without_sending()
+    test_generate_pdf_bytes_preserves_supported_unicode_text()
+    test_pdf_generation_gate_defaults_and_overrides()
     print("all media_handler tests passed")

@@ -51,7 +51,8 @@ mounting over them works too and needs no configuration.
 **not safe for production**. Set `admin_controls.admin_ids` to the Telegram user
 IDs allowed to run admin commands, and `telegram.allowed_chats` to the chat IDs
 the bot may operate in. Both are empty by default. Voice replies are opt-in;
-PDF generation is enabled by default; set telegram.reply_constraints.allow_pdf_generation: false to disable it.
+PDF generation is enabled by default for compatibility with existing profiles;
+set `telegram.reply_constraints.allow_pdf_generation: false` to disable it.
 set `telegram.reply_constraints.allow_voice_reply: true` to enable them.
 
 ## Use

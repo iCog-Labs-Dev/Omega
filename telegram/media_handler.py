@@ -4,6 +4,8 @@ import hashlib
 import threading
 import logging
 import sys
+import re
+import unicodedata
 
 logger = logging.getLogger(__name__)
 
@@ -415,7 +417,8 @@ def speak(text):
 
 
 def _pdf_generation_allowed():
-    """Read the active channel's PDF gate; default to disabled."""
+    """Read the active channel's PDF gate; default to enabled for profiles
+    created before this gate existed."""
     try:
         constraints = getattr(_live_channel, "reply_constraints", None) or {}
         return bool(constraints.get("allow_pdf_generation", True))
@@ -446,6 +449,38 @@ def _generate_pdf_bytes(content):
         logger.error(f"Failed to generate PDF: {error}")
         return None
 
+_SECRET_PATTERNS = {
+    "openrouter_key":    re.compile(r"\bsk-or-v1-[a-f0-9]{64}\b"),
+    "telegram_bot_token": re.compile(r"\d{8,10}:[A-Za-z0-9_-]{35}"),
+    "openai_key":        re.compile(r"\bsk-(proj-)?[A-Za-z0-9_-]{48,}\b"),
+    "anthropic_key": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{90,}\b"),
+}
+
+def _luhn_ok(digits):
+    total, alt = 0, False
+    for d in reversed(digits):
+        d = int(d)
+        if alt:
+            d = d * 2 - 9 if d * 2 > 9 else d * 2
+        total += d
+        alt = not alt
+    return total % 10 == 0
+
+def _pdf_content_is_safe(content: str) -> bool:
+    """Scan for high-confidence credential token formats only.
+    Returns False and logs the category if a match is found."""
+    text = unicodedata.normalize("NFKC", content)
+    text = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", text)
+    for name, pattern in _SECRET_PATTERNS.items():
+        if pattern.search(text):
+            logger.warning("PDF refused: credential pattern matched (%s)", name)
+            return False
+    for m in re.finditer(r"\b(?:[0-9][ -]?){13,19}\b", text):
+        digits = re.sub(r"\D", "", m.group())
+        if 13 <= len(digits) <= 19 and _luhn_ok(digits):
+            logger.warning("PDF refused: sensitive information pattern matched (credit_card)")
+            return False
+    return True
 
 def generate_and_send_pdf(content):
     """Create a PDF from text and send it through the live Telegram channel."""
@@ -456,6 +491,8 @@ def generate_and_send_pdf(content):
         return "PDF_DISABLED: PDF generation is turned off"
     if len(content) > MAX_PDF_CHARS:
         return f"PDF_FAILED: content exceeds {MAX_PDF_CHARS} characters"
+    if not _pdf_content_is_safe(content):
+        return "Refused: unsafe PDF content"
     if _prompt_is_unsafe(content):
         return "Refused: unsafe PDF content"
     if _live_send_chat_action is not None:
@@ -472,5 +509,5 @@ def generate_and_send_pdf(content):
         _live_send_document(pdf_bytes, filename="Omega_Document.pdf")
     except Exception as error:
         logger.error(f"Failed to send generated PDF: {error}")
-        return f"PDF_FAILED: generated but could not send: {error}"
+        return "PDF_FAILED: generated but could not send"
     return "PDF_SENT"
