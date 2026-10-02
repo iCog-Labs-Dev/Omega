@@ -33,7 +33,18 @@ VISION_PROMPT = (
 MAX_QR_CODES = 8
 MAX_QR_CHARS = 2000
 
-_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+# Characters str.splitlines() treats as line boundaries. core's response parser
+# splits commands on these, so one left in a payload could begin a line that
+# starts a new command once the reply is parsed; map them all to spaces. The C0
+# range and DEL cover the ASCII controls, and NEL/LS/PS the Unicode breaks.
+_LINE_BREAKS = re.compile(r"[\x00-\x1f\x7f\x85\u2028\u2029]")
+
+# core escapes real quotes, newlines and apostrophes to these tokens on the way
+# in to the model and restores them in the reply. A payload that already spells
+# a token out is never escaped, so it round-trips into a real quote or newline
+# that can close a string or open a command line. Blank the tokens so decoded
+# text cannot carry one in.
+_ESCAPE_TOKENS = re.compile(r"_newline_|_quote_|_apostrophe_")
 
 
 def set_pending_media(media):
@@ -89,8 +100,17 @@ def _image_key(image_parts):
 
 
 def _flatten(text):
-    """Reduce a payload to one printable line of bounded length."""
-    text = _CONTROL.sub(" ", text).strip()
+    """Reduce a decoded payload to one safe, printable line of bounded length.
+
+    A code holds a stranger's text that the agent is told to repeat word for
+    word, so the two things that could turn repeated text into a command are
+    removed first: core's escape tokens and every line break, either of which
+    can forge a command boundary or close a string once the reply is parsed.
+    (A code that spells a link's target differently from its label is defused
+    where replies are rendered, not here, since the agent rewrites the payload.)
+    """
+    text = _ESCAPE_TOKENS.sub(" ", text)
+    text = _LINE_BREAKS.sub(" ", text).strip()
     if len(text) > MAX_QR_CHARS:
         text = text[:MAX_QR_CHARS] + " [truncated]"
     return text
