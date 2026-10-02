@@ -8,8 +8,10 @@
 Pillow>=10.0.0
 pypdf>=4.0.0
 aiogram>=3.0.0
-telegramify-markdown>=0.1.0
+# >=1.4.0 for convert()/entities_to_markdownv2(), used to reveal link targets.
+telegramify-markdown>=1.4.0
 openai>=1.0.0
 PyYAML>=6.0
 requests>=2.31.0
 edge-tts>=7.2.8
+zxing-cpp>=2.2.0
