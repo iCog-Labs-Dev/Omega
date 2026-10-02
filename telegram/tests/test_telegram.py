@@ -135,6 +135,7 @@ class FakeBot:
         self.download_bytes = download_bytes
         self.sent_photo = None
         self.sent_voice = None
+        self.sent_document = None
         self.sent_messages = []
         self.reject_markdown = reject_markdown
 
@@ -156,7 +157,17 @@ class FakeBot:
 
     async def send_voice(self, chat_id, voice, caption=None, reply_to_message_id=None):
         self.sent_voice = {"chat_id": chat_id, "voice": voice, "caption": caption,
-                            "reply_to_message_id": reply_to_message_id}
+                           "reply_to_message_id": reply_to_message_id}
+        return SimpleNamespace()
+
+    async def send_document(self, chat_id, document, caption=None,
+                            reply_to_message_id=None,
+                            allow_sending_without_reply=None):
+        self.sent_document = {
+            "chat_id": chat_id, "document": document, "caption": caption,
+            "reply_to_message_id": reply_to_message_id,
+            "allow_sending_without_reply": allow_sending_without_reply,
+        }
         return SimpleNamespace()
 
 
@@ -437,6 +448,30 @@ def test_send_voice_dispatches_expected_aiogram_call():
         t.join(timeout=2)
 
 
+def test_send_document_dispatches_expected_aiogram_call():
+    ch = _new_channel()
+    bot = FakeBot()
+    ch.bot = bot
+    ch.connected = True
+    ch.chat_id = "555"
+    ch._reply_to_id = None
+
+    loop = asyncio.new_event_loop()
+    t = threading.Thread(target=loop.run_forever, daemon=True)
+    t.start()
+    ch.loop = loop
+    try:
+        ch.send_document(b"%PDF-test", filename="report.pdf", caption="Report")
+        assert bot.sent_document is not None
+        assert bot.sent_document["chat_id"] == "555"
+        assert bot.sent_document["caption"] == "Report"
+        assert isinstance(bot.sent_document["document"], BufferedInputFile)
+        assert bot.sent_document["document"].filename == "report.pdf"
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        t.join(timeout=2)
+
+
 def test_admin_command_refuses_non_admin_allows_admin():
     """_purge_cmd (admin-only, private-DM-only) must refuse a non-admin and
     take no destructive effect, and must proceed for an admin. The purge must go
@@ -598,7 +633,7 @@ def test_policy_sections_describe_what_the_bot_actually_does():
     combined = " ".join((ch.start_msg, ch.about_msg, ch.privacy_msg)).lower()
     for denied in ("send files/media", "cannot send files"):
         assert denied not in combined, f"policy still denies: {denied}"
-    for disclosed in ("moderation", "transcription", "vision"):
+    for disclosed in ("moderation", "transcription", "vision", "pdf"):
         assert disclosed in combined, f"policy does not disclose: {disclosed}"
 
 
@@ -902,6 +937,7 @@ if __name__ == "__main__":
     test_inbound_ethics_block_prevents_queueing()
     test_send_photo_dispatches_expected_aiogram_call()
     test_send_voice_dispatches_expected_aiogram_call()
+    test_send_document_dispatches_expected_aiogram_call()
     test_admin_command_refuses_non_admin_allows_admin()
     test_pause_actually_gates_the_chat_it_names()
     test_open_defaults_are_warned_about()

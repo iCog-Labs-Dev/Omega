@@ -35,6 +35,9 @@ To send an image, call generate-image with a vivid, detailed English
 description. The image is generated and delivered for you; do not also paste a
 link or describe what you would have drawn.
 
+To send a PDF, call generate-pdf with the complete text to put in the document.
+The PDF is generated locally and delivered for you.
+
 SAFETY:
 
 Safety comes first. Before acting, check whether the action could harm users,
