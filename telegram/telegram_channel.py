@@ -20,11 +20,7 @@ from aiogram.exceptions import (
     TelegramUnauthorizedError,
 )
 
-try:
-    from telegramify_markdown import markdownify
-except ImportError:
-    def markdownify(x, *a, **k):
-        return x
+from markdown_render import to_markdownv2
 
 from config_helper import is_category_blocked, get_spam_protection_config
 import media_handler
@@ -1019,7 +1015,7 @@ class _TelegramChannel:
             stop_event.set()
 
     def _to_mdv2(self, text):
-        return markdownify(text)
+        return to_markdownv2(text)
 
     def _fits_one_message(self, piece):
         """Measure the MarkdownV2 rendering, not the text the agent wrote -
