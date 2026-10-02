@@ -446,7 +446,19 @@ def test_pdf_content_is_safe_allows_normal_text():
     assert mh._pdf_content_is_safe("Set the token field in your config.")
     assert mh._pdf_content_is_safe("If /etc/passwd contains root:x:0:0 ...")
     assert mh._pdf_content_is_safe("password must be at least 8 characters")
+    assert mh._pdf_content_is_safe("The application reads /var/log/app.log.")
 
+
+def test_pdf_content_is_safe_blocks_sensitive_file_references():
+    assert not mh._pdf_content_is_safe("Read ~/.ssh/id_ed25519")
+    assert not mh._pdf_content_is_safe("Configuration: /home/alice/.aws/credentials")
+    assert not mh._pdf_content_is_safe("Environment: /proc/self/environ")
+    assert not mh._pdf_content_is_safe("-----BEGIN PRIVATE KEY-----\nprivate material")
+
+def test_pdf_content_is_safe_blocks_dotenv_and_shadow_and_windows_paths():
+    assert not mh._pdf_content_is_safe("Config lives at ~/.env.production")
+    assert not mh._pdf_content_is_safe("cat /etc/shadow")
+    assert not mh._pdf_content_is_safe(r"C:\Users\alice\.aws\credentials")
 
 def test_generate_and_send_pdf_success_with_real_bytes():
     # A real fpdf2-generated PDF must reach _live_send_document
@@ -486,6 +498,7 @@ def test_generate_and_send_pdf_refuses_sensitive_content_without_sending():
         for content in (
             "sk-or-v1-" + "a" * 64,
             "Card: 4242 4242 4242 4242",
+            "Read ~/.ssh/id_ed25519",
         ):
             assert mh.generate_and_send_pdf(content) == "Refused: unsafe PDF content"
         assert rendered == []
@@ -521,6 +534,8 @@ if __name__ == "__main__":
     test_synthesise_speech_uses_edge_tts()
     test_pdf_content_is_safe_blocks_credentials()
     test_pdf_content_is_safe_allows_normal_text()
+    test_pdf_content_is_safe_blocks_sensitive_file_references()
+    test_pdf_content_is_safe_blocks_dotenv_and_shadow_and_windows_paths()
     test_pdf_content_is_safe_blocks_credit_card_number()
     test_generate_and_send_pdf_success_with_real_bytes()
     test_generate_and_send_pdf_refuses_sensitive_content_without_sending()

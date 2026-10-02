@@ -456,6 +456,14 @@ _SECRET_PATTERNS = {
     "anthropic_key": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{90,}\b"),
 }
 
+_SENSITIVE_FILE_PATTERNS = {
+    "unix_password_store": re.compile(r"(?:^|[\s'\"`])/(?:etc/(?:shadow|gshadow)|proc/(?:self|\d+)/environ)\b", re.I),
+    "unix_credential_store": re.compile(r"(?:^|[\s'\"`])(?:~|/(?:root|home/[^/\s]+))/\.(?:ssh|aws|gnupg|kube)(?:/|\b)", re.I),
+    "dotenv_file": re.compile(r"(?:^|[\s'\"`])(?:~|/(?:root|home/[^/\s]+))/\.env(?:\b|\.)", re.I),
+    "windows_credential_store": re.compile(r"(?:^|[\s'\"`])[A-Z]:\\Users\\[^\\\s]+\\\.(?:ssh|aws|gnupg|kube)(?:\\|\b)", re.I),
+    "private_key_material": re.compile(r"-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----"),
+}
+
 def _luhn_ok(digits):
     total, alt = 0, False
     for d in reversed(digits):
@@ -467,13 +475,17 @@ def _luhn_ok(digits):
     return total % 10 == 0
 
 def _pdf_content_is_safe(content: str) -> bool:
-    """Scan for high-confidence credential token formats only.
+    """Reject high-confidence credential, sensitive-file, and card patterns.
     Returns False and logs the category if a match is found."""
     text = unicodedata.normalize("NFKC", content)
     text = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", text)
     for name, pattern in _SECRET_PATTERNS.items():
         if pattern.search(text):
             logger.warning("PDF refused: credential pattern matched (%s)", name)
+            return False
+    for name, pattern in _SENSITIVE_FILE_PATTERNS.items():
+        if pattern.search(text):
+            logger.warning("PDF refused: sensitive file pattern matched (%s)", name)
             return False
     for m in re.finditer(r"\b(?:[0-9][ -]?){13,19}\b", text):
         digits = re.sub(r"\D", "", m.group())
