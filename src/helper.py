@@ -143,7 +143,20 @@ def cfv2_compact_history(events_repr, limit=2400):
         if remaining <= 0:
             break
         if len(line) > remaining:
-            line = line[:remaining]
+            # Older events should be omitted rather than included as a broken
+            # fragment. If the newest event alone exceeds the limit, retain its
+            # header and end the payload with an ellipsis at a word boundary.
+            if selected:
+                break
+            header, delimiter, payload = line.partition(": ")
+            marker = "..."
+            payload_budget = remaining - len(header) - len(delimiter) - len(marker)
+            if not delimiter or payload_budget <= 0:
+                break
+            excerpt = payload[:payload_budget].rstrip()
+            if len(excerpt) < len(payload):
+                excerpt = excerpt.rsplit(" ", 1)[0] if " " in excerpt else ""
+            line = f"{header}: {excerpt}{marker}"
         selected.append(line)
         used += len(line) + separator
     selected.reverse()
