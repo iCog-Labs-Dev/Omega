@@ -21,6 +21,7 @@ _DISTRIBUTION = {
     "yaml": "PyYAML",
     "telegramify_markdown": "telegramify-markdown",
     "edge_tts": "edge-tts",
+    "zxingcpp": "zxing-cpp",
 }
 
 # Imported on purpose without being declared. See requirements.txt for why.
