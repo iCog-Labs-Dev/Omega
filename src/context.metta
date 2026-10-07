@@ -279,6 +279,7 @@
       (change-state! &cfv2-frame-indexspace ())
       (change-state! &cfv2-goalspace ())
       (change-state! &cfv2-subframespace ())
+      (change-state! &cfv2-frame-event-space ())
 
       ;; Relational states used in frame composition
       (change-state! &cfv2-relational-space ())
@@ -374,12 +375,18 @@
    (if (== $kind UserMessageForCurrentFrame) UserDirective
    (if (== $kind ResultAdded) Result Milestone)))))
 
-;; A frame ID is also the state key for that frame's private event space.
+;; Events share one initialized state and are selected by frame ID and category.
 (= (cfv2-get-frame-events $frameID $category)
-   (if (== $category ())
-       (get-state $frameID)
-       (filter-atom (get-state $frameID) $event
-          (== (cfv2-event-category $event) $category))))
+   (filter-atom (get-state &cfv2-frame-event-space) $event
+      (and
+         (== (cfv2-event-frame-id $event) $frameID)
+         (or (== $category ())
+             (== (cfv2-event-category $event) $category)))))
+
+(= (cfv2-event-frame-id
+      (FrameEvent (frameID $frameID) (category $category) (kind $kind)
+         (payload $payload) (timestamp $timestamp)))
+   $frameID)
 
 (= (cfv2-event-category
       (FrameEvent (frameID $frameID) (category $category) (kind $kind)
@@ -391,10 +398,10 @@
                     (frameID $frameID)
                     (category $category)
                     (kind $kind)
-                    (payload (swrite (cfv2-history-payload $payload)))
+                    (payload (cfv2-history-payload $payload))
                     (timestamp (cfv2-now))))
-          ($events (append (get-state $frameID) ($event))))
-      (change-state! $frameID $events)))
+          ($events (append (get-state &cfv2-frame-event-space) ($event))))
+      (change-state! &cfv2-frame-event-space $events)))
 
 (= (cfv2-refresh-current-history-summary)
    (change-state! &cfv2-current-history-summary
@@ -482,7 +489,6 @@
           ($goalSpaceID (cfv2-make-id &GoalSpace))
           ($subFrameSpaceID (cfv2-make-id &SubFrameSpace))
           ($now (cfv2-now))
-          ($_ (change-state! $frameID ()))
           ($_ (cfv2-add-frame-event $frameID (cfv2-history-category $source) $source $description))
           ($historySummary (cfv2-compact-history (cfv2-get-frame-events $frameID ())))
           ($deliverables $description)
