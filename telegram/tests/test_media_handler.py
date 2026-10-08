@@ -507,6 +507,76 @@ def test_generate_and_send_pdf_refuses_sensitive_content_without_sending():
         (mh._pdf_generation_allowed, mh._prompt_is_unsafe,
          mh._generate_pdf_bytes, mh._live_send_document) = original
 
+
+def _pdf_text(pdf_bytes):
+    reader = PdfReader(BytesIO(pdf_bytes))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def test_generate_pdf_bytes_keeps_right_to_left_text_in_reading_order():
+    # Without text shaping fpdf2 lays these out left to right, so a reader
+    # sees the letters reversed: "שלום עולם" came out as "םלוע םולש".
+    # Mixed Hebrew and English renders correctly too, but pypdf cannot read a
+    # mixed-direction line back, so only a single-direction line is checked.
+    content = "שלום עולם"
+    extracted = _pdf_text(mh._generate_pdf_bytes(content))
+    assert content in extracted, extracted
+
+
+def test_generate_pdf_bytes_joins_arabic_letters():
+    # Joined Arabic is drawn with contextual glyphs, which a PDF reader maps to
+    # presentation forms; NFKC folds them back to the plain letters.
+    import unicodedata
+    content = "مرحبا بالعالم"
+    extracted = unicodedata.normalize("NFKC", _pdf_text(mh._generate_pdf_bytes(content)))
+    assert content in extracted, extracted
+
+
+def test_characters_missing_from_pdf_font_lists_each_once_in_order():
+    missing = mh._characters_missing_from_pdf_font("Hello 👋 世界 ✅ 世界 👋")
+    assert missing == ["👋", "世", "界", "✅"], missing
+
+
+def test_characters_missing_from_pdf_font_covers_supported_scripts_and_layout():
+    content = "Tab\there\nПривет «мир» № 5 €\nשלום مرحبا Ελληνικά — “quotes” •"
+    assert mh._characters_missing_from_pdf_font(content) == []
+
+
+def test_describe_missing_characters_caps_the_list():
+    missing = [chr(0x4E00 + i) for i in range(mh.MAX_LISTED_MISSING_CHARS + 3)]
+    described = mh._describe_missing_characters(missing)
+    assert described.startswith("一 (U+4E00), "), described
+    assert described.endswith(" and 3 more"), described
+    assert described.count("(U+") == mh.MAX_LISTED_MISSING_CHARS, described
+
+
+def test_generate_and_send_pdf_refuses_characters_the_font_cannot_draw():
+    """A PDF with characters silently left out must not go out as PDF_SENT."""
+    original = (
+        mh._pdf_generation_allowed,
+        mh._prompt_is_unsafe,
+        mh._generate_pdf_bytes,
+        mh._live_send_document,
+    )
+    rendered = []
+    sent = []
+    mh._pdf_generation_allowed = lambda: True
+    mh._prompt_is_unsafe = lambda content: False
+    mh._generate_pdf_bytes = lambda content: rendered.append(content) or b"%PDF-test"
+    mh._live_send_document = lambda *args, **kwargs: sent.append((args, kwargs))
+    try:
+        result = mh.generate_and_send_pdf("Hello 👋 世界 ✅")
+        assert result == (
+            "PDF_FAILED: the PDF font cannot draw 👋 (U+1F44B), 世 (U+4E16), "
+            "界 (U+754C), ✅ (U+2705). Nothing was sent; remove or replace these "
+            "characters and call generate-pdf again"), result
+        assert rendered == []
+        assert sent == []
+    finally:
+        (mh._pdf_generation_allowed, mh._prompt_is_unsafe,
+         mh._generate_pdf_bytes, mh._live_send_document) = original
+
+
 if __name__ == "__main__":
     test_no_image_returns_marker()
     test_describe_memoizes_per_turn()
@@ -541,4 +611,10 @@ if __name__ == "__main__":
     test_generate_and_send_pdf_refuses_sensitive_content_without_sending()
     test_generate_pdf_bytes_preserves_supported_unicode_text()
     test_pdf_generation_gate_defaults_and_overrides()
+    test_generate_pdf_bytes_keeps_right_to_left_text_in_reading_order()
+    test_generate_pdf_bytes_joins_arabic_letters()
+    test_characters_missing_from_pdf_font_lists_each_once_in_order()
+    test_characters_missing_from_pdf_font_covers_supported_scripts_and_layout()
+    test_describe_missing_characters_caps_the_list()
+    test_generate_and_send_pdf_refuses_characters_the_font_cannot_draw()
     print("all media_handler tests passed")

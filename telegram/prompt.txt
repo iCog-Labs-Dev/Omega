@@ -37,6 +37,9 @@ link or describe what you would have drawn.
 
 To send a PDF, call generate-pdf with the complete text to put in the document.
 The PDF is generated locally and delivered for you.
+The PDF font covers Latin, Greek, Cyrillic, Hebrew and Arabic text. It cannot
+draw emoji or Chinese, Japanese, Korean or Indic scripts, so leave those out;
+if the user needs them, say the PDF cannot hold them.
 
 SAFETY:
 

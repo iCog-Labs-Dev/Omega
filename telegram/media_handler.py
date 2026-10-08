@@ -349,6 +349,9 @@ def generate_and_send(prompt):
 DEFAULT_TTS_VOICE = "en-US-AriaNeural"
 MAX_TTS_CHARS = 4096
 MAX_PDF_CHARS = 20000
+PDF_FONT_PATH = Path(__file__).resolve().parent / "assets" / "fonts" / "DejaVuSans.ttf"
+# How many of the characters the font cannot draw are named back to the agent.
+MAX_LISTED_MISSING_CHARS = 10
 
 
 def _tts_allowed():
@@ -427,8 +430,31 @@ def _pdf_generation_allowed():
         return False
 
 
+def _characters_missing_from_pdf_font(content):
+    """Characters in content the PDF font has no glyph for, each listed once
+    in order of first use. Control characters such as newline and tab are
+    layout, not glyphs, and are never reported."""
+    from fontTools.ttLib import TTFont
+
+    drawable = TTFont(str(PDF_FONT_PATH)).getBestCmap()
+    return list(dict.fromkeys(
+        ch for ch in content
+        if ord(ch) not in drawable and unicodedata.category(ch) != "Cc"
+    ))
+
+
+def _describe_missing_characters(missing):
+    """Name the characters the font cannot draw, short enough for the agent."""
+    shown = ", ".join(f"{ch} (U+{ord(ch):04X})" for ch in missing[:MAX_LISTED_MISSING_CHARS])
+    hidden = len(missing) - MAX_LISTED_MISSING_CHARS
+    return shown + (f" and {hidden} more" if hidden > 0 else "")
+
+
 def _generate_pdf_bytes(content):
-    """Render text into a simple in-memory PDF, returning bytes or None."""
+    """Render text into a simple in-memory PDF, returning bytes or None.
+
+    Text shaping puts right-to-left scripts in reading order and joins Arabic
+    letters; without it Hebrew and Arabic come out reversed."""
     try:
         from io import BytesIO
         from fpdf import FPDF
@@ -436,10 +462,10 @@ def _generate_pdf_bytes(content):
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
-        font_path = Path(__file__).resolve().parent / "assets" / "fonts" / "DejaVuSans.ttf"
 
-        pdf.add_font("DejaVu", fname=str(font_path))
+        pdf.add_font("DejaVu", fname=str(PDF_FONT_PATH))
         pdf.set_font("DejaVu", size=12)
+        pdf.set_text_shaping(True)
 
         pdf.multi_cell(0, 6, text=content)
         buffer = BytesIO()
@@ -507,6 +533,13 @@ def generate_and_send_pdf(content):
         return "Refused: unsafe PDF content"
     if _prompt_is_unsafe(content):
         return "Refused: unsafe PDF content"
+    # fpdf2 leaves out characters the font cannot draw and only logs it, so a
+    # PDF would go out with words missing while the agent is told it was sent.
+    missing = _characters_missing_from_pdf_font(content)
+    if missing:
+        return ("PDF_FAILED: the PDF font cannot draw "
+                f"{_describe_missing_characters(missing)}. Nothing was sent; "
+                "remove or replace these characters and call generate-pdf again")
     if _live_send_chat_action is not None:
         try:
             _live_send_chat_action("upload_document")

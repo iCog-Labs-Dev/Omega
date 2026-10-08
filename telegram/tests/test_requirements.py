@@ -23,6 +23,7 @@ _DISTRIBUTION = {
     "edge_tts": "edge-tts",
     # fpdf2 intentionally retains the historical ``fpdf`` import name.
     "fpdf": "fpdf2",
+    "fontTools": "fonttools",
 }
 
 # Imported on purpose without being declared. See requirements.txt for why.

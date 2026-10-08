@@ -16,7 +16,7 @@ outbound retry queue, and the channel auth handshake.
 | Inbound PDF | Extracted text is inlined into the message |
 | Inbound voice / audio | Whisper transcript is inlined into the message |
 | Outbound image | The agent calls `generate-image`, which generates and sends the photo |
-| Outbound PDF | The agent calls `generate-pdf`, which creates a local PDF and sends it as a Telegram document (up to 20,000 characters) |
+| Outbound PDF | The agent calls `generate-pdf`, which creates a local PDF and sends it as a Telegram document (up to 20,000 characters). Hebrew and Arabic are shaped; text with characters the bundled font cannot draw, such as emoji or CJK, is refused and the characters are named to the agent |
 | Outbound voice | The agent calls `speak`, which synthesizes and sends a Telegram voice message when enabled |
 | Admin commands | `/kill`, `/pause [chat_id]`, `/togglesearch`, `/purge` (admin IDs only) |
 | Safety | Ethics classification on inbound and outbound text, per-user spam throttling |
