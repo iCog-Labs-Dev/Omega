@@ -8,7 +8,8 @@
 Pillow>=10.0.0
 pypdf>=4.0.0
 aiogram>=3.0.0
-telegramify-markdown>=0.1.0
+# >=1.4.0 for convert()/entities_to_markdownv2(), used to reveal link targets.
+telegramify-markdown>=1.4.0
 openai>=1.0.0
 PyYAML>=6.0
 requests>=2.31.0
@@ -19,3 +20,4 @@ fpdf2==2.8.1
 fonttools>=4.34.0
 # Lets fpdf2 shape text, which Hebrew and Arabic need to read correctly.
 uharfbuzz==0.56.3
+zxing-cpp>=2.2.0

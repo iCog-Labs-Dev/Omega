@@ -24,6 +24,7 @@ _DISTRIBUTION = {
     # fpdf2 intentionally retains the historical ``fpdf`` import name.
     "fpdf": "fpdf2",
     "fontTools": "fonttools",
+    "zxingcpp": "zxing-cpp",
 }
 
 # Imported on purpose without being declared. See requirements.txt for why.
