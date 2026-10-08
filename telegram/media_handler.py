@@ -490,6 +490,35 @@ _SENSITIVE_FILE_PATTERNS = {
     "private_key_material": re.compile(r"-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----"),
 }
 
+# Card networks by the digits a card number starts with and how long it is.
+# Any 13-19 digit run passes the Luhn check about one time in ten, so Luhn
+# alone refused Telegram chat ids (-100...) and millisecond timestamps. A run
+# has to start like a real card of its length before Luhn is asked.
+_CARD_NETWORKS = (
+    ("visa",       re.compile(r"4"), {13, 16, 19}),
+    ("mastercard", re.compile(r"5[1-5]|222[1-9]|22[3-9]\d|2[3-6]\d\d|27[01]\d|2720"), {16}),
+    ("amex",       re.compile(r"3[47]"), {15}),
+    ("discover",   re.compile(r"6011|64[4-9]|65"), set(range(16, 20))),
+    ("jcb",        re.compile(r"35(?:2[89]|[3-8]\d)"), set(range(16, 20))),
+    ("diners",     re.compile(r"30[0-5]|309|36|3[89]"), set(range(14, 20))),
+    ("unionpay",   re.compile(r"62"), set(range(16, 20))),
+    ("maestro",    re.compile(r"5018|5020|5038|5893|6304|6759|676[1-3]"), set(range(13, 20))),
+)
+
+# A run of 13-19 digits, optionally grouped by spaces or dashes, that is not
+# part of a longer word or number and has no minus sign in front.
+_CARD_CANDIDATE = re.compile(r"(?<![\w-])\d(?:[ -]?\d){12,18}(?!\w)")
+
+
+def _looks_like_card_number(digits):
+    """True when digits start like a card of their length and pass Luhn."""
+    starts_like_card = any(
+        prefix.match(digits) and len(digits) in lengths
+        for _, prefix, lengths in _CARD_NETWORKS
+    )
+    return starts_like_card and _luhn_ok(digits)
+
+
 def _luhn_ok(digits):
     total, alt = 0, False
     for d in reversed(digits):
@@ -513,9 +542,8 @@ def _pdf_content_is_safe(content: str) -> bool:
         if pattern.search(text):
             logger.warning("PDF refused: sensitive file pattern matched (%s)", name)
             return False
-    for m in re.finditer(r"\b(?:[0-9][ -]?){13,19}\b", text):
-        digits = re.sub(r"\D", "", m.group())
-        if 13 <= len(digits) <= 19 and _luhn_ok(digits):
+    for m in _CARD_CANDIDATE.finditer(text):
+        if _looks_like_card_number(re.sub(r"\D", "", m.group())):
             logger.warning("PDF refused: sensitive information pattern matched (credit_card)")
             return False
     return True

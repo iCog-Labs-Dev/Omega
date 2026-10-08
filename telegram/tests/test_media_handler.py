@@ -480,6 +480,32 @@ def test_pdf_content_is_safe_blocks_credit_card_number():
     assert not mh._pdf_content_is_safe("Card: 4242 4242 4242 4242")
 
 
+def test_pdf_content_is_safe_blocks_each_card_network():
+    # Published test numbers, one per network the check knows.
+    for number in (
+        "4111111111111111",       # Visa
+        "5555555555554444",       # Mastercard
+        "2223003122003222",       # Mastercard 2-series
+        "3782 822463 10005",      # Amex, grouped as printed
+        "6011-1111-1111-1117",    # Discover, dashed
+        "3530111333300000",       # JCB
+        "30569309025904",         # Diners, 14 digits
+        "6200000000000005",       # UnionPay
+    ):
+        assert not mh._pdf_content_is_safe(f"Pay with {number} today"), number
+
+
+def test_pdf_content_is_safe_allows_ids_and_timestamps_that_pass_luhn():
+    # Both pass Luhn and were refused as credit_card before the check looked
+    # at how a number starts. QA hit them in ordinary bot output.
+    for text in (
+        "Group chat id: -1001234567896",
+        "created_at_ms=1696680000001",
+        "Order 1234567812345670 shipped",
+    ):
+        assert mh._pdf_content_is_safe(text), text
+
+
 def test_generate_and_send_pdf_refuses_sensitive_content_without_sending():
     """Sensitive text must not be rendered or handed to Telegram."""
     original = (
@@ -607,6 +633,8 @@ if __name__ == "__main__":
     test_pdf_content_is_safe_blocks_sensitive_file_references()
     test_pdf_content_is_safe_blocks_dotenv_and_shadow_and_windows_paths()
     test_pdf_content_is_safe_blocks_credit_card_number()
+    test_pdf_content_is_safe_blocks_each_card_network()
+    test_pdf_content_is_safe_allows_ids_and_timestamps_that_pass_luhn()
     test_generate_and_send_pdf_success_with_real_bytes()
     test_generate_and_send_pdf_refuses_sensitive_content_without_sending()
     test_generate_pdf_bytes_preserves_supported_unicode_text()
