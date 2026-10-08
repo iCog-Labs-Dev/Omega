@@ -1,5 +1,7 @@
+from dataclasses import dataclass
 from pathlib import Path
 import base64
+import functools
 import hashlib
 import threading
 import logging
@@ -288,6 +290,18 @@ def register_channel(send_photo, send_voice, send_document, send_chat_action, ch
     _live_send_document = send_document
     _live_send_chat_action = send_chat_action
     _live_channel = channel
+    _log_pdf_fonts()
+
+
+def _log_pdf_fonts():
+    """Log which fonts PDFs draw with, so a deployment's script coverage
+    shows at startup."""
+    try:
+        fonts = _load_pdf_fonts(_pdf_font_dir())
+        names = [fonts.main.path.name] + [font.path.name for font in fonts.fallbacks]
+        logger.info("PDF fonts: %s", ", ".join(names))
+    except Exception as error:
+        logger.error(f"Could not load PDF fonts: {error}")
 
 
 def _image_generation_allowed():
@@ -350,8 +364,20 @@ DEFAULT_TTS_VOICE = "en-US-AriaNeural"
 MAX_TTS_CHARS = 4096
 MAX_PDF_CHARS = 20000
 PDF_FONT_PATH = Path(__file__).resolve().parent / "assets" / "fonts" / "DejaVuSans.ttf"
-# How many of the characters the font cannot draw are named back to the agent.
+# Setting that overrides where extra PDF fonts are read from and installed to.
+PDF_FONT_DIR_KEY = "TG_PDF_FONT_DIR"
+# Font files read from that folder; a .ttc collection gives its first font.
+PDF_FONT_SUFFIXES = (".ttf", ".otf", ".ttc")
+# How many of the characters the fonts cannot draw are named back to the agent.
 MAX_LISTED_MISSING_CHARS = 10
+# install-pdf-font only downloads from here: the OFL-licensed half of the
+# Google Fonts repository. The agent names a family, never a URL.
+GOOGLE_FONTS_OFL_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/"
+FONT_DOWNLOAD_TIMEOUT_SECONDS = 60
+MAX_FONT_METADATA_BYTES = 256 * 1024
+# Noto Sans SC, the largest common family, is about 18 MB.
+MAX_FONT_DOWNLOAD_BYTES = 32 * 1024 * 1024
+MAX_FONT_DIR_BYTES = 200 * 1024 * 1024
 
 
 def _tts_allowed():
@@ -419,6 +445,16 @@ def speak(text):
     return "VOICE_SENT"
 
 
+def _pdf_font_install_allowed():
+    """Read the active channel's font install gate; default to enabled."""
+    try:
+        constraints = getattr(_live_channel, "reply_constraints", None) or {}
+        return bool(constraints.get("allow_pdf_font_install", True))
+    except Exception as error:
+        logger.error(f"Could not read allow_pdf_font_install gate: {error}")
+        return False
+
+
 def _pdf_generation_allowed():
     """Read the active channel's PDF gate; default to enabled for profiles
     created before this gate existed."""
@@ -430,17 +466,135 @@ def _pdf_generation_allowed():
         return False
 
 
-def _characters_missing_from_pdf_font(content):
-    """Characters in content the PDF font has no glyph for, each listed once
-    in order of first use. Control characters such as newline and tab are
-    layout, not glyphs, and are never reported."""
+@dataclass(frozen=True)
+class PdfFont:
+    """A font file the PDF renderer can draw from, with the characters it covers.
+
+    fpdf2 quietly leaves out any character its fonts have no glyph for, so the
+    PDF skill checks the text against the fonts before rendering. That check is
+    only honest if every character a font claims is really drawn, which is not
+    true of every font file: a colour emoji font lists its emoji but holds only
+    bitmaps fpdf2 cannot draw.
+
+    Get one from _load_pdf_font, which returns a PdfFont only for a file that
+    parsed and has TrueType outlines. Everything else comes back as an
+    UnusablePdfFont saying why.
+    """
+    path: Path
+    codepoints: frozenset
+
+
+@dataclass(frozen=True)
+class UnusablePdfFont:
+    """A font file left out of the PDF fonts, and why."""
+    path: Path
+    reason: str
+
+
+@dataclass(frozen=True)
+class PdfFontSet:
+    """The bundled font and the fallback fonts fpdf2 tries after it, in order.
+
+    fpdf2 draws each character with the main font when it can, and otherwise
+    with the first fallback font that has it. The missing-character check and
+    the renderer take the same set, so text that passes the check is drawn in
+    full:
+
+        fonts = _load_pdf_fonts(_pdf_font_dir())
+        if not fonts.missing(content):
+            pdf_bytes = _generate_pdf_bytes(content, fonts)
+    """
+    main: PdfFont
+    fallbacks: tuple = ()
+
+    def missing(self, content):
+        """Characters no font in the set can draw, each once, in order of first
+        use. Control characters such as newline and tab are layout, not glyphs,
+        and are never reported."""
+        drawable = self.main.codepoints.union(*(f.codepoints for f in self.fallbacks))
+        return list(dict.fromkeys(
+            ch for ch in content
+            if ord(ch) not in drawable and unicodedata.category(ch) != "Cc"
+        ))
+
+    def apply_to(self, pdf, size):
+        """Register every font with pdf and select the main one."""
+        pdf.add_font("main", fname=str(self.main.path))
+        names = [f"fallback{i}" for i in range(len(self.fallbacks))]
+        for name, font in zip(names, self.fallbacks):
+            pdf.add_font(name, fname=str(font.path))
+        pdf.set_font("main", size=size)
+        if names:
+            pdf.set_fallback_fonts(names, exact_match=False)
+
+
+def _load_pdf_font(path):
+    """Read one font file into a PdfFont or an UnusablePdfFont, reusing the
+    last result until the file changes."""
+    stat = path.stat()
+    return _read_pdf_font(path, stat.st_mtime_ns, stat.st_size)
+
+
+@functools.lru_cache(maxsize=64)
+def _read_pdf_font(path, mtime_ns, size):
+    """Parse a font file. mtime_ns and size are only there to make an edited
+    file a new cache entry.
+
+    Only TrueType outlines are accepted: bitmap emoji fonts draw nothing, and
+    fpdf2 embeds CFF outlines (most .otf files, Noto Sans CJK) under the wrong
+    font type, which PDF readers warn about or reject."""
     from fontTools.ttLib import TTFont
 
-    drawable = TTFont(str(PDF_FONT_PATH)).getBestCmap()
-    return list(dict.fromkeys(
-        ch for ch in content
-        if ord(ch) not in drawable and unicodedata.category(ch) != "Cc"
-    ))
+    try:
+        font = TTFont(str(path), fontNumber=0, lazy=True)
+        if "glyf" not in font:
+            return UnusablePdfFont(path, "no TrueType outlines (a CFF or bitmap-only font)")
+        return PdfFont(path, frozenset(font.getBestCmap() or ()))
+    except Exception as error:
+        return UnusablePdfFont(path, f"cannot be read as a font: {error}")
+
+
+def _pdf_font_dir():
+    """The folder extra PDF fonts are read from and installed to: TG_PDF_FONT_DIR
+    when set, otherwise fonts/ in core's memory folder, which is the volume
+    that survives restarts."""
+    from config import config_get_by_key
+    from helper import projectRootDirectory
+
+    value = str(config_get_by_key(PDF_FONT_DIR_KEY, "") or "").strip()
+    return Path(value) if value else Path(projectRootDirectory()) / "memory" / "fonts"
+
+
+def _load_pdf_fonts(font_dir):
+    """The bundled font plus every usable font in font_dir, in filename order.
+
+    A folder that cannot be read, or a file that is not a usable font, is
+    logged and left out; it never stops a PDF. The bundled font failing is a
+    packaging fault and raises."""
+    main = _load_pdf_font(PDF_FONT_PATH)
+    if not isinstance(main, PdfFont):
+        raise RuntimeError(f"bundled PDF font {PDF_FONT_PATH.name}: {main.reason}")
+    if font_dir is None:
+        return PdfFontSet(main)
+    try:
+        paths = sorted(
+            p for p in font_dir.iterdir()
+            if p.suffix.lower() in PDF_FONT_SUFFIXES and not p.name.startswith(".") and p.is_file()
+        )
+    except FileNotFoundError:
+        # Normal until the first install-pdf-font creates it.
+        return PdfFontSet(main)
+    except OSError as error:
+        logger.warning("PDF font folder %s cannot be read: %s", font_dir, error)
+        return PdfFontSet(main)
+    fallbacks = []
+    for path in paths:
+        font = _load_pdf_font(path)
+        if isinstance(font, PdfFont):
+            fallbacks.append(font)
+        else:
+            logger.warning("Skipping PDF font %s: %s", path.name, font.reason)
+    return PdfFontSet(main, tuple(fallbacks))
 
 
 def _describe_missing_characters(missing):
@@ -450,11 +604,12 @@ def _describe_missing_characters(missing):
     return shown + (f" and {hidden} more" if hidden > 0 else "")
 
 
-def _generate_pdf_bytes(content):
-    """Render text into a simple in-memory PDF, returning bytes or None.
+def _generate_pdf_bytes(content, fonts):
+    """Render text with a PdfFontSet into an in-memory PDF, returning bytes or None.
 
-    Text shaping puts right-to-left scripts in reading order and joins Arabic
-    letters; without it Hebrew and Arabic come out reversed."""
+    Text shaping puts right-to-left scripts in reading order, joins Arabic
+    letters and builds Indic syllables; without it Hebrew and Arabic come out
+    reversed."""
     try:
         from io import BytesIO
         from fpdf import FPDF
@@ -463,8 +618,7 @@ def _generate_pdf_bytes(content):
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
 
-        pdf.add_font("DejaVu", fname=str(PDF_FONT_PATH))
-        pdf.set_font("DejaVu", size=12)
+        fonts.apply_to(pdf, size=12)
         pdf.set_text_shaping(True)
 
         pdf.multi_cell(0, 6, text=content)
@@ -561,19 +715,26 @@ def generate_and_send_pdf(content):
         return "Refused: unsafe PDF content"
     if _prompt_is_unsafe(content):
         return "Refused: unsafe PDF content"
-    # fpdf2 leaves out characters the font cannot draw and only logs it, so a
+    try:
+        fonts = _load_pdf_fonts(_pdf_font_dir())
+    except Exception as error:
+        logger.error(f"Could not load PDF fonts: {error}")
+        return "PDF_FAILED: could not load the PDF fonts"
+    # fpdf2 leaves out characters its fonts cannot draw and only logs it, so a
     # PDF would go out with words missing while the agent is told it was sent.
-    missing = _characters_missing_from_pdf_font(content)
+    missing = fonts.missing(content)
     if missing:
-        return ("PDF_FAILED: the PDF font cannot draw "
-                f"{_describe_missing_characters(missing)}. Nothing was sent; "
-                "remove or replace these characters and call generate-pdf again")
+        return ("PDF_FAILED: the PDF fonts cannot draw "
+                f"{_describe_missing_characters(missing)}. Nothing was sent. "
+                "Install a font that covers them with install-pdf-font and a "
+                "Google Fonts family name, or remove them, then call "
+                "generate-pdf again")
     if _live_send_chat_action is not None:
         try:
             _live_send_chat_action("upload_document")
         except Exception as error:
             logger.warning(f"Could not send upload_document chat action: {error}")
-    pdf_bytes = _generate_pdf_bytes(content)
+    pdf_bytes = _generate_pdf_bytes(content, fonts)
     if not pdf_bytes:
         return "PDF_FAILED: could not generate PDF bytes"
     if _live_send_document is None:
@@ -584,3 +745,228 @@ def generate_and_send_pdf(content):
         logger.error(f"Failed to send generated PDF: {error}")
         return "PDF_FAILED: generated but could not send"
     return "PDF_SENT"
+
+
+class FontInstallRefused(Exception):
+    """install-pdf-font cannot go ahead; the message is for the agent."""
+
+
+@dataclass(frozen=True)
+class GoogleFontFamily:
+    """A Google Fonts family name that is safe to turn into a download path.
+
+    install-pdf-font takes a family name from the agent, and the name ends up
+    in a URL and a file name. Letting the agent pass a URL, or any text into
+    those, would make the "only google/fonts" rule something the agent could
+    talk its way around. A GoogleFontFamily only exists for a plain name, and
+    its directory is the repository's own folder name for it:
+
+        family = GoogleFontFamily.parse("Noto Sans Devanagari")
+        family.directory  # "notosansdevanagari", read from ofl/notosansdevanagari/
+    """
+    name: str
+    directory: str
+
+    @staticmethod
+    def parse(text):
+        """A GoogleFontFamily for letters, digits and spaces, or None."""
+        name = " ".join(str(text or "").split())
+        if not re.fullmatch(r"[A-Za-z0-9 ]{1,64}", name):
+            return None
+        return GoogleFontFamily(name, re.sub(r"[^a-z0-9]", "", name.lower()))
+
+    def file_url(self, filename):
+        return f"{GOOGLE_FONTS_OFL_URL}{self.directory}/{filename}"
+
+
+def _download_google_fonts_file(url, max_bytes):
+    """GET a file from the Google Fonts repository, refusing redirects and
+    anything larger than max_bytes."""
+    import requests
+
+    if not url.startswith(GOOGLE_FONTS_OFL_URL):
+        raise FontInstallRefused("fonts can only come from the Google Fonts repository")
+    with requests.get(url, stream=True, allow_redirects=False,
+                      timeout=FONT_DOWNLOAD_TIMEOUT_SECONDS) as response:
+        if response.status_code == 404:
+            raise FontInstallRefused("not found in the Google Fonts repository")
+        if response.status_code != 200:
+            raise FontInstallRefused(f"the Google Fonts repository answered HTTP {response.status_code}")
+        chunks, size = [], 0
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            size += len(chunk)
+            if size > max_bytes:
+                raise FontInstallRefused(f"the font file is larger than {max_bytes // (1024 * 1024)} MB")
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _regular_font_filename(metadata):
+    """The upright, regular-weight .ttf named in a family's METADATA.pb."""
+    best = None
+    for block in re.findall(r"fonts\s*\{(.*?)\}", metadata, re.S):
+        style = re.search(r'style:\s*"([^"]+)"', block)
+        weight = re.search(r"weight:\s*(\d+)", block)
+        filename = re.search(r'filename:\s*"([^"]+)"', block)
+        if not filename or (style and style.group(1) != "normal"):
+            continue
+        name = filename.group(1)
+        if not re.fullmatch(r"[A-Za-z0-9_\-\[\],.]+\.ttf", name) or ".." in name:
+            continue
+        distance = abs(int(weight.group(1)) - 400) if weight else 400
+        if best is None or distance < best[0]:
+            best = (distance, name)
+    if best is None:
+        raise FontInstallRefused("the family lists no upright .ttf file")
+    return best[1]
+
+
+def _static_pdf_font_bytes(data):
+    """Check downloaded font bytes and return them as a fixed-weight TrueType font.
+
+    fpdf2 draws a variable font at its default weight, which for Noto Sans SC
+    is Thin, so variable fonts are pinned to Regular (wght 400, other axes at
+    their defaults) first."""
+    from io import BytesIO
+    from fontTools.ttLib import TTFont
+
+    try:
+        font = TTFont(BytesIO(data))
+    except Exception:
+        raise FontInstallRefused("the download is not a font file")
+    if "glyf" not in font:
+        raise FontInstallRefused("the font has no TrueType outlines, so PDFs cannot use it")
+    if "fvar" in font:
+        from fontTools.varLib import instancer
+
+        location = {
+            axis.axisTag: (min(max(400, axis.minValue), axis.maxValue)
+                           if axis.axisTag == "wght" else axis.defaultValue)
+            for axis in font["fvar"].axes
+        }
+        font = instancer.instantiateVariableFont(font, location)
+    out = BytesIO()
+    font.save(out)
+    return out.getvalue()
+
+
+def _folder_size(folder):
+    """Total bytes of the files directly in folder; 0 if it does not exist."""
+    try:
+        return sum(p.stat().st_size for p in folder.iterdir() if p.is_file())
+    except FileNotFoundError:
+        return 0
+
+
+def _install_pdf_font_files(family):
+    """Download and save one GoogleFontFamily, blocking until done. Returns the
+    FONT_* status the agent is given."""
+    try:
+        font_dir = _pdf_font_dir()
+        target = font_dir / f"{family.directory}.ttf"
+        if target.exists():
+            return f"FONT_ALREADY_INSTALLED: {family.name}"
+        metadata = _download_google_fonts_file(
+            family.file_url("METADATA.pb"), MAX_FONT_METADATA_BYTES).decode("utf-8", "replace")
+        filename = _regular_font_filename(metadata)
+        font_bytes = _static_pdf_font_bytes(
+            _download_google_fonts_file(family.file_url(filename), MAX_FONT_DOWNLOAD_BYTES))
+        if _folder_size(font_dir) + len(font_bytes) > MAX_FONT_DIR_BYTES:
+            raise FontInstallRefused(
+                f"the font folder would pass {MAX_FONT_DIR_BYTES // (1024 * 1024)} MB")
+        before = _load_pdf_fonts(font_dir)
+        font_dir.mkdir(parents=True, exist_ok=True)
+        # Written under a dot name, which the font loader skips, and renamed
+        # once complete, so a PDF made meanwhile never reads half a font.
+        partial = font_dir / f".{family.directory}.ttf.partial"
+        partial.write_bytes(font_bytes)
+        partial.replace(target)
+    except FontInstallRefused as reason:
+        return f"FONT_INSTALL_FAILED: {family.name}: {reason}"
+    except Exception as error:
+        logger.error(f"Failed to install PDF font {family.name}: {error}")
+        return f"FONT_INSTALL_FAILED: {family.name}: could not download or save the font"
+    added = _load_pdf_font(target)
+    if not isinstance(added, PdfFont):
+        return f"FONT_INSTALL_FAILED: {family.name}: {added.reason}"
+    covered = before.main.codepoints.union(*(f.codepoints for f in before.fallbacks))
+    new = len(added.codepoints - covered)
+    logger.info("Installed PDF font %s from %s", target.name, filename)
+    return f"FONT_INSTALLED: {family.name}, {new} more characters can now go in PDFs"
+
+
+def _run_in_background(work):
+    """Run work on a daemon thread so the agent's loop is not held up."""
+    threading.Thread(target=work, daemon=True, name="install-pdf-font").start()
+
+
+# Family directories being downloaded right now, so a second request for the
+# same family while the first is running does not download it twice.
+_fonts_installing = set()
+
+
+def install_pdf_font(family_name):
+    """install-pdf-font skill: start downloading a Google Fonts family into the
+    PDF font folder so generate-pdf can draw its script.
+
+    A large family takes up to about 20 seconds, too long to hold the agent's
+    loop, so the download runs in the background. The user is told right away
+    that the fonts for their request are downloading, and when the download
+    ends the result reaches the agent as a new message in the same chat, so
+    it can call generate-pdf again or say what went wrong.
+
+    Returns a short status string (never raises): FONT_INSTALL_STARTED when the
+    download is under way, or a final FONT_* status when there is nothing to
+    wait for."""
+    family = GoogleFontFamily.parse(family_name)
+    if family is None:
+        return ("FONT_INSTALL_FAILED: pass a Google Fonts family name of letters, "
+                "digits and spaces, such as Noto Sans Devanagari")
+    if not _pdf_font_install_allowed():
+        return "FONT_INSTALL_DISABLED: installing PDF fonts is turned off"
+    channel = _live_channel
+    if not hasattr(channel, "queue_event"):
+        # No channel to report back through, so there is no one to wait for.
+        return _install_pdf_font_files(family)
+    try:
+        if (_pdf_font_dir() / f"{family.directory}.ttf").exists():
+            return f"FONT_ALREADY_INSTALLED: {family.name}"
+    except Exception as error:
+        logger.error(f"Could not check the PDF font folder: {error}")
+        return f"FONT_INSTALL_FAILED: {family.name}: could not read the font folder"
+    with _lock:
+        if family.directory in _fonts_installing:
+            return (f"FONT_INSTALL_IN_PROGRESS: {family.name} is already downloading; "
+                    "wait for its FONT_INSTALLED message")
+        _fonts_installing.add(family.directory)
+    chat_id, reply_to_id = channel.conversation()
+
+    def work():
+        # Whatever happens, the agent has to hear back, or it waits forever.
+        try:
+            status = _install_pdf_font_files(family)
+        except Exception as error:
+            logger.error(f"Failed to install PDF font {family.name}: {error}")
+            status = f"FONT_INSTALL_FAILED: {family.name}: could not download or save the font"
+        finally:
+            with _lock:
+                _fonts_installing.discard(family.directory)
+        if status.startswith("FONT_INSTALLED"):
+            note = f"{status}. Call generate-pdf again for the request that needed it."
+        else:
+            note = f"{status}. Tell the user the PDF cannot include those characters."
+        try:
+            channel.queue_event(chat_id, reply_to_id, f"[install-pdf-font] {note}")
+        except Exception as error:
+            logger.error(f"Could not report the {family.name} font install: {error}")
+
+    try:
+        channel.send_message(
+            f"Downloading the {family.name} font this PDF needs. "
+            "I will send the PDF when it is ready.", chat_id=chat_id)
+    except Exception as error:
+        logger.warning(f"Could not tell the user a font is downloading: {error}")
+    _run_in_background(work)
+    return (f"FONT_INSTALL_STARTED: {family.name} is downloading and the user has "
+            "been told. Do not call generate-pdf yet; a FONT_INSTALLED or "
+            "FONT_INSTALL_FAILED message arrives when it finishes.")

@@ -136,3 +136,8 @@
 ;; : generate-pdf (-> String String)
 (= (generate-pdf $content)
    (py-call (media_handler.generate_and_send_pdf $content)))
+
+;; Install a font so generate-pdf can draw a script it cannot yet, such as Devanagari, Thai, Chinese or emoji. Use when generate-pdf answers PDF_FAILED naming characters it cannot draw. Pass a Google Fonts family name, not a URL. The download runs in the background and a message starting [install-pdf-font] arrives when it ends.
+;; : install-pdf-font (-> String String)
+(= (install-pdf-font $family)
+   (py-call (media_handler.install_pdf_font $family)))

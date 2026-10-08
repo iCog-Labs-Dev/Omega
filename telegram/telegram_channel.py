@@ -1032,6 +1032,18 @@ class _TelegramChannel:
         text by as much as a factor of two."""
         return len(self._to_mdv2(piece)) <= TELEGRAM_TEXT_LIMIT
 
+    def conversation(self):
+        """The chat and message the agent is answering right now."""
+        return self.chat_id, self._reply_to_id
+
+    def queue_event(self, chat_id, reply_to_id, text):
+        """Hand the agent a note from the plugin itself, such as a finished
+        background download, the way a user message reaches it: the agent
+        picks it up from get_last_message on its next loop and answers in
+        that chat."""
+        with self.msg_lock:
+            self._message_queue.append((chat_id, text, reply_to_id, None))
+
     def send_message(self, text, chat_id=None, reply_to_id=None):
         """Queue a text message for the target chat, then deliver whatever the
         bot is ready to take. Never call this from the bot's own event loop

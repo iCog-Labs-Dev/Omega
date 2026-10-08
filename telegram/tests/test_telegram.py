@@ -325,6 +325,16 @@ def test_pdf_handler_extracts_text():
         restore()
 
 
+def test_queued_event_reaches_the_agent_in_its_chat():
+    """A background job reports back through the same queue as user
+    messages, so the agent answers in the chat that asked."""
+    ch = _new_channel()
+    ch.queue_event(1, 5, "[install-pdf-font] FONT_INSTALLED: Noto Sans Thai")
+
+    assert ch.get_last_message() == "[1] [5] [install-pdf-font] FONT_INSTALLED: Noto Sans Thai"
+    assert ch.conversation() == (1, 5)
+
+
 def test_pdf_handler_rejects_non_pdf_document():
     ch = _new_channel()
     ch.bot = FakeBot()
@@ -931,6 +941,7 @@ if __name__ == "__main__":
     test_svg_extension_is_rejected_even_with_spoofed_png_mime()
     test_invalid_raster_document_is_rejected()
     test_pdf_handler_extracts_text()
+    test_queued_event_reaches_the_agent_in_its_chat()
     test_pdf_handler_rejects_non_pdf_document()
     test_voice_handler_transcribes_audio()
     test_muted_user_is_gated_from_message_queue()
