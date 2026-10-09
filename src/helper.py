@@ -72,6 +72,97 @@ def compact_plain(value, limit=1200):
     return f"sha256:{digest[:16]} chars:{len(text)} excerpt:{compact}"
 
 
+def _unquote_history_string(value):
+    """Remove S-expression quotes and only decode escaped quotes/backslashes."""
+    text = str(value)
+    if len(text) < 2 or text[0] not in ('"', "'") or text[-1] != text[0]:
+        return text
+    inner = text[1:-1]
+    out = []
+    i = 0
+    while i < len(inner):
+        if inner[i] == "\\" and i + 1 < len(inner) and inner[i + 1] in ('"', "'", "\\"):
+            out.append(inner[i + 1])
+            i += 2
+        else:
+            out.append(inner[i])
+            i += 1
+    return "".join(out)
+
+
+def cfv2_history_payload(value, limit=900):
+    """Normalize, cap, and JSON-quote a payload for safe MeTTa event storage."""
+    text = normalize_string(value).strip()
+    text = _unquote_history_string(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    limit = max(0, int(limit))
+    if len(text) <= limit:
+        compact = text
+    elif limit <= 3:
+        compact = text[:limit]
+    else:
+        compact = text[: limit - 3].rstrip() + "..."
+    # The caller stores this value directly in a FrameEvent field. Returning a
+    # JSON string literal keeps whitespace and escaped characters parseable
+    # without routing the payload through MeTTa's swrite function.
+    return json.dumps(compact, ensure_ascii=False)
+
+
+def cfv2_compact_history(events_repr, limit=2400):
+    """Format the newest frame events into a plain-text summary within `limit`."""
+    limit = max(0, int(limit))
+    if limit == 0:
+        return ""
+
+    events = _balanced_exprs(normalize_string(events_repr), "FrameEvent")
+    lines = []
+    for event in events:
+        category = _field(event, "category") or "Event"
+        kind = _field(event, "kind") or category
+        timestamp = _field(event, "timestamp") or ""
+        payload = _field(event, "payload") or ""
+        timestamp = _unquote_history_string(timestamp)
+        if len(payload) >= 2 and payload[0] == '"' and payload[-1] == '"':
+            try:
+                payload = json.loads(payload)
+            except (TypeError, ValueError):
+                payload = _unquote_history_string(payload)
+        else:
+            payload = _unquote_history_string(payload)
+        payload = re.sub(r"\s+", " ", payload).strip()
+        stamp = f" [{timestamp}]" if timestamp else ""
+        lines.append(f"{category}/{kind}{stamp}: {payload}")
+
+    # Preserve recent context first when space is limited, but render the result
+    # in chronological order for readability.
+    selected = []
+    used = 0
+    for line in reversed(lines):
+        separator = 1 if selected else 0
+        remaining = limit - used - separator
+        if remaining <= 0:
+            break
+        if len(line) > remaining:
+            # Older events should be omitted rather than included as a broken
+            # fragment. If the newest event alone exceeds the limit, retain its
+            # header and end the payload with an ellipsis at a word boundary.
+            if selected:
+                break
+            header, delimiter, payload = line.partition(": ")
+            marker = "..."
+            payload_budget = remaining - len(header) - len(delimiter) - len(marker)
+            if not delimiter or payload_budget <= 0:
+                break
+            excerpt = payload[:payload_budget].rstrip()
+            if len(excerpt) < len(payload):
+                excerpt = excerpt.rsplit(" ", 1)[0] if " " in excerpt else ""
+            line = f"{header}: {excerpt}{marker}"
+        selected.append(line)
+        used += len(line) + separator
+    selected.reverse()
+    return "\n".join(selected)
+
+
 def make_id(prefix="id"):
     stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
     return f"{prefix}-{stamp}"
