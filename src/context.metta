@@ -370,10 +370,14 @@
    (change-state! &cfv2-current-updated-at (cfv2-now)))
 
 (= (cfv2-history-category $kind)
-   (if (== $kind CommandBatch) CommandBatch
-   (if (== $kind UserDirective) UserDirective
-   (if (== $kind UserMessageForCurrentFrame) UserDirective
-   (if (== $kind ResultAdded) Result Milestone)))))
+   (case $kind (
+      (CommandBatch CommandBatch)
+      (UserDirective UserDirective)
+      (UserMessageForCurrentFrame UserDirective)
+      (AgentDirective AgentDirective)
+      (ResultAdded Result)
+      ($_ Milestone)
+   )))
 
 ;; Events share one initialized state and are selected by frame ID and category.
 (= (cfv2-get-frame-events $frameID $category)

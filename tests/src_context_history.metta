@@ -7,6 +7,10 @@
 !(change-state! &cfv2-current-history-summary "")
 !(change-state! &cfv2-frame-event-space ())
 
+!(test (== AgentDirective (cfv2-history-category AgentDirective)) True)
+!(test (== Result (cfv2-history-category ResultAdded)) True)
+!(test (== Milestone (cfv2-history-category OtherHistoryKind)) True)
+
 !(cfv2-record-message-for-current-frame "Check the weather; quote: \"rain\"; path: C:\\\\temp")
 !(cfv2-record-command-batch (SearchWeather) (WeatherResult rain))
 !(cfv2-record-frame-note ResultAdded (WeatherResult rain))
