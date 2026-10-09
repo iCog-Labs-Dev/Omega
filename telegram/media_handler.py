@@ -459,6 +459,8 @@ def generate_and_send(prompt):
 DEFAULT_TTS_VOICE = "en-US-AriaNeural"
 MAX_TTS_CHARS = 4096
 MAX_PDF_CHARS = 20000
+# fpdf2 draws nothing for a tab, so tabs become this many spaces in a PDF.
+PDF_TAB_SIZE = 4
 PDF_FONT_PATH = Path(__file__).resolve().parent / "assets" / "fonts" / "DejaVuSans.ttf"
 # Setting that overrides where extra PDF fonts are read from and installed to.
 PDF_FONT_DIR_KEY = "TG_PDF_FONT_DIR"
@@ -613,6 +615,22 @@ class PdfFontSet:
             if ord(ch) not in drawable and unicodedata.category(ch) != "Cc"
         ))
 
+    def needed_for(self, content):
+        """The same set with only the fallback fonts content uses.
+
+        fpdf2 embeds every font it is given, used or not, so with a few fonts
+        installed a Latin-only PDF grew from 8 KB to 23 KB and took eight times
+        as long. A fallback is kept when it draws a character of content that
+        the main font and the fallbacks before it cannot, which is exactly the
+        font fpdf2 would pick for that character."""
+        covered = set(self.main.codepoints)
+        needed = []
+        for font in self.fallbacks:
+            if any(ord(ch) not in covered and ord(ch) in font.codepoints for ch in content):
+                needed.append(font)
+                covered |= font.codepoints
+        return PdfFontSet(self.main, tuple(needed))
+
     def apply_to(self, pdf, size):
         """Register every font with pdf and select the main one."""
         pdf.add_font("main", fname=str(self.main.path))
@@ -631,20 +649,38 @@ def _load_pdf_font(path):
     return _read_pdf_font(path, stat.st_mtime_ns, stat.st_size)
 
 
+# Tables that hold colour glyphs. fpdf2 draws only a font's plain outlines, so
+# for a colour font such as Noto Color Emoji it draws nothing, even though the
+# font has a glyf table and lists every emoji in its character map.
+_COLOUR_FONT_TABLES = ("COLR", "CBDT", "sbix", "SVG ")
+
+
+def _why_pdfs_cannot_use(font):
+    """Why fpdf2 cannot draw from an open fontTools font, or None if it can.
+
+    fpdf2 embeds CFF outlines (most .otf files, Noto Sans CJK) under the wrong
+    font type, which PDF readers warn about or reject, and draws nothing for
+    colour glyphs."""
+    if "glyf" not in font:
+        return "the font has no TrueType outlines (a CFF or bitmap-only font)"
+    colour = [tag.strip() for tag in _COLOUR_FONT_TABLES if tag in font]
+    if colour:
+        return (f"it is a colour font ({', '.join(colour)}), which PDFs cannot draw; "
+                "use a black-and-white font such as Noto Emoji instead")
+    return None
+
+
 @functools.lru_cache(maxsize=64)
 def _read_pdf_font(path, mtime_ns, size):
     """Parse a font file. mtime_ns and size are only there to make an edited
-    file a new cache entry.
-
-    Only TrueType outlines are accepted: bitmap emoji fonts draw nothing, and
-    fpdf2 embeds CFF outlines (most .otf files, Noto Sans CJK) under the wrong
-    font type, which PDF readers warn about or reject."""
+    file a new cache entry."""
     from fontTools.ttLib import TTFont
 
     try:
         font = TTFont(str(path), fontNumber=0, lazy=True)
-        if "glyf" not in font:
-            return UnusablePdfFont(path, "no TrueType outlines (a CFF or bitmap-only font)")
+        problem = _why_pdfs_cannot_use(font)
+        if problem:
+            return UnusablePdfFont(path, problem)
         return PdfFont(path, frozenset(font.getBestCmap() or ()))
     except Exception as error:
         return UnusablePdfFont(path, f"cannot be read as a font: {error}")
@@ -714,10 +750,11 @@ def _generate_pdf_bytes(content, fonts):
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
 
-        fonts.apply_to(pdf, size=12)
+        text = content.expandtabs(PDF_TAB_SIZE)
+        fonts.needed_for(text).apply_to(pdf, size=12)
         pdf.set_text_shaping(True)
 
-        pdf.multi_cell(0, 6, text=content)
+        pdf.multi_cell(0, 6, text=text)
         buffer = BytesIO()
         pdf.output(buffer)
         return buffer.getvalue()
@@ -755,9 +792,10 @@ _CARD_NETWORKS = (
     ("maestro",    re.compile(r"5018|5020|5038|5893|6304|6759|676[1-3]"), set(range(13, 20))),
 )
 
-# A run of 13-19 digits, optionally grouped by spaces or dashes, that is not
-# part of a longer word or number and has no minus sign in front.
-_CARD_CANDIDATE = re.compile(r"(?<![\w-])\d(?:[ -]?\d){12,18}(?!\w)")
+# A run of 13-19 digits, optionally grouped by spaces or dashes, with no
+# letter, digit or minus sign in front. The lookahead makes every digit group
+# a possible start, so a card that follows other numbers is still found.
+_CARD_CANDIDATE = re.compile(r"(?<![\w-])(?=(\d(?:[ -]?\d){12,18})(?!\d))")
 
 
 def _looks_like_card_number(digits):
@@ -792,14 +830,67 @@ def _pdf_content_is_safe(content: str) -> bool:
         if pattern.search(text):
             logger.warning("PDF refused: sensitive file pattern matched (%s)", name)
             return False
-    for m in _CARD_CANDIDATE.finditer(text):
-        if _looks_like_card_number(re.sub(r"\D", "", m.group())):
-            logger.warning("PDF refused: sensitive information pattern matched (credit_card)")
-            return False
+    if _contains_card_number(text):
+        logger.warning("PDF refused: sensitive information pattern matched (credit_card)")
+        return False
     return True
 
+
+def _contains_card_number(text):
+    """True when text holds a card number. A card is often followed by more
+    digits, such as an expiry date in "4242 4242 4242 4242 12 2027", so each
+    run of whole digit groups from a candidate's start is tried, not only the
+    longest one."""
+    for match in _CARD_CANDIDATE.finditer(text):
+        digits = ""
+        for group in re.split(r"[ -]", match.group(1)):
+            digits += group
+            if _looks_like_card_number(digits):
+                return True
+    return False
+
+PDF_FILENAME = "Omega_Document.pdf"
+
+# The PDFs already sent for each chat's current user message, as
+# chat id -> (message id, digests of the texts sent). Only the latest message
+# per chat is kept, so this stays as small as the number of chats.
+_delivered_pdfs = {}
+
+
+def _pdf_delivery_key(content):
+    """(chat id, message id, digest of content) for the PDF being asked for,
+    or None when there is no user message to tie it to."""
+    conversation = getattr(_live_channel, "conversation", None)
+    chat_id, message_id = conversation() if conversation else (None, None)
+    if message_id is None:
+        return None
+    return chat_id, message_id, hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _pdf_already_delivered(key):
+    """True when this text was already sent for this user message."""
+    with _lock:
+        sent = _delivered_pdfs.get(key[0])
+        return sent is not None and sent[0] == key[1] and key[2] in sent[1]
+
+
+def _record_pdf_delivery(key):
+    """Remember that this text was sent for this user message."""
+    with _lock:
+        sent = _delivered_pdfs.get(key[0])
+        if sent is None or sent[0] != key[1]:
+            sent = _delivered_pdfs[key[0]] = (key[1], set())
+        sent[1].add(key[2])
+
+
 def generate_and_send_pdf(content):
-    """Create a PDF from text and send it through the live Telegram channel."""
+    """Create a PDF from text and send it through the live Telegram channel.
+
+    Some models call generate-pdf again after PDF_SENT for the same request;
+    QA saw up to 16 copies of one document. The repeats come from core's loop,
+    but a user should get each document once, so the same text for the same
+    user message answers PDF_ALREADY_SENT and is not sent again. A new message,
+    or different text, sends as usual."""
     content = (content or "").strip()
     if not content:
         return "PDF_FAILED: empty content"
@@ -807,6 +898,11 @@ def generate_and_send_pdf(content):
         return "PDF_DISABLED: PDF generation is turned off"
     if len(content) > MAX_PDF_CHARS:
         return f"PDF_FAILED: content exceeds {MAX_PDF_CHARS} characters"
+    delivery = _pdf_delivery_key(content)
+    if delivery is not None and _pdf_already_delivered(delivery):
+        return ("PDF_ALREADY_SENT: the user already has this document for their "
+                "current message, so it was not sent again. Do not call "
+                "generate-pdf again for this request.")
     if not _pdf_content_is_safe(content):
         return "Refused: unsafe PDF content"
     if _prompt_is_unsafe(content):
@@ -836,11 +932,14 @@ def generate_and_send_pdf(content):
     if _live_send_document is None:
         return "PDF_FAILED: generated but no channel is registered to send it"
     try:
-        _live_send_document(pdf_bytes, filename="Omega_Document.pdf")
+        _live_send_document(pdf_bytes, filename=PDF_FILENAME)
     except Exception as error:
         logger.error(f"Failed to send generated PDF: {error}")
         return "PDF_FAILED: generated but could not send"
-    return "PDF_SENT"
+    if delivery is not None:
+        _record_pdf_delivery(delivery)
+    return (f"PDF_SENT: {PDF_FILENAME} was delivered to the user. "
+            "Do not call generate-pdf again for this request.")
 
 
 class FontInstallRefused(Exception):
@@ -897,6 +996,43 @@ def _download_google_fonts_file(url, max_bytes):
     return b"".join(chunks)
 
 
+def _google_fonts_file_size(url):
+    """The size in bytes the Google Fonts repository reports for a file, or
+    None when it does not say. Asks with HEAD, so nothing is downloaded."""
+    import requests
+
+    if not url.startswith(GOOGLE_FONTS_OFL_URL):
+        raise FontInstallRefused("fonts can only come from the Google Fonts repository")
+    response = requests.head(url, allow_redirects=False, timeout=FONT_DOWNLOAD_TIMEOUT_SECONDS)
+    if response.status_code == 404:
+        raise FontInstallRefused("not found in the Google Fonts repository")
+    if response.status_code != 200:
+        raise FontInstallRefused(f"the Google Fonts repository answered HTTP {response.status_code}")
+    length = response.headers.get("Content-Length", "")
+    return int(length) if length.isdigit() else None
+
+
+def _choose_font_file(family):
+    """The Regular .ttf to install for family, checked before anyone is told a
+    download has started: the family has to exist and the file has to be under
+    the size limit. Raises FontInstallRefused when it cannot be installed."""
+    try:
+        metadata = _download_google_fonts_file(
+            family.file_url("METADATA.pb"), MAX_FONT_METADATA_BYTES).decode("utf-8", "replace")
+        filename = _regular_font_filename(metadata)
+        size = _google_fonts_file_size(family.file_url(filename))
+    except FontInstallRefused:
+        raise
+    except Exception as error:
+        logger.error(f"Could not look up PDF font {family.name}: {error}")
+        raise FontInstallRefused("could not reach the Google Fonts repository")
+    if size is not None and size > MAX_FONT_DOWNLOAD_BYTES:
+        raise FontInstallRefused(
+            f"the font file is {size // (1024 * 1024)} MB, over the "
+            f"{MAX_FONT_DOWNLOAD_BYTES // (1024 * 1024)} MB limit")
+    return filename
+
+
 def _regular_font_filename(metadata):
     """The upright, regular-weight .ttf named in a family's METADATA.pb."""
     best = None
@@ -930,8 +1066,9 @@ def _static_pdf_font_bytes(data):
         font = TTFont(BytesIO(data))
     except Exception:
         raise FontInstallRefused("the download is not a font file")
-    if "glyf" not in font:
-        raise FontInstallRefused("the font has no TrueType outlines, so PDFs cannot use it")
+    problem = _why_pdfs_cannot_use(font)
+    if problem:
+        raise FontInstallRefused(problem)
     if "fvar" in font:
         from fontTools.varLib import instancer
 
@@ -954,17 +1091,14 @@ def _folder_size(folder):
         return 0
 
 
-def _install_pdf_font_files(family):
-    """Download and save one GoogleFontFamily, blocking until done. Returns the
-    FONT_* status the agent is given."""
+def _install_pdf_font_files(family, filename):
+    """Download family's font file, chosen by _choose_font_file, and save it,
+    blocking until done. Returns the FONT_* status the agent is given."""
     try:
         font_dir = _pdf_font_dir()
         target = font_dir / f"{family.directory}.ttf"
         if target.exists():
             return f"FONT_ALREADY_INSTALLED: {family.name}"
-        metadata = _download_google_fonts_file(
-            family.file_url("METADATA.pb"), MAX_FONT_METADATA_BYTES).decode("utf-8", "replace")
-        filename = _regular_font_filename(metadata)
         font_bytes = _static_pdf_font_bytes(
             _download_google_fonts_file(family.file_url(filename), MAX_FONT_DOWNLOAD_BYTES))
         if _folder_size(font_dir) + len(font_bytes) > MAX_FONT_DIR_BYTES:
@@ -1020,10 +1154,6 @@ def install_pdf_font(family_name):
                 "digits and spaces, such as Noto Sans Devanagari")
     if not _pdf_font_install_allowed():
         return "FONT_INSTALL_DISABLED: installing PDF fonts is turned off"
-    channel = _live_channel
-    if not hasattr(channel, "queue_event"):
-        # No channel to report back through, so there is no one to wait for.
-        return _install_pdf_font_files(family)
     try:
         if (_pdf_font_dir() / f"{family.directory}.ttf").exists():
             return f"FONT_ALREADY_INSTALLED: {family.name}"
@@ -1035,12 +1165,28 @@ def install_pdf_font(family_name):
             return (f"FONT_INSTALL_IN_PROGRESS: {family.name} is already downloading; "
                     "wait for its FONT_INSTALLED message")
         _fonts_installing.add(family.directory)
+    # Looked up before the user hears anything, so a family that does not
+    # exist or is too big is refused at once instead of announced and dropped.
+    try:
+        filename = _choose_font_file(family)
+    except FontInstallRefused as reason:
+        with _lock:
+            _fonts_installing.discard(family.directory)
+        return f"FONT_INSTALL_FAILED: {family.name}: {reason}"
+    channel = _live_channel
+    if not hasattr(channel, "queue_event"):
+        # No channel to report back through, so there is no one to wait for.
+        try:
+            return _install_pdf_font_files(family, filename)
+        finally:
+            with _lock:
+                _fonts_installing.discard(family.directory)
     chat_id, reply_to_id = channel.conversation()
 
     def work():
         # Whatever happens, the agent has to hear back, or it waits forever.
         try:
-            status = _install_pdf_font_files(family)
+            status = _install_pdf_font_files(family, filename)
         except Exception as error:
             logger.error(f"Failed to install PDF font {family.name}: {error}")
             status = f"FONT_INSTALL_FAILED: {family.name}: could not download or save the font"

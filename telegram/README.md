@@ -114,11 +114,18 @@ The agent never passes a URL, redirects are not followed, a font may be at most
 32 MB and the folder 200 MB. Variable fonts are saved at Regular weight, since
 fpdf2 would draw them at their default, which for Noto Sans SC is Thin. Fonts
 PDFs cannot use are refused: CFF fonts, which fpdf2 embeds under the wrong
-font type, and colour emoji fonts, whose bitmaps fpdf2 cannot draw (Noto Emoji
-works). Downloads run in the background: the user is told the fonts for their
-request are downloading, and when it ends the agent gets the result as a new
-message in that chat and sends the PDF. Noto Sans SC takes about 20 seconds;
-most families take a few.
+font type, and colour fonts such as Noto Color Emoji (`COLR`, `CBDT`, `sbix` or
+`SVG ` tables), whose colour glyphs fpdf2 cannot draw. The black-and-white Noto
+Emoji works. The family and file size are checked before anything is
+downloaded, so a family that does not exist or is too big is refused at once.
+Downloads run in the background: the user is told the fonts for their request
+are downloading, and when it ends the agent gets the result as a new message in
+that chat and sends the PDF. Noto Sans SC takes about 20 seconds; most families
+take a few. A PDF only carries the installed fonts its text actually uses.
+
+`generate-pdf` sends each document once per user message: if the agent asks
+for the same text again for the same message, it answers `PDF_ALREADY_SENT`
+and sends nothing.
 
 Fonts go to `fonts/` in core's memory folder, so they survive restarts.
 `TG_PDF_FONT_DIR` points somewhere else, and copying `.ttf` files into the folder

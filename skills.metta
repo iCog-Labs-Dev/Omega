@@ -132,7 +132,7 @@
    PIN-SUCCESS)
 
 
-;; Generate a PDF document and send it to the user. Use when the user asks for a PDF containing text, a summary, or a report. Pass the complete text to write into the document.
+;; Generate a PDF document and send it to the user. Use when the user asks for a PDF containing text, a summary, or a report. Pass the complete text in double quotes on one line, writing line breaks as the TELEGRAM CHANNEL section explains.
 ;; : generate-pdf (-> String String)
 (= (generate-pdf $content)
    (py-call (media_handler.generate_and_send_pdf $content)))

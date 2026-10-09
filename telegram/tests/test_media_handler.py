@@ -279,7 +279,9 @@ def test_generate_and_send_pdf_success():
     mh._generate_pdf_bytes = lambda content, fonts: b"%PDF-test"
     mh._live_send_document = lambda data, filename: sent.update(data=data, filename=filename)
     try:
-        assert mh.generate_and_send_pdf("A concise report") == "PDF_SENT"
+        assert mh.generate_and_send_pdf("A concise report") == (
+            "PDF_SENT: Omega_Document.pdf was delivered to the user. "
+            "Do not call generate-pdf again for this request.")
         assert sent == {"data": b"%PDF-test", "filename": "Omega_Document.pdf"}
     finally:
         (mh._pdf_generation_allowed, mh._prompt_is_unsafe,
@@ -470,7 +472,7 @@ def test_generate_and_send_pdf_success_with_real_bytes():
     mh._live_send_document = lambda data, filename: sent.update(data=data, filename=filename)
     try:
         result = mh.generate_and_send_pdf("A normal report with token and /etc/passwd mentioned.")
-        assert result == "PDF_SENT", result
+        assert result.startswith("PDF_SENT: "), result
         assert sent.get("data", b"").startswith(b"%PDF")
     finally:
         mh._pdf_generation_allowed, mh._prompt_is_unsafe, mh._live_send_document = original
@@ -613,10 +615,11 @@ def _box_glyph_ttf():
     return pen.glyph()
 
 
-def _write_test_font(path, chars, outlines="truetype", variable=False):
+def _write_test_font(path, chars, outlines="truetype", variable=False, colour=False):
     """Write a tiny font that draws a box for each of chars. outlines is
     "truetype" (glyf) or "cff", the kind fpdf2 embeds badly. variable adds a
-    weight axis whose default is Thin, like Noto Sans SC."""
+    weight axis whose default is Thin, like Noto Sans SC. colour adds COLR and
+    CPAL tables next to the outlines, like the Google Fonts Noto Color Emoji."""
     from fontTools.fontBuilder import FontBuilder
     from fontTools.pens.t2CharStringPen import T2CharStringPen
 
@@ -638,6 +641,9 @@ def _write_test_font(path, chars, outlines="truetype", variable=False):
     fb.setupNameTable({"familyName": "Test", "styleName": "Regular"})
     fb.setupOS2(sTypoAscender=800, usWinAscent=800, usWinDescent=200)
     fb.setupPost()
+    if colour:
+        fb.setupCPAL([[(1.0, 0.0, 0.0, 1.0)]])
+        fb.setupCOLR({name: [(name, 0)] for name in names[1:]})
     if variable:
         fb.setupFvar(axes=[("wght", 100, 100, 900, "Weight")], instances=[])
         fb.setupGvar({name: [] for name in names})
@@ -728,7 +734,7 @@ def test_generate_and_send_pdf_uses_the_configured_font_folder():
             assert mh.generate_and_send_pdf("Hello नम").startswith("PDF_FAILED: the PDF fonts cannot draw")
             assert sent == []
             mh._pdf_font_dir = lambda: Path(folder)
-            assert mh.generate_and_send_pdf("Hello नम") == "PDF_SENT"
+            assert mh.generate_and_send_pdf("Hello नम").startswith("PDF_SENT: ")
             assert "नम" in _pdf_text(sent[0])
     finally:
         (mh._pdf_generation_allowed, mh._prompt_is_unsafe,
@@ -856,10 +862,12 @@ def test_static_pdf_font_bytes_pins_variable_fonts_and_refuses_unusable_ones():
         raise AssertionError("accepted an unusable font")
 
 
-def _install_with_fake_repository(folder, font_bytes, run):
+def _install_with_fake_repository(folder, font_bytes, run, reported_size=None):
     """Run with install-pdf-font reading from a stand-in repository and
-    writing to folder."""
-    original = (mh._download_google_fonts_file, mh._pdf_font_dir, mh._pdf_font_install_allowed)
+    writing to folder. reported_size is what a HEAD request says the font file
+    weighs, by default its real size."""
+    original = (mh._download_google_fonts_file, mh._google_fonts_file_size,
+                mh._pdf_font_dir, mh._pdf_font_install_allowed)
     downloads = []
 
     def fake_download(url, max_bytes):
@@ -869,12 +877,14 @@ def _install_with_fake_repository(folder, font_bytes, run):
         return font_bytes
 
     mh._download_google_fonts_file = fake_download
+    mh._google_fonts_file_size = lambda url: reported_size if reported_size is not None else len(font_bytes)
     mh._pdf_font_dir = lambda: folder
     mh._pdf_font_install_allowed = lambda: True
     try:
         return run(), downloads
     finally:
-        (mh._download_google_fonts_file, mh._pdf_font_dir, mh._pdf_font_install_allowed) = original
+        (mh._download_google_fonts_file, mh._google_fonts_file_size,
+         mh._pdf_font_dir, mh._pdf_font_install_allowed) = original
 
 
 def test_install_pdf_font_adds_a_font_that_generate_pdf_then_uses():
@@ -1028,7 +1038,7 @@ def test_background_install_reports_back_even_when_the_worker_crashes():
     from pathlib import Path
     original = mh._install_pdf_font_files
 
-    def crash(family):
+    def crash(family, filename):
         raise RuntimeError("disk on fire")
 
     def scenario(channel, held):
@@ -1044,6 +1054,180 @@ def test_background_install_reports_back_even_when_the_worker_crashes():
                 Path(root) / "fonts", b"unused", lambda: _with_fake_channel(scenario))
     finally:
         mh._install_pdf_font_files = original
+
+
+def test_colour_fonts_are_refused_at_install_and_skipped_at_load():
+    """A colour emoji font has a glyf table and lists its emoji, but fpdf2
+    draws nothing for them, so they would pass the check and vanish."""
+    import tempfile
+    from pathlib import Path
+
+    colour = _test_font_bytes("न", colour=True)
+    try:
+        mh._static_pdf_font_bytes(colour)
+    except mh.FontInstallRefused as refused:
+        assert "colour font (COLR)" in str(refused), refused
+    else:
+        raise AssertionError("accepted a colour font")
+
+    with tempfile.TemporaryDirectory() as folder:
+        (Path(folder) / "colour.ttf").write_bytes(colour)
+        fonts = mh._load_pdf_fonts(Path(folder))
+        assert fonts.fallbacks == ()
+        assert fonts.missing("न") == ["न"]
+
+
+def test_pdf_content_is_safe_refuses_cards_followed_or_preceded_by_numbers():
+    for text in (
+        "Test card 4242 4242 4242 4242 12 2027",
+        "ref 1234567890123 4111 1111 1111 1111",
+        "1234 5678 4111 1111 1111 1111",
+        "4111-1111-1111-1111 exp 12/29",
+        "card=4111111111111111",
+    ):
+        assert not mh._pdf_content_is_safe(text), text
+
+
+def test_pdf_content_is_safe_allows_phone_numbers_isbns_and_event_times():
+    for text in (
+        "Event time 1728390000003 ms",
+        "Call +49 30 123456 0006",
+        "ISBN 978-1-4028-9462-6",
+    ):
+        assert mh._pdf_content_is_safe(text), text
+
+
+def test_pdf_embeds_only_the_fallback_fonts_its_text_uses():
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as folder:
+        _write_test_font(Path(folder) / "10-na.ttf", "न")
+        _write_test_font(Path(folder) / "20-ma.ttf", "म")
+        _write_test_font(Path(folder) / "30-na-again.ttf", "न")
+        fonts = mh._load_pdf_fonts(Path(folder))
+        assert len(fonts.fallbacks) == 3
+
+        def used(text):
+            return [f.path.name for f in fonts.needed_for(text).fallbacks]
+
+        assert used("A plain Latin report") == []
+        assert used("Hello न") == ["10-na.ttf"]
+        assert used("नम") == ["10-na.ttf", "20-ma.ttf"]
+
+        page = PdfReader(BytesIO(mh._generate_pdf_bytes("A plain Latin report", fonts))).pages[0]
+        assert len(page["/Resources"]["/Font"]) == 1
+
+
+def test_install_pdf_font_checks_the_family_before_telling_the_user():
+    """A family that does not exist, or a file over the limit, is refused at
+    once, without a "Downloading" message the user would then see fail."""
+    import tempfile
+    from pathlib import Path
+
+    def missing_family(channel, held):
+        original = mh._download_google_fonts_file
+
+        def not_found(url, max_bytes):
+            raise mh.FontInstallRefused("not found in the Google Fonts repository")
+
+        mh._download_google_fonts_file = not_found
+        try:
+            result = mh.install_pdf_font("Not A Real Family")
+        finally:
+            mh._download_google_fonts_file = original
+        assert result == ("FONT_INSTALL_FAILED: Not A Real Family: not found in "
+                          "the Google Fonts repository"), result
+        assert channel.sent == [] and held == []
+
+    def too_big(channel, held):
+        result = mh.install_pdf_font("Test Sans")
+        assert result == ("FONT_INSTALL_FAILED: Test Sans: the font file is 51 MB, "
+                          "over the 32 MB limit"), result
+        assert channel.sent == [] and held == []
+        assert "testsans" not in mh._fonts_installing
+
+    with tempfile.TemporaryDirectory() as root:
+        folder = Path(root) / "fonts"
+        _install_with_fake_repository(folder, b"unused", lambda: _with_fake_channel(missing_family))
+        _install_with_fake_repository(folder, b"unused", lambda: _with_fake_channel(too_big),
+                                      reported_size=51 * 1024 * 1024)
+        assert not folder.exists()
+
+
+class _ConversationChannel:
+    """A live channel answering the given user message in the given chat."""
+    reply_constraints = {}
+
+    def __init__(self, chat_id, message_id):
+        self.chat_id, self.message_id = chat_id, message_id
+
+    def conversation(self):
+        return self.chat_id, self.message_id
+
+
+def _with_pdf_channel(channel, send, run):
+    original = (mh._prompt_is_unsafe, mh._live_send_document, mh._live_channel,
+                dict(mh._delivered_pdfs))
+    mh._prompt_is_unsafe = lambda content: False
+    mh._live_send_document = send
+    mh._live_channel = channel
+    mh._delivered_pdfs.clear()
+    try:
+        run()
+    finally:
+        mh._prompt_is_unsafe, mh._live_send_document, mh._live_channel, delivered = original
+        mh._delivered_pdfs.clear()
+        mh._delivered_pdfs.update(delivered)
+
+
+def test_generate_and_send_pdf_sends_each_document_once_per_user_message():
+    """QA saw one request bring up to 16 copies of a PDF, each call after
+    PDF_SENT and with no new message."""
+    channel = _ConversationChannel(555, 10)
+    sent = []
+
+    def run():
+        assert mh.generate_and_send_pdf("Quarterly report").startswith("PDF_SENT: ")
+        assert mh.generate_and_send_pdf("Quarterly report") == (
+            "PDF_ALREADY_SENT: the user already has this document for their "
+            "current message, so it was not sent again. Do not call "
+            "generate-pdf again for this request.")
+        assert len(sent) == 1
+        assert mh.generate_and_send_pdf("Annual report").startswith("PDF_SENT: ")
+        assert len(sent) == 2
+        channel.message_id = 11
+        assert mh.generate_and_send_pdf("Quarterly report").startswith("PDF_SENT: ")
+        assert len(sent) == 3
+        channel.chat_id = 777
+        assert mh.generate_and_send_pdf("Quarterly report").startswith("PDF_SENT: ")
+        assert len(sent) == 4
+
+    _with_pdf_channel(channel, lambda data, filename: sent.append(data), run)
+
+
+def test_generate_and_send_pdf_sends_again_after_a_failed_delivery():
+    attempts = []
+
+    def flaky_send(data, filename):
+        attempts.append(data)
+        if len(attempts) == 1:
+            raise RuntimeError("network down")
+
+    def run():
+        assert mh.generate_and_send_pdf("Status") == "PDF_FAILED: generated but could not send"
+        assert mh.generate_and_send_pdf("Status").startswith("PDF_SENT: ")
+        assert len(attempts) == 2
+
+    _with_pdf_channel(_ConversationChannel(555, 20), flaky_send, run)
+
+
+def test_generate_pdf_bytes_keeps_tabs_as_spaces():
+    """fpdf2 draws nothing for a tab, so "Name\tScore" came out "NameScore"."""
+    import re
+    text = _pdf_text(mh._generate_pdf_bytes("Name\tScore\nAda\t91", mh._load_pdf_fonts(None)))
+    # PDF readers differ on how many spaces they report, so only check that
+    # the words are kept apart.
+    assert re.search(r"Name\s+Score", text) and re.search(r"Ada\s+91", text), text
 
 if __name__ == "__main__":
     test_no_image_returns_marker()
@@ -1106,4 +1290,12 @@ if __name__ == "__main__":
     test_install_pdf_font_downloads_in_the_background_and_reports_back()
     test_background_install_failure_still_reaches_the_agent()
     test_background_install_reports_back_even_when_the_worker_crashes()
+    test_colour_fonts_are_refused_at_install_and_skipped_at_load()
+    test_pdf_content_is_safe_refuses_cards_followed_or_preceded_by_numbers()
+    test_pdf_content_is_safe_allows_phone_numbers_isbns_and_event_times()
+    test_pdf_embeds_only_the_fallback_fonts_its_text_uses()
+    test_install_pdf_font_checks_the_family_before_telling_the_user()
+    test_generate_and_send_pdf_sends_each_document_once_per_user_message()
+    test_generate_and_send_pdf_sends_again_after_a_failed_delivery()
+    test_generate_pdf_bytes_keeps_tabs_as_spaces()
     print("all media_handler tests passed")
