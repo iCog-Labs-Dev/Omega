@@ -1,8 +1,8 @@
 # omega-telegram
 
 A Telegram communication channel for Omega with media support: the agent can
-read images, PDFs and voice notes that users attach, generate images, and send
-voice replies when enabled.
+read images, PDFs and voice notes that users attach, generate images and PDFs,
+and send voice replies when enabled.
 
 This is the `telegram` channel. It replaces core's earlier HTTP-polling Telegram
 channel and keeps everything that one provided — the gateway proxy path, the
@@ -17,6 +17,7 @@ outbound retry queue, and the channel auth handshake.
 | Inbound PDF | Extracted text is inlined into the message |
 | Inbound voice / audio | Whisper transcript is inlined into the message |
 | Outbound image | The agent calls `generate-image`, which generates and sends the photo |
+| Outbound PDF | The agent calls `generate-pdf`, which creates a local PDF and sends it as a Telegram document (up to 20,000 characters). Hebrew and Arabic are shaped; text with characters no font can draw is refused and the characters are named to the agent. See [PDF fonts](#pdf-fonts) |
 | Outbound voice | The agent calls `speak`, which synthesizes and sends a Telegram voice message when enabled |
 | Admin commands | `/kill`, `/pause [chat_id]`, `/togglesearch`, `/purge` (admin IDs only) |
 | Safety | Ethics classification on inbound and outbound text, per-user spam throttling |
@@ -51,6 +52,8 @@ mounting over them works too and needs no configuration.
 **not safe for production**. Set `admin_controls.admin_ids` to the Telegram user
 IDs allowed to run admin commands, and `telegram.allowed_chats` to the chat IDs
 the bot may operate in. Both are empty by default. Voice replies are opt-in;
+PDF generation is enabled by default for compatibility with existing profiles;
+set `telegram.reply_constraints.allow_pdf_generation: false` to disable it.
 set `telegram.reply_constraints.allow_voice_reply: true` to enable them.
 
 ## Use
@@ -88,10 +91,54 @@ they belong to the proxy, not here.
 | `TG_PROFILE_PATH` | no | Path to the channel profile, defaults to the shipped one |
 | `TG_POLICY_PATH` | no | Path to the user-facing policy text, defaults to the shipped one |
 | `TG_PROMPT_PATH` | no | Path to the prompt section, defaults to the shipped one |
+| `TG_PDF_FONT_DIR` | no | Folder PDF fonts are installed to and read from, defaults to `memory/fonts`; see [PDF fonts](#pdf-fonts) |
 
 Vision defaults to Anthropic because an OpenRouter account whose data policy
 excludes vision providers gets a 404 on every vision model while text and image
 generation keep working.
+
+## PDF fonts
+
+PDFs are drawn with the bundled DejaVu Sans, which covers Latin, Greek,
+Cyrillic, Hebrew and Arabic. When a PDF needs another script, `generate-pdf`
+refuses it and names the characters, and the agent can call `install-pdf-font`
+with a Google Fonts family to add one:
+
+```
+install-pdf-font Noto Sans Devanagari
+```
+
+The skill only downloads from the OFL folder of
+[google/fonts](https://github.com/google/fonts/tree/main/ofl), by family name.
+The agent never passes a URL, redirects are not followed, a font may be at most
+32 MB and the folder 200 MB. Variable fonts are saved at Regular weight, since
+fpdf2 would draw them at their default, which for Noto Sans SC is Thin. Fonts
+PDFs cannot use are refused: CFF fonts, which fpdf2 embeds under the wrong
+font type, and colour fonts such as Noto Color Emoji (`COLR`, `CBDT`, `sbix` or
+`SVG ` tables), whose colour glyphs fpdf2 cannot draw. The black-and-white Noto
+Emoji works. The family and file size are checked before anything is
+downloaded, so a family that does not exist or is too big is refused at once.
+Downloads run in the background: the user is told the fonts for their request
+are downloading, and when it ends the agent gets the result as a new message in
+that chat and sends the PDF. Noto Sans SC takes about 20 seconds; most families
+take a few. A PDF only carries the installed fonts its text actually uses.
+
+`generate-pdf` sends each document once per user message: if the agent asks
+for the same text again for the same message, it answers `PDF_ALREADY_SENT`
+and sends nothing.
+
+Fonts go to `fonts/` in core's memory folder, so they survive restarts.
+`TG_PDF_FONT_DIR` points somewhere else, and copying `.ttf` files into the folder
+pre-installs them. Each character is drawn with DejaVu Sans when it can be, and
+otherwise with the first font in the folder, by filename, that has it, so an
+installed font can add scripts but never change how the bundled ones look. The
+folder is read each time a PDF is made, and the fonts in use are logged at
+startup. Set `telegram.reply_constraints.allow_pdf_font_install: false` to stop
+the agent installing fonts.
+
+One known gap is a line that mixes Hebrew and Arabic: fpdf2 shapes it as one
+run, so the Arabic letters are not joined and the two words come out in the
+wrong order. Either language alone, or mixed with English, is fine.
 
 ## Location
 

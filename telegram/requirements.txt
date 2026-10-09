@@ -14,4 +14,10 @@ openai>=1.0.0
 PyYAML>=6.0
 requests>=2.31.0
 edge-tts>=7.2.8
+fpdf2==2.8.1
+# fpdf2 depends on fonttools already; the plugin also imports it directly to
+# check which characters the PDF font can draw.
+fonttools>=4.34.0
+# Lets fpdf2 shape text, which Hebrew and Arabic need to read correctly.
+uharfbuzz==0.56.3
 zxing-cpp>=2.2.0
