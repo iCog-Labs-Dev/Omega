@@ -378,20 +378,16 @@
 ;; Events share one initialized state and are selected by frame ID and category.
 (= (cfv2-get-frame-events $frameID $category)
    (filter-atom (get-state &cfv2-frame-event-space) $event
-      (and
-         (== (cfv2-event-frame-id $event) $frameID)
-         (or (== $category ())
-             (== (cfv2-event-category $event) $category)))))
+      (cfv2-check-frame-event $event $frameID $category)))
 
-(= (cfv2-event-frame-id
-      (FrameEvent (frameID $frameID) (category $category) (kind $kind)
-         (payload $payload) (timestamp $timestamp)))
-   $frameID)
-
-(= (cfv2-event-category
-      (FrameEvent (frameID $frameID) (category $category) (kind $kind)
-         (payload $payload) (timestamp $timestamp)))
-   $category)
+(= (cfv2-check-frame-event
+      (FrameEvent (frameID $eventFrameID) (category $eventCategory) (kind $kind)
+         (payload $payload) (timestamp $timestamp))
+      $frameID $category)
+   (and
+      (== $eventFrameID $frameID)
+      (or (== $category ())
+          (== $eventCategory $category))))
 
 (= (cfv2-add-frame-event $frameID $category $kind $payload)
    (let* (($event (FrameEvent
