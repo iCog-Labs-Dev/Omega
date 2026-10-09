@@ -370,6 +370,14 @@
    (change-state! &cfv2-current-updated-at (cfv2-now)))
 
 (= (cfv2-history-category $kind)
+   (case $kind (
+      (CommandBatch CommandBatch)
+      (UserDirective UserDirective)
+      (UserMessageForCurrentFrame UserDirective)
+      (AgentDirective AgentDirective)
+      (ResultAdded Result)
+      ($_ Milestone)
+   )))
    (if (== $kind CommandBatch) CommandBatch
    (if (== $kind UserDirective) UserDirective
    (if (== $kind UserMessageForCurrentFrame) UserDirective
