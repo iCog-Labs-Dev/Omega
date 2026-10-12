@@ -21,6 +21,9 @@ _DISTRIBUTION = {
     "yaml": "PyYAML",
     "telegramify_markdown": "telegramify-markdown",
     "edge_tts": "edge-tts",
+    # fpdf2 intentionally retains the historical ``fpdf`` import name.
+    "fpdf": "fpdf2",
+    "fontTools": "fonttools",
     "zxingcpp": "zxing-cpp",
 }
 
@@ -29,9 +32,9 @@ _ALLOWED_UNDECLARED = set()
 
 # Provided by core, not installable from here. Only what is actually imported:
 # if the plugin starts using another of core's modules, the test says so.
-# channels/config/plugin come from core's src/; auth and delivery_queue are
+# channels/config/helper/plugin come from core's src/; auth and delivery_queue are
 # shared channel infrastructure that lives in core's channels/ folder.
-_CORE_MODULES = {"channels", "config", "plugin", "auth", "delivery_queue", "rag"}
+_CORE_MODULES = {"channels", "config", "helper", "plugin", "auth", "delivery_queue", "rag"}
 
 
 def _plugin_modules():

@@ -229,7 +229,8 @@ def live(credentials):
         tc.stop_telegram()
         pytest.fail("channel did not connect to Telegram within 30s")
     media_handler.register_channel(
-        tc.send_photo, tc.send_voice, tc.send_chat_action, tc._channel)
+        tc.send_photo, tc.send_voice, tc.send_document, tc.send_chat_action,
+        tc._channel)
     try:
         yield tc
     finally:

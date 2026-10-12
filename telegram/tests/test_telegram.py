@@ -135,6 +135,7 @@ class FakeBot:
         self.download_bytes = download_bytes
         self.sent_photo = None
         self.sent_voice = None
+        self.sent_document = None
         self.sent_messages = []
         self.reject_markdown = reject_markdown
 
@@ -156,7 +157,17 @@ class FakeBot:
 
     async def send_voice(self, chat_id, voice, caption=None, reply_to_message_id=None):
         self.sent_voice = {"chat_id": chat_id, "voice": voice, "caption": caption,
-                            "reply_to_message_id": reply_to_message_id}
+                           "reply_to_message_id": reply_to_message_id}
+        return SimpleNamespace()
+
+    async def send_document(self, chat_id, document, caption=None,
+                            reply_to_message_id=None,
+                            allow_sending_without_reply=None):
+        self.sent_document = {
+            "chat_id": chat_id, "document": document, "caption": caption,
+            "reply_to_message_id": reply_to_message_id,
+            "allow_sending_without_reply": allow_sending_without_reply,
+        }
         return SimpleNamespace()
 
 
@@ -314,6 +325,16 @@ def test_pdf_handler_extracts_text():
         restore()
 
 
+def test_queued_event_reaches_the_agent_in_its_chat():
+    """A background job reports back through the same queue as user
+    messages, so the agent answers in the chat that asked."""
+    ch = _new_channel()
+    ch.queue_event(1, 5, "[install-pdf-font] FONT_INSTALLED: Noto Sans Thai")
+
+    assert ch.get_last_message() == "[1] [5] [install-pdf-font] FONT_INSTALLED: Noto Sans Thai"
+    assert ch.conversation() == (1, 5)
+
+
 def test_pdf_handler_rejects_non_pdf_document():
     ch = _new_channel()
     ch.bot = FakeBot()
@@ -432,6 +453,30 @@ def test_send_voice_dispatches_expected_aiogram_call():
         assert bot.sent_voice["chat_id"] == "555"
         assert isinstance(bot.sent_voice["voice"], BufferedInputFile)
         assert bot.sent_voice["voice"].filename == "voice.mp3"
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        t.join(timeout=2)
+
+
+def test_send_document_dispatches_expected_aiogram_call():
+    ch = _new_channel()
+    bot = FakeBot()
+    ch.bot = bot
+    ch.connected = True
+    ch.chat_id = "555"
+    ch._reply_to_id = None
+
+    loop = asyncio.new_event_loop()
+    t = threading.Thread(target=loop.run_forever, daemon=True)
+    t.start()
+    ch.loop = loop
+    try:
+        ch.send_document(b"%PDF-test", filename="report.pdf", caption="Report")
+        assert bot.sent_document is not None
+        assert bot.sent_document["chat_id"] == "555"
+        assert bot.sent_document["caption"] == "Report"
+        assert isinstance(bot.sent_document["document"], BufferedInputFile)
+        assert bot.sent_document["document"].filename == "report.pdf"
     finally:
         loop.call_soon_threadsafe(loop.stop)
         t.join(timeout=2)
@@ -598,7 +643,7 @@ def test_policy_sections_describe_what_the_bot_actually_does():
     combined = " ".join((ch.start_msg, ch.about_msg, ch.privacy_msg)).lower()
     for denied in ("send files/media", "cannot send files"):
         assert denied not in combined, f"policy still denies: {denied}"
-    for disclosed in ("moderation", "transcription", "vision"):
+    for disclosed in ("moderation", "transcription", "vision", "pdf"):
         assert disclosed in combined, f"policy does not disclose: {disclosed}"
 
 
@@ -896,12 +941,14 @@ if __name__ == "__main__":
     test_svg_extension_is_rejected_even_with_spoofed_png_mime()
     test_invalid_raster_document_is_rejected()
     test_pdf_handler_extracts_text()
+    test_queued_event_reaches_the_agent_in_its_chat()
     test_pdf_handler_rejects_non_pdf_document()
     test_voice_handler_transcribes_audio()
     test_muted_user_is_gated_from_message_queue()
     test_inbound_ethics_block_prevents_queueing()
     test_send_photo_dispatches_expected_aiogram_call()
     test_send_voice_dispatches_expected_aiogram_call()
+    test_send_document_dispatches_expected_aiogram_call()
     test_admin_command_refuses_non_admin_allows_admin()
     test_pause_actually_gates_the_chat_it_names()
     test_open_defaults_are_warned_about()

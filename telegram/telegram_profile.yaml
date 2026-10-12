@@ -23,6 +23,11 @@ telegram:
     allow_media: true
     allow_audio: true
     allow_image_generation: true
+    allow_pdf_generation: true
+    # install-pdf-font: lets the agent add fonts for scripts PDFs cannot draw
+    # yet. Downloads come only from the OFL folder of github.com/google/fonts,
+    # by family name, and are size-capped; the agent never supplies a URL.
+    allow_pdf_font_install: true
     allow_voice_reply: true
     allow_admin_actions: false
     allow_new_outbound_chats: false
