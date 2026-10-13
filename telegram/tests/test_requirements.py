@@ -19,6 +19,7 @@ _REQUIREMENTS = os.path.join(_PLUGIN_DIR, "requirements.txt")
 _DISTRIBUTION = {
     "PIL": "Pillow",
     "yaml": "PyYAML",
+    "lingua": "lingua-language-detector",
     "telegramify_markdown": "telegramify-markdown",
     "edge_tts": "edge-tts",
     # fpdf2 intentionally retains the historical ``fpdf`` import name.

@@ -36,7 +36,7 @@
                 "Install a font so generate-pdf can draw a script it cannot yet, such as Devanagari, Thai, Chinese or emoji. Use when generate-pdf answers PDF_FAILED naming characters it cannot draw. Pass a Google Fonts family name, not a URL. The download runs in the background and a message starting [install-pdf-font] arrives when it ends (example: install-pdf-font Noto Sans Devanagari)"
                 (font_family))
      (add-skill speak
-                "Speak a reply aloud as a Telegram voice message. Use when the user asks you to say something out loud, reply with voice, or send a voice message. Pass the exact text to speak (example: speak Hello, I am Oma)"
+                "Speak a reply aloud as Telegram voice messages. Long text is split and sent in order. Use when the user asks for speech. Pass the exact text; keep the command on one physical line and encode line breaks as backslash-n, as with send (example: speak Hello, I am Oma)"
                 (voice_text))
      (addTelegramPromptSection)
      ()))
@@ -56,6 +56,9 @@
 
 (= (generate-image $prompt)
    (py-call (media_handler.generate_and_send $prompt)))
+
+(= (speak)
+   (speak ""))
 
 (= (speak $text)
    (py-call (media_handler.speak $text)))
