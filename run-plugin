@@ -25,7 +25,7 @@
 # them is what broke the previous launcher against newer core.
 set -euo pipefail
 
-CORE_REMOTE="https://github.com/iCog-Labs-Dev/mettaclaw.git"
+CORE_REMOTE="https://github.com/iCog-Labs-Dev/Omega.git"
 CORE_REF="telegram"
 CORE_DIR=""
 BASE_IMAGE=""
@@ -54,7 +54,7 @@ usage() {
     sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; $d'
     cat <<'USAGE'
 Options:
-  --core-remote URL     git remote to build core from (default: iCog-Labs-Dev/mettaclaw)
+  --core-remote URL     git remote to build core from (default: iCog-Labs-Dev/Omega)
   --core-ref REF        branch, tag or sha (default: telegram)
   --core-dir PATH       use an existing core checkout instead of cloning
   --base-image IMAGE    layer onto a published core image; skips the core build
@@ -123,8 +123,12 @@ if [ ! -f "$PLUGIN_DIR/$PLUGIN_NAME.metta" ] && ! grep -rqs 'def loadOmegaPlugin
     die "$PLUGIN_DIR has neither $PLUGIN_NAME.metta nor a loadOmegaPlugin function"
 fi
 
-[ -f "$ENV_FILE" ] || die "no env file at $ENV_FILE (pass --env-file)"
-ENV_FILE="$(cd "$(dirname "$ENV_FILE")" && pwd)/$(basename "$ENV_FILE")"
+# Only a run needs credentials. --prepare-only and --no-run stop before the
+# container starts, which is how CI uses this, and CI has no .env to give.
+if [ "$DO_RUN" = 1 ]; then
+    [ -f "$ENV_FILE" ] || die "no env file at $ENV_FILE (pass --env-file)"
+    ENV_FILE="$(cd "$(dirname "$ENV_FILE")" && pwd)/$(basename "$ENV_FILE")"
+fi
 
 : "${COMMCHANNEL:=$PLUGIN_NAME}"
 : "${CONTAINER:=omega-$PLUGIN_NAME}"
@@ -138,7 +142,7 @@ if [ -z "$IMAGE" ]; then
 fi
 
 say "plugin      $PLUGIN_DIR  (registers as '$PLUGIN_NAME')"
-say "env file    $ENV_FILE"
+[ "$DO_RUN" = 1 ] && say "env file    $ENV_FILE"
 say "image       $IMAGE"
 say "container   $CONTAINER"
 say "memory      $MEMORY_DIR"
@@ -368,8 +372,11 @@ case "$MODE" in
         # The plugin's own suite, against the real core in the image. Named
         # apart from the bot so a --test run does not collide with one running.
         say "running the plugin's tests inside the container"
-        run "docker run --rm --name '$CONTAINER-test' ${transient[*]} --entrypoint python3 ${DOCKER_ARGS[*]:-} '$IMAGE' \
-             -m pytest '$OMEGA_ROOT/plugins/$PLUGIN_NAME/tests' -q"
+        # Core does not ship pytest, so the throwaway container installs it.
+        # Baking it into every image to serve one command is the worse trade.
+        run "docker run --rm --name '$CONTAINER-test' ${transient[*]} --entrypoint sh ${DOCKER_ARGS[*]:-} '$IMAGE' \
+             -c 'python3 -m pip install --quiet --no-cache-dir --break-system-packages pytest \
+                 && python3 -m pytest $OMEGA_ROOT/plugins/$PLUGIN_NAME/tests -q'"
         ;;
     shell)
         say "opening a shell in the container"

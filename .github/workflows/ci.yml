@@ -1,0 +1,20 @@
+name: ci
+
+# Runs on a pull request. Work lands on telegram-plugin in iCog-Labs-Dev/Omega
+# and is then synced to SNET_Telegram in singnet/Omega_CustomBots, so both get
+# the same gates. A deploy runs these gates again before it publishes.
+
+on:
+  pull_request:
+    branches:
+      - telegram-plugin
+      - SNET_Telegram
+  workflow_dispatch:
+
+jobs:
+  build:
+    uses: ./.github/workflows/common.yml
+    with:
+      publish_docker: false
+      core_remote: ${{ vars.CORE_REMOTE }}
+      core_ref: ${{ vars.CORE_REF }}

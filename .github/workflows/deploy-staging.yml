@@ -1,0 +1,85 @@
+name: Deploy (staging)
+
+# A pre-prod-* tag builds an image, puts it on the staging server, and rehearses
+# a release with it: the matching prod-* section of CHANGELOG.md is published as
+# a prerelease and the bot is told to announce that tag on startup. It is the
+# only way to read the announcement before production sends it.
+#
+#   git tag pre-prod-2026-09-17 && git push origin pre-prod-2026-09-17
+#
+# Pushing to the branch no longer deploys; see the trigger below. workflow_dispatch
+# is declared for when this workflow also lives on the default branch; until then
+# GitHub will not offer it, because it only reads dispatchable workflows from there.
+
+on:
+  push:
+    # Commented out while rehearsals are frequent. A tag points at a commit that
+    # was just pushed to this branch, so both triggers fired and the branch run
+    # built exactly what the tag run then rebuilt - two builds, one image's
+    # worth of work. Uncomment to go back to deploying staging on every push.
+    # branches:
+    #   - SNET_Telegram
+    tags:
+      - "pre-prod-*"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+# Every job checks the repository. This file also lives on telegram-plugin in
+# iCog-Labs-Dev/Omega, where development happens, and a tag pushed there must
+# not deploy: only singnet/Omega_CustomBots holds the deploy secrets.
+
+jobs:
+  # Only for a tag: a branch push is not a release and has nothing to announce.
+  # Only when the notes live here. RELEASE_NOTES_REPO points at the public core
+  # repository, which publishes them from its own CHANGELOG on its own tag, so
+  # publishing again here would write a release nothing reads.
+  publish-release:
+    if: github.repository == 'singnet/Omega_CustomBots' && (github.ref_type == 'tag' && vars.RELEASE_NOTES_REPO == '')
+    # Only this job may write. A called workflow cannot hold more than its
+    # caller grants, and the workflow-level grant above is read-only.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-release.yml
+    with:
+      tag: ${{ github.ref_name }}
+      prerelease: true
+
+  build:
+    if: github.repository == 'singnet/Omega_CustomBots'
+    uses: ./.github/workflows/common.yml
+    with:
+      publish_docker: true
+      tag_name: staging-${{ github.sha }}
+      core_remote: ${{ vars.CORE_REMOTE }}
+      core_ref: ${{ vars.CORE_REF }}
+    secrets:
+      REGISTRY_USERNAME: ${{ github.actor }}
+      REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    # The release must exist before the container starts, or the announcement
+    # finds nothing. always() keeps a plain branch push deploying, where
+    # publish-release is skipped rather than run.
+    needs: [build, publish-release]
+    if: github.repository == 'singnet/Omega_CustomBots' && (always() && needs.build.result == 'success' && needs.publish-release.result != 'failure')
+    uses: ./.github/workflows/deploy.yml
+    with:
+      image: ${{ needs.build.outputs.image }}
+      target: staging
+      env_slug: staging
+      release_tag: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      release_repo: ${{ vars.RELEASE_NOTES_REPO }}
+    secrets:
+      INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID_STAGING }}
+      INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET_STAGING }}
+      INFISICAL_PROJECT_SLUG: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+      SSH_HOST: ${{ secrets.SSH_HOST_STAGING }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}

@@ -1,0 +1,63 @@
+name: publish-release
+
+# Publishes the GitHub release a deploy is about to announce.
+#
+# The bot reads its release notes from the GitHub release for its tag, and it
+# reads them when the container starts. Publishing by hand after the deploy is
+# a race against the build: lose it and the announcement is skipped until the
+# container next restarts, which under --restart=always can be days. So the
+# notes live in CHANGELOG.md, are reviewed in the pull request that adds them,
+# and are published here before the deploy job runs.
+#
+# A pre-prod-* tag is published as a prerelease carrying the section of the
+# matching prod-* version, so staging rehearses the exact text production will
+# send.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag to publish, for example prod-2026-09-17'
+        required: true
+        type: string
+      prerelease:
+        description: 'Publish as a prerelease'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Publish the release from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease && '--prerelease' || '' }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Fails loudly when the section is missing, rather than publishing an
+          # empty release the bot would then summarise into nothing.
+          body=$(python3 scripts/changelog-section.py "$TAG")
+
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, updating its notes"
+            printf '%s\n' "$body" | gh release edit "$TAG" --repo "$REPO" \
+              --notes-file - --title "$TAG"
+          else
+            printf '%s\n' "$body" | gh release create "$TAG" --repo "$REPO" \
+              --title "$TAG" --notes-file - --verify-tag $PRERELEASE
+          fi
+
+          echo "published $TAG"

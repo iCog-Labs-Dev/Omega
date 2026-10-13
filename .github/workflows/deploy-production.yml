@@ -1,0 +1,93 @@
+name: Deploy (production)
+
+# Tag a commit on the bot branch to release it:
+#
+#   git tag prod-2026-09-10 && git push origin prod-2026-09-10
+#
+# A tag push reads the workflow from the tagged commit, so this works without
+# the workflow ever being on the default branch.
+
+on:
+  push:
+    tags:
+      - "prod-*"
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+# Every job checks the repository. This file also lives on telegram-plugin in
+# iCog-Labs-Dev/Omega, where development happens, and a tag pushed there must
+# not deploy: only singnet/Omega_CustomBots holds the deploy secrets.
+
+jobs:
+  # A release names the core it ships. CORE_REF is resolved to a commit inside
+  # the build job, and the whole run queues behind any other deploy, so a branch
+  # there is read minutes to hours after the tag was pushed: whatever core had
+  # moved to by then is what production gets, silently. A commit cannot move.
+  pinned-core:
+    if: github.repository == 'singnet/Omega_CustomBots'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse a core reference that can move
+        env:
+          CORE_REF: ${{ vars.CORE_REF }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$CORE_REF" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "::error::CORE_REF is '${CORE_REF:-(unset)}'. A production" \
+                 "release has to pin a 40-character core commit, because a" \
+                 "branch is read when the build job starts and can have moved" \
+                 "by then. Set it to the commit you are releasing:" \
+                 "gh variable set CORE_REF --repo \$GITHUB_REPOSITORY --body <sha>"
+            exit 1
+          fi
+          echo "core pinned at $CORE_REF"
+
+  # Published before the deploy, so the notes are there when the bot starts and
+  # looks them up. See publish-release.yml.
+  # See the note in deploy-staging.yml: skipped while the notes live elsewhere.
+  publish-release:
+    if: github.repository == 'singnet/Omega_CustomBots' && (vars.RELEASE_NOTES_REPO == '')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-release.yml
+    with:
+      tag: ${{ github.ref_name }}
+
+  build:
+    if: github.repository == 'singnet/Omega_CustomBots'
+    needs: pinned-core
+    uses: ./.github/workflows/common.yml
+    with:
+      publish_docker: true
+      tag_name: production-${{ github.sha }}
+      core_remote: ${{ vars.CORE_REMOTE }}
+      core_ref: ${{ vars.CORE_REF }}
+    secrets:
+      REGISTRY_USERNAME: ${{ github.actor }}
+      REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    needs: [build, publish-release]
+    if: github.repository == 'singnet/Omega_CustomBots' && (always() && needs.build.result == 'success' && needs.publish-release.result != 'failure')
+    uses: ./.github/workflows/deploy.yml
+    with:
+      image: ${{ needs.build.outputs.image }}
+      target: production
+      env_slug: prod
+      restart: true
+      require_chat_id: true
+      release_tag: ${{ github.ref_name }}
+      release_repo: ${{ vars.RELEASE_NOTES_REPO }}
+    secrets:
+      INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID_PRODUCTION }}
+      INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET_PRODUCTION }}
+      INFISICAL_PROJECT_SLUG: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+      SSH_HOST: ${{ secrets.SSH_HOST_PRODUCTION }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}

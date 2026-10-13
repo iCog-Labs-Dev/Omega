@@ -1,0 +1,283 @@
+name: common
+
+# Builds a deployable bot image and proves the plugin loads in it.
+#
+# The image is core's, with this plugin dropped in at plugins/telegram. Core is
+# never edited: it is cloned at a pinned commit, copied, and the copy is what
+# gets the plugin. The copying and any core-side adjustment is done by
+# ./run-plugin, the same script used to run the bot locally, so an image built
+# here and an image built on a laptop are assembled the same way.
+#
+# Two gates run before anything is published. The plugin's own test suite runs
+# on the runner, and the built image is asked to load the plugin the way core
+# will -- reading the manifest and importing every module. The suite alone would
+# not catch a missing dependency, because it stubs core out; only the image can.
+
+on:
+  workflow_call:
+    inputs:
+      publish_docker:
+        description: 'Push the image to the registry'
+        required: false
+        default: false
+        type: boolean
+      image_name:
+        description: 'Image repository to publish, without the tag'
+        required: false
+        default: ''
+        type: string
+      registry:
+        description: 'Registry to log in to'
+        required: false
+        default: 'ghcr.io'
+        type: string
+      tag_name:
+        description: 'Tag to build, and to publish when publish_docker is set'
+        required: false
+        default: 'latest'
+        type: string
+      platforms:
+        description: 'Platform to build for. One only: the image is loaded
+          locally for the smoke test before it is pushed.'
+        required: false
+        default: 'linux/amd64'
+        type: string
+      no_build_cache:
+        description: 'Do not use cached docker layers on image build'
+        required: false
+        default: false
+        type: boolean
+      run_tests:
+        description: 'Run the plugin test suite'
+        required: false
+        default: true
+        type: boolean
+      core_remote:
+        description: 'Core repository the image is built from'
+        required: false
+        default: ''
+        type: string
+      core_ref:
+        description: 'Core branch, tag or commit. A branch is resolved to the
+          commit it points at when the run starts, so a push to core mid-run
+          cannot change what is built.'
+        required: false
+        default: ''
+        type: string
+    secrets:
+      REGISTRY_USERNAME:
+        required: false
+      REGISTRY_PASSWORD:
+        required: false
+    outputs:
+      image:
+        description: 'The image that was built'
+        value: ${{ jobs.build.outputs.image }}
+      core_sha:
+        description: 'The core commit it was built from'
+        value: ${{ jobs.build.outputs.core_sha }}
+
+env:
+  # Changing core is a one-line change here, or a repository variable, and
+  # needs no edit to the deploy workflows.
+  DEFAULT_CORE_REMOTE: 'https://github.com/iCog-Labs-Dev/Omega.git'
+  DEFAULT_CORE_REF: 'telegram'
+  DEFAULT_IMAGE_NAME: 'omega-telegram-snet'
+
+jobs:
+  tests:
+    if: inputs.run_tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the plugin's dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest -r telegram/requirements.txt
+
+      - name: Plugin test suite
+        # The live Telegram tests skip themselves: they need TG_E2E=1 and a bot
+        # token, and they would fight the running bot for its updates.
+        run: pytest telegram/tests -q
+
+  build:
+    needs: tests
+    if: always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      core_sha: ${{ steps.core.outputs.sha }}
+    steps:
+      - name: Checkout the plugin
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve the image name
+        id: meta
+        env:
+          IMAGE_NAME: ${{ inputs.image_name }}
+          TAG: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "$IMAGE_NAME" ]; then
+            owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+            IMAGE_NAME="${{ inputs.registry }}/${owner}/${DEFAULT_IMAGE_NAME}"
+          fi
+          echo "image=${IMAGE_NAME}:${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve the core commit
+        id: core
+        env:
+          CORE_REMOTE: ${{ inputs.core_remote }}
+          CORE_REF: ${{ inputs.core_ref }}
+        run: |
+          set -euo pipefail
+          # An unset repository variable arrives as an empty string, so both
+          # forms of "not given" fall back to the same default.
+          : "${CORE_REMOTE:=$DEFAULT_CORE_REMOTE}"
+          : "${CORE_REF:=$DEFAULT_CORE_REF}"
+          # A branch or tag becomes the commit it points at now. A ref that
+          # matches nothing is already a commit. Kept out of one pipeline so a
+          # bad remote still fails the step, and so closing the pipe early
+          # cannot fail it under pipefail.
+          refs=$(git ls-remote "$CORE_REMOTE" "$CORE_REF")
+          sha=$(printf '%s\n' "$refs" | head -1 | cut -f1)
+          [ -n "$sha" ] || sha="$CORE_REF"
+          echo "remote=$CORE_REMOTE" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble the build context
+        env:
+          # run-plugin puts the context under $XDG_CACHE_HOME/omega-plugin-run.
+          XDG_CACHE_HOME: ${{ runner.temp }}
+        run: |
+          ./run-plugin --prepare-only \
+            --core-remote "${{ steps.core.outputs.remote }}" \
+            --core-ref "${{ steps.core.outputs.sha }}"
+
+      - name: Make room for the image
+        # A stock runner has about 14GB free, and this image does not fit in it
+        # twice: buildx keeps the layers, and `load` below writes the whole
+        # image into the daemon again so the smoke test can run before anything
+        # is published. Deleting toolchains this build never touches buys back
+        # roughly 25GB. Without it the build reaches the final layer and dies on
+        # "no space left on device".
+        run: |
+          echo "before:"; df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/powershell /usr/share/swift || true
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          echo "after:"; df -h / | tail -1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ runner.temp }}/omega-plugin-run/context
+          platforms: ${{ inputs.platforms }}
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.image }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
+          no-cache: ${{ inputs.no_build_cache }}
+
+      - name: Prove the plugin loads in the image
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/smoke.py" <<'PY'
+          """Check that core in this image can load the plugin.
+
+          Reading the manifest through core's own loader catches an entry core
+          would reject outright, such as an empty name or an unknown loader. The
+          count below is stricter than core: core notices a duplicate name only
+          once one of the two has been loaded, which is already too late.
+
+          Importing every module is the dependency check, and that is the
+          failure this repository has to prevent. Core installs a plugin's
+          requirements only because the plugin declares them, and a missing one
+          surfaces as an ImportError at startup and nowhere earlier -- the test
+          suite cannot see it, because it stubs core out and runs against
+          whatever the runner happens to have installed.
+          """
+          import os
+          import sys
+
+          root = os.environ.get("OMEGA_DIR", "/PeTTa/repos/Omega")
+          name = "telegram"
+
+          # What core's runtime has on the path: the tree, its src/, and the
+          # plugin's own folder, which core adds through addLocationToPath.
+          sys.path[:0] = [root, os.path.join(root, "src")]
+          import plugin
+
+          entries = [e for e in plugin.listPlugins() if e[1] == name]
+          if len(entries) != 1:
+              sys.exit(f"expected one '{name}' entry in the manifest, found {len(entries)}")
+          loader, _, location = entries[0]
+          print(f"manifest: {name} loader={loader} location={location}")
+
+          expected = os.path.join(root, "plugins", name)
+          if location != expected:
+              sys.exit(f"'{name}' resolves to {location}, not {expected}")
+          entry_point = os.path.join(location, f"{name}.metta")
+          if not os.path.isfile(entry_point):
+              sys.exit(f"{entry_point} is missing, so the metta loader has nothing to import")
+
+          sys.path.insert(0, location)
+          for module in ("telegram_channel", "media_handler", "vision", "gateway", "config_helper",
+                         "markdown_render", "text_splitter", "speech_text", "speech_language"):
+              __import__(module)
+              print(f"imported: {module}")
+          print("plugin loads")
+          PY
+          docker run --rm -i --entrypoint python3 "$IMAGE" - < "$RUNNER_TEMP/smoke.py"
+
+      - name: Log in to the image registry
+        if: inputs.publish_docker
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Push the image
+        if: inputs.publish_docker
+        # Every layer was built and cached by the build step above, so this
+        # only uploads. The cache is not written again for the same reason.
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ runner.temp }}/omega-plugin-run/context
+          platforms: ${{ inputs.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+          provenance: false
+          cache-from: type=gha
+
+      - name: Summary
+        run: |
+          {
+            echo "| | |"
+            echo "|---|---|"
+            echo "| image | \`${{ steps.meta.outputs.image }}\` |"
+            echo "| core | ${{ steps.core.outputs.remote }} |"
+            echo "| core commit | \`${{ steps.core.outputs.sha }}\` |"
+            echo "| plugin commit | \`${{ github.sha }}\` |"
+            echo "| pushed | ${{ inputs.publish_docker }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

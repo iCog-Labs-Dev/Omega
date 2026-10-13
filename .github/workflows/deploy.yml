@@ -1,0 +1,310 @@
+name: deploy
+
+# Puts a built image on the server. Staging and production differ only in which
+# Infisical environment the secrets come from and whether the container is
+# restarted automatically, so they share this one definition rather than a
+# copy each.
+#
+# Infisical is read over its HTTP API and the server is reached with plain ssh,
+# rather than through the actions that wrap them. This organisation allows only
+# GitHub-owned and verified-creator actions, so `Infisical/secrets-action` and
+# `appleboy/ssh-action` are refused before the run starts. Calling both directly
+# also means a workflow holding production keys and an ssh private key trusts
+# no unverified third party.
+#
+# Secrets never reach the image or the agent. The container starts under core's
+# own entrypoint, which brings up the credential proxy while the keys are still
+# in the environment, scrubs them, and drops privileges. The plugin reaches its
+# upstreams through that proxy.
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: 'Image to pull and run'
+        required: true
+        type: string
+      target:
+        description: "Which deployment this is, for the log: staging or production"
+        required: true
+        type: string
+      env_slug:
+        description: "Infisical environment to read secrets from: staging or prod"
+        required: true
+        type: string
+      release_tag:
+        description: 'Release to announce on startup. The agent reads the notes
+          from the GitHub release with this tag and sends a summary as its first
+          message. Empty for a deploy that is not a release, which announces
+          nothing. It is passed as a run.metta argument rather than an
+          environment variable because core''s entrypoint scrubs the environment
+          down to an allowlist before the agent ever sees it.'
+        required: false
+        default: ''
+        type: string
+      release_repo:
+        description: 'Repository whose GitHub releases hold the notes. The bot
+          reads them unauthenticated, so this has to be a repository that answers
+          anonymously; a private one returns 404 and the announcement is skipped.
+          Empty means this repository.'
+        required: false
+        default: ''
+        type: string
+      require_chat_id:
+        description: 'Refuse to deploy without a chat id. start() merges TG_CHAT_ID
+          into allowed_chats, and an empty allowed_chats restricts nothing, so a
+          missing chat id is the difference between a bot that answers one group
+          and one that answers every group it is added to. Production sets this.'
+        required: false
+        default: false
+        type: boolean
+      restart:
+        description: 'Restart the container automatically if it exits'
+        required: false
+        default: false
+        type: boolean
+      infisical_domain:
+        description: 'Infisical instance to read from'
+        required: false
+        default: 'https://app.infisical.com'
+        type: string
+    secrets:
+      # Passed in by name rather than inherited, because staging and production
+      # authenticate to Infisical as different machine identities and so keep
+      # their credentials under different names.
+      INFISICAL_CLIENT_ID:
+        required: true
+      INFISICAL_CLIENT_SECRET:
+        required: true
+      INFISICAL_PROJECT_SLUG:
+        required: true
+      SSH_HOST:
+        required: true
+      SSH_USER:
+        required: true
+      SSH_PRIVATE_KEY:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch secrets from Infisical
+        env:
+          DOMAIN: ${{ inputs.infisical_domain }}
+          CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          PROJECT_SLUG: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          ENV_SLUG: ${{ inputs.env_slug }}
+        run: |
+          set -euo pipefail
+
+          # Machine-identity login. The body is built by jq so a value
+          # containing a quote or backslash cannot break out of the JSON.
+          login=$(curl -sS --max-time 30 -X POST \
+            "${DOMAIN}/api/v1/auth/universal-auth/login" \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg i "$CLIENT_ID" --arg s "$CLIENT_SECRET" \
+                    '{clientId:$i, clientSecret:$s}')")
+          token=$(jq -r '.accessToken // empty' <<<"$login")
+          if [ -z "$token" ]; then
+            # The message names the cause without echoing what was sent.
+            echo "::error::Infisical login failed: $(jq -r '.message // "no accessToken in response"' <<<"$login")"
+            exit 1
+          fi
+          echo "::add-mask::$token"
+
+          # The status is read separately: a wrong project slug answers 404
+          # with a message that says so, and counting secrets in that body
+          # reports an empty environment instead of the real fault.
+          response=$(curl -sS --max-time 30 -G "${DOMAIN}/api/v3/secrets/raw" \
+            -H "Authorization: Bearer ${token}" \
+            --data-urlencode "workspaceSlug=${PROJECT_SLUG}" \
+            --data-urlencode "environment=${ENV_SLUG}" \
+            --data-urlencode "secretPath=/" \
+            -w '\n%{http_code}')
+          status=${response##*$'\n'}
+          raw=${response%$'\n'*}
+          if [ "$status" != "200" ]; then
+            echo "::error::Infisical read failed (HTTP $status): $(jq -r '.message // "no message"' <<<"$raw")"
+            exit 1
+          fi
+          count=$(jq '.secrets | length' <<<"$raw" 2>/dev/null || echo 0)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::Infisical project ${PROJECT_SLUG} environment ${ENV_SLUG} holds no secrets"
+            exit 1
+          fi
+
+          # Mask before exporting, so a value cannot surface in a later log
+          # line. The heredoc form of GITHUB_ENV keeps multi-line values whole.
+          for key in $(jq -r '.secrets[].secretKey' <<<"$raw"); do
+            value=$(jq -r --arg k "$key" \
+              '.secrets[] | select(.secretKey==$k) | .secretValue' <<<"$raw")
+            echo "::add-mask::$value"
+            printf '%s<<INFISICAL_EOF\n%s\nINFISICAL_EOF\n' "$key" "$value" >> "$GITHUB_ENV"
+          done
+          echo "read $count secrets from ${ENV_SLUG}"
+
+      - name: Deploy to ${{ inputs.target }}
+        env:
+          IMAGE: ${{ inputs.image }}
+          RESTART: ${{ inputs.restart && '1' || '' }}
+          REQUIRE_CHAT_ID: ${{ inputs.require_chat_id && '1' || '' }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_REPO: ${{ inputs.release_repo != '' && inputs.release_repo || github.repository }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          ASI_API_KEY: ${{ env.ASI_API_KEY }}
+          OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ env.OPENROUTER_API_KEY }}
+          TG_BOT_TOKEN: ${{ env.BOT_TOKEN }}
+          TG_CHAT_ID: ${{ env.CHAT_ID }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'OpenRouter' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+        run: |
+          set -euo pipefail
+
+          key=$(mktemp)
+          chmod 600 "$key"
+          trap 'shred -u "$key" 2>/dev/null || rm -f "$key"' EXIT
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+
+          # The remote script is piped to `bash -s` rather than passed as an
+          # argument, so nothing in it is re-parsed by the local shell. Its
+          # inputs arrive as an exported prelude quoted by printf %q, which is
+          # what keeps a key containing a space or a quote intact.
+          {
+            printf 'export IMAGE=%q RESTART=%q GHCR_USER=%q GHCR_TOKEN=%q\n' \
+              "$IMAGE" "$RESTART" "$GHCR_USER" "$GHCR_TOKEN"
+            printf 'export RELEASE_TAG=%q RELEASE_REPO=%q REQUIRE_CHAT_ID=%q\n' \
+              "$RELEASE_TAG" "$RELEASE_REPO" "$REQUIRE_CHAT_ID"
+            printf 'export ASI_API_KEY=%q OPENAI_API_KEY=%q\n' \
+              "$ASI_API_KEY" "$OPENAI_API_KEY"
+            printf 'export ANTHROPIC_API_KEY=%q OPENROUTER_API_KEY=%q\n' \
+              "$ANTHROPIC_API_KEY" "$OPENROUTER_API_KEY"
+            printf 'export TG_BOT_TOKEN=%q TG_CHAT_ID=%q\n' \
+              "$TG_BOT_TOKEN" "$TG_CHAT_ID"
+            printf 'export LLM_PROVIDER=%q LLM_MODEL=%q\n' \
+              "$LLM_PROVIDER" "$LLM_MODEL"
+            cat <<'REMOTE'
+          set -e
+
+          # Under the deploy user's own home, not /omega: this account has no
+          # sudo and cannot create a directory at the root. Only the docker CLI
+          # reads this file, as this same user, so its location is free.
+          env_dir="${HOME}/omega"
+          mkdir -p "${env_dir}"
+          chmod 700 "${env_dir}"
+
+          # A breadcrumb, not the credentials: enough of each key to tell which
+          # one is in use, and nothing an attacker could spend. The real values
+          # arrive through -e below, which overrides --env-file.
+          tee "${env_dir}/.env" > /dev/null <<EOF
+          ASI_API_KEY=...${ASI_API_KEY: -5}
+          OPENAI_API_KEY=...${OPENAI_API_KEY: -5}
+          ANTHROPIC_API_KEY=...${ANTHROPIC_API_KEY: -5}
+          OPENROUTER_API_KEY=...${OPENROUTER_API_KEY: -5}
+          TG_BOT_TOKEN=...${TG_BOT_TOKEN: -5}
+          TG_CHAT_ID=${TG_CHAT_ID}
+          LLM_PROVIDER=${LLM_PROVIDER}
+          LLM_MODEL=${LLM_MODEL}
+          EOF
+          chmod 600 "${env_dir}/.env"
+
+          # An empty chat id is the difference between a bot that answers one
+          # group and one that answers every group it is added to: start()
+          # merges TG_CHAT_ID into allowed_chats, and an empty allowed_chats
+          # passes every chat. The shipped profile leaves that list empty, so
+          # the chat id is the only thing restricting a stock deployment.
+          if [ -z "${TG_CHAT_ID}" ] && [ -n "${REQUIRE_CHAT_ID}" ]; then
+            echo "no TG_CHAT_ID. The shipped profile lists no allowed chats," \
+                 "and an empty list restricts nothing, so this would answer in" \
+                 "any chat the bot is added to. Set CHAT_ID in Infisical." >&2
+            exit 1
+          fi
+
+          # A host may carry its own channel profile, for anything the chat id
+          # does not cover. It is optional: without one the shipped defaults
+          # apply, restricted by the chat id above.
+          profile="${env_dir}/telegram_profile.yaml"
+          profile_mount=""
+          profile_arg=""
+          if [ -f "$profile" ]; then
+            profile_mount="-v ${profile}:/etc/omega/telegram_profile.yaml:ro"
+            profile_arg="TG_PROFILE_PATH=/etc/omega/telegram_profile.yaml"
+            # The agent is uid 65534 and the mount keeps host permissions, so a
+            # profile it cannot read would silently leave it on the shipped one.
+            profile_perms=$(stat -c '%a' "$profile")
+            case "$profile_perms" in
+              *4|*5|*6|*7) : ;;
+              *) echo "the channel profile at ${profile} is mode" \
+                       "${profile_perms}; the agent runs as nobody and could" \
+                       "not read it. chmod 644 and deploy again." >&2
+                 exit 1 ;;
+            esac
+            echo "using the channel profile at ${profile} (mode ${profile_perms})"
+          fi
+
+          mkdir -p /Backup/docker/PeTTa
+
+          # The package is private, so the pull needs a login even here.
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+          docker pull "${IMAGE}"
+          docker rm -f omega 2>/dev/null || true
+
+          # The prompt ships inside the plugin at plugins/telegram/prompt.txt and
+          # is read from there, so it is not copied out of the image and mounted
+          # back. To override it, mount a file and point TG_PROMPT_PATH at it.
+          # -it as core's own scripts/omega does. nginx logs to /dev/stderr and
+          # runs as www-data, and without a TTY that is the container's stderr
+          # pipe, which www-data cannot open: the proxy dies with
+          # "open() /dev/stderr failed (13: Permission denied)" and takes the
+          # container with it.
+          docker run -d -it \
+            --name omega \
+            ${RESTART:+--restart=always} \
+            --env-file "${env_dir}/.env" \
+            ${profile_mount} \
+            -e ASI_API_KEY="${ASI_API_KEY}" \
+            -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+            -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
+            -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
+            -e TG_BOT_TOKEN="${TG_BOT_TOKEN}" \
+            -v /Backup/docker/PeTTa:/PeTTa/repos/Omega/memory \
+            "${IMAGE}" \
+            commchannel=telegram \
+            TG_CHAT_ID=${TG_CHAT_ID} \
+            provider=${LLM_PROVIDER} \
+            ${LLM_MODEL:+LLM=${LLM_MODEL}} \
+            ${RELEASE_TAG:+releaseTag=${RELEASE_TAG} releaseRepo=${RELEASE_REPO}} \
+            ${profile_arg} \
+            embeddingprovider=OpenAI
+
+          docker ps --filter name=omega --format 'started {{.Names}} from {{.Image}}'
+
+          # Each deploy pulls another image of this size and the old one is
+          # never reclaimed; four of them filled a 124G disk, and the failure
+          # lands on the pull, after the build, where it costs the most. The
+          # running image and the two before it are kept, so a rollback still
+          # has somewhere to go.
+          keep=3
+          repo="${IMAGE%%:*}"
+          running=$(docker inspect omega --format '{{.Config.Image}}' 2>/dev/null || true)
+          docker images "$repo" --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' \
+            | sort -r | tail -n +$((keep + 1)) | cut -f2 \
+            | while read -r old; do
+                [ "$old" = "$running" ] && continue
+                echo "removing superseded image $old"
+                docker image rm "$old" >/dev/null 2>&1 || true
+              done
+          df -h / | tail -1
+          REMOTE
+          } | ssh -i "$key" \
+                -o StrictHostKeyChecking=accept-new \
+                -o BatchMode=yes \
+                -o ConnectTimeout=20 \
+                "${SSH_USER}@${SSH_HOST}" bash -s
