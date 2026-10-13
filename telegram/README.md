@@ -18,7 +18,7 @@ outbound retry queue, and the channel auth handshake.
 | Inbound voice / audio | Whisper transcript is inlined into the message |
 | Outbound image | The agent calls `generate-image`, which generates and sends the photo |
 | Outbound PDF | The agent calls `generate-pdf`, which creates a local PDF and sends it as a Telegram document (up to 20,000 characters). Hebrew and Arabic are shaped; text with characters no font can draw is refused and the characters are named to the agent. See [PDF fonts](#pdf-fonts) |
-| Outbound voice | The agent calls `speak`, which synthesizes and sends a Telegram voice message when enabled |
+| Outbound voice | The agent calls `speak`, which sends speech in ordered voice messages when enabled; long text uses the same paragraph/line splitting as text replies |
 | Admin commands | `/kill`, `/pause [chat_id]`, `/togglesearch`, `/purge` (admin IDs only) |
 | Safety | Ethics classification on inbound and outbound text, per-user spam throttling |
 | Scope limits | `prompt.txt` is added to the agent's prompt as its own section |
@@ -83,7 +83,7 @@ they belong to the proxy, not here.
 | `ANTHROPIC_API_KEY` | for vision | Used by the default vision provider |
 | `OPENROUTER_API_KEY` | for image gen + Whisper | Also the vision key if `VISION_PROVIDER=OpenRouter` |
 | `OPENAI_API_KEY` | for safety checks | Moderation API; without it the ethics passes allow content through |
-| `EDGE_TTS_VOICE` | no | Voice for the `speak` skill; any voice from `edge-tts --list-voices`, defaults to `en-US-AriaNeural` |
+| `EDGE_TTS_VOICE` | no | Preferred/fallback speech voice; also accepts `OMEGA_EDGE_TTS_VOICE`. Defaults to `en-US-AriaNeural`. Other detected languages automatically use a matching voice. |
 | `VISION_PROVIDER` | no | `Anthropic` (default) or `OpenRouter` |
 | `VISION_MODEL` | no | Overrides the provider's default vision model |
 | `IMAGE_PROVIDER` | no | `OpenRouter` (default, FLUX) or `OpenAI` |
@@ -139,6 +139,38 @@ the agent installing fonts.
 One known gap is a line that mixes Hebrew and Arabic: fpdf2 shapes it as one
 run, so the Arabic letters are not joined and the two words come out in the
 wrong order. Either language alone, or mixed with English, is fine.
+
+## Voice replies
+
+Voice precedence is runtime `EDGE_TTS_VOICE=...`, then environment
+`OMEGA_EDGE_TTS_VOICE`, then environment `EDGE_TTS_VOICE`, then the
+`EDGE_TTS_VOICE` YAML setting. Empty environment values are ignored. Both names
+are passed to the container from the env file, and both have to survive core's
+entrypoint. Restart after changing the voice.
+
+- The whole reply's main language selects the reply voice, preserving configured
+  gender. A sentence written mostly in a script that voice cannot read, such as
+  Russian or Chinese inside an English reply, gets a voice of its own language in
+  the same voice message. Single letters of another alphabet (α, π) keep the reply
+  voice. Unsupported language/gender combinations use the configured voice; invalid
+  voice names fall back to `en-US-AriaNeural` with a warning.
+- Markdown, image descriptions, links and emoji are removed from speech, not text
+  replies. Link labels, paragraph breaks, bare domain names such as `example.com`
+  and ordered list numbers remain. Empty cleaned input returns `VOICE_INVALID_INPUT`.
+- Sentences are grouped into text chunks of at most 4096 characters. Chunks end at
+  sentence boundaries, and `。！？` need no following space; oversized sentences
+  split at whitespace, with hard cuts only for oversized tokens. A failed chunk is
+  retried once, then sentence by sentence, sending consecutive successful sentences
+  together. The recording indicator refreshes throughout processing.
+- Failed segments produce a text notice without discarding successful audio.
+  The same text spoken twice within one agent turn is sent twice. In a later turn,
+  an exact-text retry for the same inbound message sends only what was not
+  delivered, and a fully delivered request returns `VOICE_DUPLICATE` with the
+  number of copies delivered, without sending. Uncertain uploads
+  are never automatically repeated while tracked. A voice-only
+  in-memory cache retains the 100 most recently used requests; restart or eviction
+  loses retry protection. No database is used. New messages and paraphrased
+  requests are not deduplicated; existing SQLite files are left untouched.
 
 ## Location
 

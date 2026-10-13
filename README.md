@@ -1,121 +1,95 @@
 # SNET TELEGRAM BOT
 
-A Telegram bot with media support. It reads images, PDFs and voice notes that
-users attach, and can generate images and send them back.
+A Telegram bot with media support. It reads images, QR codes, PDFs and voice
+notes that users attach, and can send back generated images, PDF documents and
+voice replies.
 
-Everything ships as an Omega plugin: a `CommChannel` for the Telegram
-channel plus two skills for the media capabilities. No core internals are
-patched — `plugins.yaml` and `skills.metta` are mounted over their core copies
-so the plugin and its skills are registered.
+Everything ships as an Omega plugin in `telegram/`. `telegram/telegram.metta`
+registers the Telegram `CommChannel` and the skills `describe-image`,
+`generate-image`, `generate-pdf`, `install-pdf-font` and `speak`. Core is never
+edited: `./run-plugin` copies the plugin into a core checkout, and that copy is
+what gets built and run.
+
+## Where the code lives
+
+| Repository | Branch | Role |
+| --- | --- | --- |
+| `iCog-Labs-Dev/Omega` | `telegram-plugin` | Where all work happens. Open pull requests here. |
+| `singnet/Omega_CustomBots` | `SNET_Telegram` | Deploys only. It holds the deploy secrets and the release tags. |
+
+`SNET_Telegram` should always hold the same files as `telegram-plugin`. Do not
+commit to it directly: a change made only there is lost the next time it is
+synced. To release, sync first:
+
+```sh
+git fetch icog && git fetch cbots
+git checkout -B sync cbots/SNET_Telegram
+git read-tree -u --reset icog/telegram-plugin   # take telegram-plugin's files exactly
+git commit -m "Sync with telegram-plugin at $(git rev-parse --short icog/telegram-plugin)"
+git push cbots sync                              # then open a PR into SNET_Telegram
+```
+
+Here `icog` is `git@github.com:iCog-Labs-Dev/Omega.git` and `cbots` is
+`https://github.com/singnet/Omega_CustomBots.git`.
 
 ## Capabilities
 
 | Capability | How the agent sees it |
 | --- | --- |
-| Inbound photo | Message shows `[image]`; the agent calls `describe-image` on demand |
+| Inbound photo | Message shows `[image]`; the agent calls `describe-image` on demand, which also reads any QR code in it |
 | Inbound PDF | Extracted text is inlined into the message |
 | Inbound voice / audio | Whisper transcript is inlined into the message |
-| Outbound image | The agent calls `generate-image`, which generates and sends the photo |
+| Outbound image | `generate-image` generates and sends the photo |
+| Outbound PDF | `generate-pdf` builds the document locally and sends it; `install-pdf-font` adds a Google Fonts family for scripts the bundled font cannot draw |
+| Outbound voice | `speak` sends speech as ordered voice messages, picking a voice for the language, when `allow_voice_reply` is on |
 | Admin commands | `/kill`, `/pause [chat_id]`, `/togglesearch`, `/purge` (admin IDs only) |
-| Safety | Ethics classification on inbound and outbound text, per-user spam throttling |
+| Safety | Ethics classification on inbound and outbound text, per-user spam throttling, link targets written out in replies, secrets and card numbers refused in PDFs |
 
-## Installation
+## Running it locally
 
-1. `git clone git@github.com:singnet/Omega_CustomBots.git`
-2. `cd Omega_CustomBots`
-3. `git checkout SNET_Telegram`
-4. Open `Omega_Telegram_SNET` in an editor and replace every `'...'`:
-   - `TG_BOT_TOKEN` — from @BotFather
-   - `TG_CHAT_ID` — the chat the bot operates in
-   - `ANTHROPIC_API_KEY` — reading images
-   - `OPENROUTER_API_KEY` — chat, image generation, voice transcription
-   - `OPENAI_API_KEY` — the Moderation API used by the safety checks
-5. Edit `telegram/telegram_profile.yaml` and fill in **both** of these — they
-   ship empty and the bot is not safe to run in a real chat until they are set:
-   - `admin_controls.admin_ids` — Telegram user IDs allowed to run admin commands
-   - `telegram.allowed_chats` — chat IDs the bot may operate in
-6. In BotFather, turn **Group Privacy off** for the bot, otherwise it cannot see
+1. Put the keys in `.env`:
+   - `TG_BOT_TOKEN`, from @BotFather
+   - `ANTHROPIC_API_KEY`, for reading images
+   - `OPENROUTER_API_KEY`, for chat, image generation and voice transcription
+   - `OPENAI_API_KEY`, for the Moderation API used by the safety checks
+2. Edit `telegram/telegram_profile.yaml` and fill in both of these. They ship
+   empty, and the bot is not safe to run in a real chat until they are set:
+   - `admin_controls.admin_ids`, the Telegram user IDs allowed to run admin commands
+   - `telegram.allowed_chats`, the chat IDs the bot may answer in
+3. In BotFather, turn **Group Privacy off** for the bot. Otherwise it cannot see
    group messages that are not direct replies to it.
-7. `./Omega_Telegram_SNET`
+4. `./run-plugin --arg TG_CHAT_ID=<chat id>`
 
-The first run builds core from source and takes a while. Later runs reuse the
-image.
-
-## Stop and restart
-
-```sh
-docker stop omega && docker start omega
-```
+The first run builds core from source, which takes about ten minutes. Later runs
+reuse the image. `./run-plugin --help` lists the options, including `--test` to
+run the suite inside the built image and `--shell` to open a shell in it.
 
 Run only one instance per bot token. A second one makes Telegram reject both
 with `TelegramConflictError`.
 
-## Build notes
+## How the bot runs
 
-**Core is built from source, not pulled from a published tag.** This bot needs
-core's plugin system (`config/plugins.yaml`, `src/channels.py`), which is not in
-a release yet — `v0.1.17` has neither. `Omega_Telegram_SNET` clones core at
-the pinned commit and builds it, then layers the plugin's Python dependencies
-on top via the `Dockerfile`, from `telegram/requirements.txt`. Core installs
-only its own `requirements.txt`, so without that layer the plugin loader fails
-on import.
+The container starts under core's own entrypoint. It brings up core's
+credential proxy while the keys are still in the environment, removes them from
+the environment the agent sees, and switches to uid 65534 (`nobody`) before the
+agent starts. The plugin reaches Telegram, OpenRouter, Anthropic and OpenAI
+through that proxy, so the agent, and its `shell` skill, never see a key.
 
-Omega core version: pinned commit `7f0d33f` of
-`singnet/Omega`. Change `CORE_COMMIT` in
-`Omega_Telegram_SNET` to move it.
-
-**The launcher bypasses core's `entrypoint.sh`** with `--entrypoint sh`. That
-entrypoint scrubs the environment down to an allowlist which excludes
-`TG_BOT_TOKEN` and every API key, because core expects channels to read their
-secrets from the nginx proxy it starts. This channel reads the environment
-instead, so the entrypoint is skipped.
-
-Two things follow, and one of them is worth understanding before deploying:
-
-- **The keys stay in the agent process's environment.** A stock run keeps them
-  in the proxy, where the agent cannot read them. Here anything that can read
-  the process environment — including the agent's own `shell` skill — can read
-  `TG_BOT_TOKEN` and all three API keys. Routing the channel through the proxy,
-  the way core's `channels/telegram.py` does, would remove the need for the
-  bypass entirely.
-- `GATEWAY_URL` is unset, so providers call their APIs directly rather than
-  through the proxy.
-
-Skipping the entrypoint also skips the `su nobody` it ends with, which would
-leave the agent running as **root**. The launcher runs the same `su nobody`
-itself, so the process ends up as uid 65534 exactly as it would on a stock run;
-`memoryDirectory` and the writable paths in `profile/policy.yaml` are all owned
-by that user. Secrets handling is therefore the only way this run differs from a
-stock one — not privileges.
-
-## Files
-
-| Path | Mounted over | Role |
-| --- | --- | --- |
-| `telegram/` | `plugins/telegram` | The plugin: channel, media handling, vision, config |
-| `plugins.yaml` | `config/plugins.yaml` | Core's plugin list plus this plugin's entry |
-| `skills.metta` | `src/skills.metta` | Core's skills plus `describe-image` and `generate-image` |
-| `knowledge-priors/` | `knowledge-priors` | Shared knowledge base, inherited from `main` |
-| `Dockerfile` | — | Adds the plugin's Python dependencies to the core image |
-| `Omega_Telegram_SNET` | — | Builds and runs the bot |
-
-`skills.metta` carries the two media skills because a MeTTa plugin's
-`loadOmegaPlugin` cannot currently register skills that reach `getSkills`.
-Once that is fixed upstream they can move into the plugin and this file no
-longer needs mounting.
-
-`knowledge-priors/` comes from the `main` branch — merge `main` into this branch
-to pick up updates. Core discovers it automatically: `src/rag.py` reads
-`<repo root>/knowledge-priors/*.md`, and skips the step if the folder is absent.
+Core is built from `CORE_REMOTE` at `CORE_REF`, which default to the `telegram`
+branch of `iCog-Labs-Dev/Omega`. Against a core that lacks something the plugin
+needs, `run-plugin` adds it to its copy: the manifest entry, the plugin's
+requirements install, and removing core's own `channels/telegram.py`, which
+claims the same channel id.
 
 ## Configuration
 
 Behaviour lives in `telegram/telegram_profile.yaml`: reply gating, admin IDs,
-spam thresholds, ethics categories, and `reply_constraints` (which includes
-`allow_image_generation`). `telegram/policy.md` holds the `/start`, `/about` and
-`/privacy` text.
+spam thresholds, ethics categories, and `reply_constraints`, which turns
+features on and off (`allow_image_generation`, `allow_pdf_generation`,
+`allow_pdf_font_install`, `allow_voice_reply`). `telegram/policy.md` holds the `/start`,
+`/about` and `/privacy` text.
 
-Optional environment variables:
+Optional settings:
 
 | Variable | Purpose |
 | --- | --- |
@@ -123,19 +97,91 @@ Optional environment variables:
 | `VISION_MODEL` | Overrides the vision provider's default model |
 | `IMAGE_PROVIDER` | `OpenRouter` (default, FLUX) or `OpenAI` |
 | `IMAGE_MODEL` | Overrides the image provider's default model |
+| `EDGE_TTS_VOICE` | Fixes the speech voice instead of choosing one by language |
+| `TG_PDF_FONT_DIR` | Where installed PDF fonts go; defaults to `fonts/` in core's memory folder, which survives restarts |
+| `TG_PROFILE_PATH`, `TG_POLICY_PATH`, `TG_PROMPT_PATH` | Use a profile, policy or prompt file from outside the plugin |
 
-Vision defaults to Anthropic: an OpenRouter account whose data policy excludes
+Vision defaults to Anthropic. An OpenRouter account whose data policy excludes
 vision providers gets a 404 on every vision model, while text chat and image
 generation keep working on the same key.
 
 ## Tests
 
 ```sh
-cd telegram && for f in tests/test_*.py; do python3 "$f"; done
+pip install pytest -r telegram/requirements.txt
+pytest telegram/tests -q
 ```
 
-Plain asserts, no framework. Network and Telegram calls are stubbed, so no
-credentials are needed.
+Network and Telegram calls are stubbed, so no credentials are needed, and core
+does not have to be installed. The live suite in `telegram/tests/test_e2e.py`
+skips itself unless `TG_E2E=1` is set. It talks to a real bot, so give it an
+idle token, not one a running bot is polling with.
+
+## Continuous delivery
+
+| Trigger | Workflow | What happens |
+| --- | --- | --- |
+| pull request to `telegram-plugin` or `SNET_Telegram` | `ci.yml` | test, build, smoke test; publishes nothing |
+| `pre-prod-*` tag on `singnet/Omega_CustomBots` | `deploy-staging.yml` | the same, then publishes the image and deploys to staging |
+| `prod-*` tag on `singnet/Omega_CustomBots` | `deploy-production.yml` | the same against production, with `--restart=always` |
+
+The deploy workflows do nothing in any other repository, so a tag pushed to
+`iCog-Labs-Dev/Omega` deploys nothing. `common.yml` builds the image and
+`deploy.yml` puts it on a server; the other workflows call them.
+
+### What has to pass
+
+The plugin's test suite runs on the runner. Then the built image loads the
+plugin the way core will: it reads the manifest through core's own loader and
+imports every plugin module. The suite stubs core out and cannot catch a
+missing dependency; only the image can.
+
+### Releasing
+
+1. On `telegram-plugin`, add a `## prod-YYYY-MM-DD` section to `CHANGELOG.md`
+   describing what people in the chat will notice.
+2. Sync `SNET_Telegram` as above and merge the pull request.
+3. Tag the merged commit `pre-prod-YYYY-MM-DD` and push the tag to
+   `singnet/Omega_CustomBots`. Staging deploys and announces that section. Add
+   `.2`, `.3` and so on for another rehearsal of the same notes.
+4. Tag the same commit `prod-YYYY-MM-DD` and push it. Production deploys.
+
+Production refuses to build unless the `CORE_REF` repository variable is a full
+40-character commit, so a branch moving mid-release cannot change what ships:
+
+```sh
+gh variable set CORE_REF --repo singnet/Omega_CustomBots --body <sha>
+```
+
+Staging builds from the same variable.
+
+Images go to `ghcr.io/singnet/omega-telegram-snet`, tagged `staging-<sha>` or
+`production-<sha>`. The deploy keeps the three newest on the server.
+
+### On the server
+
+The deploy reads the keys from Infisical (`staging` or `prod`), connects over
+SSH, and replaces the container named `omega`. Memory lives in
+`/Backup/docker/PeTTa`. If `~/omega/telegram_profile.yaml` exists on the host it
+is mounted in place of the shipped profile, and it must be readable by
+everyone, since the agent runs as `nobody`. Production refuses to deploy
+without a chat id: the shipped profile lists no allowed chats, and an empty list
+restricts nothing.
+
+The repository needs nine secrets, which `./push-cicd-secrets` sets from a filled
+`.env.cicd` (it needs admin on the repository):
+
+| Secret | |
+| --- | --- |
+| `INFISICAL_PROJECT_SLUG` | the project holding the keys, shared |
+| `INFISICAL_CLIENT_ID_STAGING`, `INFISICAL_CLIENT_SECRET_STAGING` | the staging machine identity |
+| `INFISICAL_CLIENT_ID_PRODUCTION`, `INFISICAL_CLIENT_SECRET_PRODUCTION` | the production machine identity |
+| `SSH_HOST_STAGING`, `SSH_HOST_PRODUCTION` | the two servers |
+| `SSH_USER`, `SSH_PRIVATE_KEY` | shared by both |
+
+Optional repository variables: `LLM_PROVIDER` (default `OpenRouter`),
+`LLM_MODEL`, `CORE_REMOTE`, `CORE_REF`, and `RELEASE_NOTES_REPO` when the
+release notes live in another repository.
 
 ---
 
