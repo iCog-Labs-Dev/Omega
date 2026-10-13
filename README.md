@@ -141,10 +141,23 @@ missing dependency; only the image can.
 1. On `telegram-plugin`, add a `## prod-YYYY-MM-DD` section to `CHANGELOG.md`
    describing what people in the chat will notice.
 2. Sync `SNET_Telegram` as above and merge the pull request.
-3. Tag the merged commit `pre-prod-YYYY-MM-DD` and push the tag to
-   `singnet/Omega_CustomBots`. Staging deploys and announces that section. Add
-   `.2`, `.3` and so on for another rehearsal of the same notes.
-4. Tag the same commit `prod-YYYY-MM-DD` and push it. Production deploys.
+3. Publish the notes. The bot reads them, without logging in, from the GitHub
+   release of its tag in `iCog-Labs-Dev/Omega`, because `Omega_CustomBots` is
+   private. Tag `telegram-plugin` there and publish before deploying, or the
+   bot starts with nothing to announce:
+
+   ```sh
+   tag=pre-prod-YYYY-MM-DD   # prod-YYYY-MM-DD for production
+   git tag "$tag" icog/telegram-plugin && git push icog "$tag"
+   python3 scripts/changelog-section.py "$tag" \
+     | gh release create "$tag" --repo iCog-Labs-Dev/Omega --title "$tag" \
+         --notes-file - --verify-tag --prerelease   # no --prerelease for prod-*
+   ```
+
+4. Tag the merged `SNET_Telegram` commit `pre-prod-YYYY-MM-DD` and push the tag
+   to `singnet/Omega_CustomBots`. Staging deploys and announces that section.
+   Add `.2`, `.3` and so on for another rehearsal of the same notes.
+5. Repeat steps 3 and 4 with `prod-YYYY-MM-DD`. Production deploys.
 
 Production refuses to build unless the `CORE_REF` repository variable is a full
 40-character commit, so a branch moving mid-release cannot change what ships:
@@ -180,8 +193,8 @@ The repository needs nine secrets, which `./push-cicd-secrets` sets from a fille
 | `SSH_USER`, `SSH_PRIVATE_KEY` | shared by both |
 
 Optional repository variables: `LLM_PROVIDER` (default `OpenRouter`),
-`LLM_MODEL`, `CORE_REMOTE`, `CORE_REF`, and `RELEASE_NOTES_REPO` when the
-release notes live in another repository.
+`LLM_MODEL`, `CORE_REMOTE`, `CORE_REF`, and `RELEASE_NOTES_REPO`, which is set
+to `iCog-Labs-Dev/Omega` so the deploy leaves publishing to step 3 above.
 
 ---
 
