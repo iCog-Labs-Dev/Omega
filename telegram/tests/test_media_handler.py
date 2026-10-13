@@ -2,9 +2,20 @@ import io
 import os, sys
 import types
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import pytest
 from pypdf import PdfReader
 from io import BytesIO
 import media_handler as mh
+
+
+@pytest.fixture(autouse=True)
+def _bundled_pdf_font_only(monkeypatch):
+    """Use only the bundled PDF font, unless a test sets its own folder.
+
+    The real font folder lives in core's memory directory and is found through
+    core's helper module. CI runs this suite without core, and a developer's
+    core may hold installed fonts that would change what a test sees."""
+    monkeypatch.setattr(mh, "_pdf_font_dir", lambda: None)
 
 
 def test_no_image_returns_marker():
@@ -367,6 +378,8 @@ def test_speak_disabled():
 
 
 def test_speak_synthesis_failure():
+    orig_parts = mh.speech_parts
+    mh.speech_parts = lambda text, voice: [(text, voice)]
     orig_allowed = mh._tts_allowed
     orig_unsafe = mh._prompt_is_unsafe
     orig_synth = mh._synthesise_speech
@@ -377,12 +390,15 @@ def test_speak_synthesis_failure():
         out = mh.speak("hello")
         assert out.startswith("VOICE_FAILED"), out
     finally:
+        mh.speech_parts = orig_parts
         mh._tts_allowed = orig_allowed
         mh._prompt_is_unsafe = orig_unsafe
         mh._synthesise_speech = orig_synth
 
 
 def test_speak_success():
+    orig_parts = mh.speech_parts
+    mh.speech_parts = lambda text, voice: [(text, voice)]
     orig_allowed = mh._tts_allowed
     orig_unsafe = mh._prompt_is_unsafe
     orig_synth = mh._synthesise_speech
@@ -401,6 +417,7 @@ def test_speak_success():
         assert sent["bytes"] == b"audio-bytes", sent
         assert "record_voice" in actions, actions
     finally:
+        mh.speech_parts = orig_parts
         mh._tts_allowed = orig_allowed
         mh._prompt_is_unsafe = orig_unsafe
         mh._synthesise_speech = orig_synth
