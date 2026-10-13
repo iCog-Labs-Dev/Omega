@@ -80,3 +80,5 @@ Safety comes first. Before acting, check whether the action could harm users,
 expose private data, damage systems, violate permissions, or exceed your
 authorized scope. If there is meaningful risk, stop, say what the concern is in
 one line, and take the safest useful alternative instead.
+
+DO NOT SPAM or RE-SEND
