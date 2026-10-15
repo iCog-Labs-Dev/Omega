@@ -272,3 +272,63 @@ def test_relayed_newline_token_still_cannot_start_a_command(helper, reply):
 
 def test_newline_token_before_plain_text_is_not_a_command_break(helper):
     assert helper.balance_parentheses('send "hi"_newline_and more') == _send('"hi"\nand more')
+
+
+# --- internal context lines must never reach the user (OMEGA-498) ----------
+# The model reads its context as labelled sections (PROMPT:, HISTORY:, ...) and
+# sometimes copies that form into its reply as a note under a send. A line that
+# is not a command used to be glued onto the send above it, so the note went out
+# to the chat. These replies are the ones QA saw.
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "send Here is your cat!\nPROMPT: user @kis_a requested a cat drawing; called generate-image",
+        "send Your number is 256.\nPROMPT: User 77 from MikhailMorozov asked about their number; answered 256 from history",
+        "send Here is your answer.\nPROMPT: internal note, user asked for a formatting test",
+        "send Done.\nHISTORY: user asked for a summary",
+        "send Done.\n  LAST_SKILL_USE_RESULTS: (RESULTS: ())",
+    ],
+)
+def test_context_label_line_is_not_sent(helper, reply):
+    message, note = reply.split("\n")
+    assert helper.balance_parentheses(reply) == (
+        f'((send {json.dumps(message[len("send "):])}) '
+        f'(Error UNKNOWN_SKILL_CALL {json.dumps(note.strip())}))'
+    )
+
+
+def test_context_label_line_keeps_following_commands(helper):
+    reply = "send hi\nPROMPT: note\npin task done"
+    out = helper.balance_parentheses(reply)
+    assert out == '((send "hi") (Error UNKNOWN_SKILL_CALL "PROMPT: note") (pin "task done"))'
+
+
+def test_send_whose_text_is_a_context_label_is_refused(helper):
+    reply = 'send PROMPT: A: [["timestamp","2026-10-14 06:43:19"],["action","idle"]]'
+    out = helper.balance_parentheses(reply)
+    assert "(send" not in out
+    assert out.startswith("((Error CONTEXT_LABEL_IN_ARGUMENT ")
+
+
+def test_label_words_inside_ordinary_text_still_send(helper):
+    # Only a label at the start of a line counts, in upper case with its colon.
+    reply = "send Here is the plan.\nThe prompt: be brief.\nTime: 5pm"
+    assert helper.balance_parentheses(reply) == _send(
+        "Here is the plan.\nThe prompt: be brief.\nTime: 5pm"
+    )
+
+
+def test_context_label_line_after_a_quoted_send_is_not_sent(helper):
+    out = helper.balance_parentheses('send "hi"\nPROMPT: note')
+    assert out == '((send "hi") (Error UNKNOWN_SKILL_CALL "PROMPT: note"))'
+
+
+def test_quoted_argument_spanning_lines_still_continues(helper):
+    out = helper.balance_parentheses('send "line one\nline two"')
+    assert out.count("(send ") == 1
+    assert "line two" in out and "Error" not in out
+
+
+def test_unquoted_multi_line_send_still_continues(helper):
+    assert helper.balance_parentheses("send line one\nline two") == _send("line one\nline two")
