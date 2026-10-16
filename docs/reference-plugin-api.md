@@ -32,6 +32,37 @@ module. The plugin record has the following fields:
     or MeTTa module. In such case it provides the path to the directory where
     `name` module is located. Can include `{REPO}` placeholder to designate the
     root folder of the Omega source repository.
+  - `enabled` (optional) - `false` removes the plugin from the list. Useful in
+    a drop-in file, see below.
+
+### Adding plugins without editing plugins.yaml
+
+After `config/plugins.yaml`, the agent reads every `*.yaml` file in
+`config/plugins.d/`, in file name order. Each file has the same format as
+`plugins.yaml`. An entry with a new name is added to the end of the list. An
+entry whose name is already listed replaces that entry and keeps its place,
+and `enabled: false` turns it off. This lets a deployment add, swap or remove
+plugins by adding one file, while `plugins.yaml` stays as shipped.
+
+For example, to replace the built-in Telegram channel with a MeTTa plugin
+copied into `plugins/telegram`:
+
+```yaml
+# config/plugins.d/telegram.yaml
+- name: telegram
+  loader: metta
+  location: "{REPO}/plugins/telegram"
+```
+
+To turn the IRC channel off:
+
+```yaml
+# config/plugins.d/no-irc.yaml
+- name: irc
+  enabled: false
+```
+
+A name may appear only once in each file.
 
 ### Python module identity and names
 
@@ -77,10 +108,11 @@ Python.
 
 Another issue is that it is difficult to run plugins inside Docker container.
 There are two ways of doing this:
-  1. Build fresh image including plugin's code and modified
-     `config/plugins.yaml` configuration file.
-  2. Mount the plugin's code and modified `config/plugins.yaml` configuration
-     file into the container using custom `docker run` command.
+  1. Build fresh image including plugin's code and a drop-in file in
+     `config/plugins.d/`.
+  2. Mount the plugin's code and a drop-in file into the container using
+     custom `docker run` command, e.g.
+     `-v ./telegram.yaml:/PeTTa/repos/Omega/config/plugins.d/telegram.yaml:ro`.
 
 This document doesn't describe using Docker in details it is a subject to the
 future Omega improvements.

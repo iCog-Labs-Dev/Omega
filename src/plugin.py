@@ -23,39 +23,73 @@ def _error(func, text):
     raise RuntimeError(error)
 
 def listPlugins():
-    """Loads the list of the plugins from ./config/plugins.yaml file and then
-    returns list of triples (loader, name, location). YAML file
-    contains the list of plugins each specified by three fields:
-    - name - required, must be unique
+    """Loads the list of the plugins from ./config/plugins.yaml file, applies
+    the drop-in files from ./config/plugins.d/ on top of it and then returns
+    list of triples (loader, name, location). YAML file contains the list of
+    plugins each specified by these fields:
+    - name - required, must be unique within one file
     - loader - required, must be either "python" or "metta"
-    - location - optional, path to the plugin module used by Python loader"""
-    global _plugins, _REPO, _LOADERS
+    - location - optional, path to the plugin module used by Python loader
+    - enabled - optional, false drops the plugin from the list
 
-    config_path = _REPO.joinpath("./config/plugins.yaml")
-    with open(config_path, "r") as f:
-        yaml_content = yaml.safe_load(f)
+    Drop-in files are read in file name order. An entry whose name is already
+    listed replaces that entry in place, so a deployment can swap a plugin or
+    turn it off without editing plugins.yaml:
 
-    plugins = []
+        # config/plugins.d/telegram.yaml
+        - name: telegram
+          loader: metta
+          location: "{REPO}/plugins/telegram"
+    """
+    global _REPO
+    return _list_plugins(_REPO.joinpath("config"))
+
+def _list_plugins(config_dir):
+    """Merge plugins.yaml and plugins.d/*.yaml from config_dir into the list
+    of (loader, name, location) triples."""
+    manifests = [config_dir.joinpath("plugins.yaml")]
+    manifests += sorted(config_dir.joinpath("plugins.d").glob("*.yaml"))
+
+    # A dict keeps the first position of a key, so a replaced entry loads
+    # where the original did.
+    entries = {}
+    for path in manifests:
+        for name, entry in _read_manifest(path):
+            entries[name] = entry
+
+    return [_plugin_triple(entry) for entry in entries.values()
+            if entry.get("enabled", True) is not False]
+
+def _read_manifest(path):
+    """Return the (name, entry) pairs of one manifest file in file order."""
+    with open(path, "r") as f:
+        yaml_content = yaml.safe_load(f) or []
+
+    names = set()
     for i, p in enumerate(yaml_content):
         name = p.get("name")
         if name is None:
-            _error("listPlugins", f"name field is empty, file: {config_path}, index: {i}")
-        if name in _plugins:
-            _error("listPlugins", f"name '{name}' is not unique")
+            _error("listPlugins", f"name field is empty, file: {path}, index: {i}")
+        if name in names:
+            _error("listPlugins", f"name '{name}' is not unique, file: {path}")
+        names.add(name)
+        yield name, p
 
-        loader = p.get("loader", "metta")
-        if not loader in _LOADERS:
-            _error("listPlugins", f"incorrect loader type '{loader}', only {_LOADERS} are supported")
+def _plugin_triple(p):
+    """Validate one manifest entry and turn it into (loader, name, location)."""
+    global _REPO, _LOADERS
 
-        location = p.get("location")
-        if location is not None:
-            location = str(pathlib.Path(location.format(REPO=_REPO)).resolve())
-        else:
-            location = ""
+    loader = p.get("loader", "metta")
+    if not loader in _LOADERS:
+        _error("listPlugins", f"incorrect loader type '{loader}', only {_LOADERS} are supported")
 
-        plugins.append([loader, name, location])
+    location = p.get("location")
+    if location is not None:
+        location = str(pathlib.Path(location.format(REPO=_REPO)).resolve())
+    else:
+        location = ""
 
-    return plugins
+    return [loader, p["name"], location]
 
 class PythonPlugin:
     """Class to wrap the reference to the Python module and keep it inside
