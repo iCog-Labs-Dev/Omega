@@ -80,12 +80,12 @@ they belong to the proxy, not here.
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `TG_BOT_TOKEN` | yes | Telegram bot token |
-| `ANTHROPIC_API_KEY` | for vision | Used by the default vision provider |
-| `OPENROUTER_API_KEY` | for image gen + Whisper | Also the vision key if `VISION_PROVIDER=OpenRouter` |
+| `ANTHROPIC_API_KEY` | no | Vision fallback, used when OpenRouter cannot describe an image |
+| `OPENROUTER_API_KEY` | for vision, image gen + Whisper | The first vision provider tried |
 | `OPENAI_API_KEY` | for safety checks | Moderation API; without it the ethics passes allow content through |
 | `EDGE_TTS_VOICE` | no | Preferred/fallback speech voice; also accepts `OMEGA_EDGE_TTS_VOICE`. Defaults to `en-US-AriaNeural`. Other detected languages automatically use a matching voice. |
-| `VISION_PROVIDER` | no | `Anthropic` (default) or `OpenRouter` |
-| `VISION_MODEL` | no | Overrides the provider's default vision model |
+| `VISION_PROVIDER` | no | Which vision provider to try first: `OpenRouter` (default) or `Anthropic` |
+| `VISION_MODEL` | no | Overrides the model of the provider tried first |
 | `IMAGE_PROVIDER` | no | `OpenRouter` (default, FLUX) or `OpenAI` |
 | `IMAGE_MODEL` | no | Overrides the image provider's default model |
 | `TG_PROFILE_PATH` | no | Path to the channel profile, defaults to the shipped one |
@@ -93,9 +93,15 @@ they belong to the proxy, not here.
 | `TG_PROMPT_PATH` | no | Path to the prompt section, defaults to the shipped one |
 | `TG_PDF_FONT_DIR` | no | Folder PDF fonts are installed to and read from, defaults to `memory/fonts`; see [PDF fonts](#pdf-fonts) |
 
-Vision defaults to Anthropic because an OpenRouter account whose data policy
-excludes vision providers gets a 404 on every vision model while text and image
-generation keep working.
+Vision tries OpenRouter first and Anthropic second, and uses whichever answers.
+An OpenRouter account whose data policy excludes vision providers gets a 404 on
+every vision model while text and image generation keep working, and then the
+image goes to Anthropic. When both fail, the agent is told what each provider
+answered, such as `OpenRouter: HTTP 404: ...; Anthropic: HTTP 401: ...`.
+
+Inside the container the entrypoint clears the environment, so set
+`VISION_PROVIDER` and `VISION_MODEL` as arguments rather than environment
+variables: `./run-plugin --arg VISION_PROVIDER=Anthropic`.
 
 ## PDF fonts
 

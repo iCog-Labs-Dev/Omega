@@ -61,9 +61,10 @@ def test_behind_the_proxy_no_key_is_needed():
 
 
 def test_vision_client_targets_the_proxy_route():
-    """describe-image must work with no ANTHROPIC_API_KEY in the environment."""
+    """describe-image must work with no vision keys in the environment."""
     restore = _with_gateway("http://localhost:8080")
     saved = os.environ.pop("ANTHROPIC_API_KEY", None)
+    saved_openrouter = os.environ.pop("OPENROUTER_API_KEY", None)
     created = {}
 
     fake_openai = types.ModuleType("openai")
@@ -77,7 +78,10 @@ def test_vision_client_targets_the_proxy_route():
     real_openai = sys.modules.get("openai")
     sys.modules["openai"] = fake_openai
     try:
-        vision._make_client()
+        vision._make_client(vision.PROVIDERS_BY_NAME["OpenRouter"])
+        assert created["base_url"] == "http://localhost:8080/openrouter/", created
+        assert created["api_key"] == gateway.PROXY_KEY, created
+        vision._make_client(vision.PROVIDERS_BY_NAME["Anthropic"])
         assert created["base_url"] == "http://localhost:8080/anthropic/", created
         assert created["api_key"] == gateway.PROXY_KEY, created
     finally:
@@ -87,6 +91,8 @@ def test_vision_client_targets_the_proxy_route():
             del sys.modules["openai"]
         if saved is not None:
             os.environ["ANTHROPIC_API_KEY"] = saved
+        if saved_openrouter is not None:
+            os.environ["OPENROUTER_API_KEY"] = saved_openrouter
         restore()
 
 
