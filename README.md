@@ -75,11 +75,13 @@ the environment the agent sees, and switches to uid 65534 (`nobody`) before the
 agent starts. The plugin reaches Telegram, OpenRouter, Anthropic and OpenAI
 through that proxy, so the agent, and its `shell` skill, never see a key.
 
-Core is built from `CORE_REMOTE` at `CORE_REF`, which default to the `telegram`
-branch of `iCog-Labs-Dev/Omega`. Against a core that lacks something the plugin
-needs, `run-plugin` adds it to its copy: the manifest entry, the plugin's
-requirements install, and removing core's own `channels/telegram.py`, which
-claims the same channel id.
+Core is built from `CORE_REMOTE` at `CORE_REF`, which default to `main` of
+`singnet/Omega`. `run-plugin` copies the plugin to `plugins/telegram` and adds
+`config/plugins.d/telegram.yaml`, which replaces core's own `telegram` entry, so
+core's built-in channel and its prompt are never loaded. No core file is
+changed. It refuses a core that does not read `config/plugins.d` or does not
+install `plugins/*/requirements.txt`, and warns when core lacks the channel
+prompt hook or the tool veto that `/togglesearch` needs.
 
 ## Configuration
 

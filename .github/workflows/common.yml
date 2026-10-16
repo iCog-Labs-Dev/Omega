@@ -80,8 +80,8 @@ on:
 env:
   # Changing core is a one-line change here, or a repository variable, and
   # needs no edit to the deploy workflows.
-  DEFAULT_CORE_REMOTE: 'https://github.com/iCog-Labs-Dev/Omega.git'
-  DEFAULT_CORE_REF: 'telegram'
+  DEFAULT_CORE_REMOTE: 'https://github.com/singnet/Omega.git'
+  DEFAULT_CORE_REF: 'main'
   DEFAULT_IMAGE_NAME: 'omega-telegram-snet'
 
 jobs:
@@ -233,9 +233,11 @@ jobs:
           loader, _, location = entries[0]
           print(f"manifest: {name} loader={loader} location={location}")
 
+          # The drop-in has to win over core's own 'telegram' entry, or core
+          # loads its built-in channel under the same id.
           expected = os.path.join(root, "plugins", name)
-          if location != expected:
-              sys.exit(f"'{name}' resolves to {location}, not {expected}")
+          if loader != "metta" or location != expected:
+              sys.exit(f"'{name}' resolves to {loader} at {location}, not metta at {expected}")
           entry_point = os.path.join(location, f"{name}.metta")
           if not os.path.isfile(entry_point):
               sys.exit(f"{entry_point} is missing, so the metta loader has nothing to import")
