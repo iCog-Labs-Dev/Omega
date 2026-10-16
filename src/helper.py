@@ -232,7 +232,47 @@ def _split_separated_commands(line):
     return pieces
 
 
+# Section labels from the context the loop builds for the model (getContext in
+# src/loop.metta and the history entries in src/memory.metta). The model reads
+# them every turn and sometimes copies one into its reply as a note to itself.
+CONTEXT_LABELS = (
+    "PROMPT:",
+    "SKILLS:",
+    "OUTPUT_FORMAT:",
+    "SAVE_PERMANENT_FILES_DIR:",
+    "LAST_SKILL_USE_RESULTS:",
+    "HISTORY:",
+    "HUMAN_MESSAGE:",
+    "HUMAN-MSG:",
+    "ERROR_FEEDBACK:",
+)
+
+
+def _starts_with_context_label(text):
+    """True if text opens with one of the context section labels."""
+    s = text.lstrip()
+    for quote in ('"', QUOTE_TOKEN):
+        if s.startswith(quote):
+            s = s[len(quote):]
+            break
+    return s.startswith(CONTEXT_LABELS)
+
+
 def split_command_blocks(s):
+    """Group the lines of the model's reply into one block per command.
+
+    A line that does not start a command belongs to the command above it, which
+    is how a send or a file carries several lines of text. A line that opens
+    with a context label such as PROMPT: or HISTORY: is the exception. That is
+    the model writing a note about its own context, so it starts a block of its
+    own, and balance_parentheses reports it back to the model instead of
+    sending it to the user as the end of a message:
+
+        send Here is your cat!
+        PROMPT: user asked for a cat; called generate-image
+
+    becomes (send "Here is your cat!") (Error UNKNOWN_SKILL_CALL "PROMPT: ...").
+    """
     blocks = []
     cur = []
     # Split on "\n" only: str.splitlines() also breaks on U+2028, U+0085 and
@@ -243,7 +283,7 @@ def split_command_blocks(s):
             if cur:
                 cur.append(raw)
             continue
-        if starts_command_line(raw) and cur:
+        if (starts_command_line(raw) or _starts_with_context_label(raw)) and cur:
             blocks.append("\n".join(cur).strip())
             cur = [raw]
         else:
@@ -300,6 +340,11 @@ def balance_parentheses(s):
             # Do not let model commentary become a MeTTa expression.  The
             # loop turns this into ALERT_FAILED feedback for the next turn.
             sexprs.append(f"(Error UNKNOWN_SKILL_CALL {quote_arg(line)})")
+            continue
+        if _starts_with_context_label(rest):
+            # A command whose text is a copied context section, such as
+            # "send PROMPT: ...", would show the model's own context to the user.
+            sexprs.append(f"(Error CONTEXT_LABEL_IN_ARGUMENT {quote_arg(line)})")
             continue
         if cmd == "speak" and not rest:
             # Missing text must reach the skill's validation, not an
