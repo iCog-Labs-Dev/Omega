@@ -548,6 +548,9 @@ class TelegramChannel(channels.CommChannel):
     def send(self, message: str) -> None:
         send_message(message)
 
+    def prompt_file(self) -> str:
+        return "tg_prompt.txt"
+
 
 def loadOmegaPlugin():
     channels.registerCommChannel("telegram", TelegramChannel())

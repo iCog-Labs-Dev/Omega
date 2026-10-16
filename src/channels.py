@@ -66,6 +66,15 @@ class CommChannel:
         """Send message via the communication channel"""
         raise NotImplementedError()
 
+    def prompt_file(self) -> str:
+        """Name of a file in the memory directory whose text is added to the
+        prompt while this channel is active, or "" for none.
+
+        The prompt belongs to the channel rather than to its id, so a plugin
+        that registers a replacement under the same id brings its own prompt
+        and does not inherit the built-in one."""
+        return ""
+
 def registerCommChannel(id: str, channel: CommChannel) -> None:
     """
     Register communication channel in the registry.
@@ -105,3 +114,11 @@ def commChannelSend(message):
     """Send message via selected communication channel"""
     global _commchannel
     _commchannel.send(message)
+
+def commChannelPromptFile():
+    """Prompt file name of the selected communication channel, "" if it has
+    none or no channel is started."""
+    global _commchannel
+    if _commchannel is None:
+        return ""
+    return str(_commchannel.prompt_file() or "")

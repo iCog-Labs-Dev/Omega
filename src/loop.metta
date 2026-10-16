@@ -34,14 +34,18 @@
                          " HISTORY: " (getHistory) 
                          " TIME: " (get_time_as_string)))))
 
-(= (addTelegramPromptExtension)
-   (if (== (commchannel) telegram)
-       (let $path (joinPath ((memoryDirectory) "tg_prompt.txt"))
-            (if (exists-file $path)
-                (add-prompt-extension tg-prompt (read-file $path))
-                (progn (log WARN "loop" (TELEGRAM_PROMPT_NOT_FOUND: $path))
-                       ())))
-       ()))
+;Add the prompt file of the started channel, if it names one. The channel
+;decides, not its id, so a plugin replacing a built-in channel does not get
+;the built-in channel's prompt.
+(= (addChannelPromptExtension)
+   (let $file (py-call (channels.commChannelPromptFile))
+        (if (== $file "")
+            ()
+            (let $path (joinPath ((memoryDirectory) $file))
+                 (if (exists-file $path)
+                     (add-prompt-extension channel-prompt (read-file $path))
+                     (progn (log WARN "loop" (CHANNEL_PROMPT_NOT_FOUND: $path))
+                            ()))))))
 
 (= (getPromptExtensions)
    (join (newline) (collapse (prompt-extension $_))))
@@ -83,7 +87,7 @@
                                (initKnowledge)
                                (initPlugins)
                                (initChannels)
-                               (addTelegramPromptExtension)
+                               (addChannelPromptExtension)
                                (commChannelSend (version))
                                (llmProviderStart (provider)))
                         (change-state! &loops (- (get-state &loops) 1)))

@@ -3,10 +3,9 @@
 !(import! &self ./src/utils)
 !(import! &self ./src/skills)
 
-; Define the selected channel and memory path used by the Telegram prompt
-; registration test.
-(= (commchannel) telegram)
+; Memory path and test channels used by the channel prompt registration test.
 (= (memoryDirectory) (joinPath ((projectRootDirectory) "memory")))
+!(import! &self ./res/prompt_channel.py)
 
 ; used by prompt-extension
 !(import! &self ./src/loop)
@@ -38,12 +37,20 @@
        False)
 
 !(test (progn
-         (addTelegramPromptExtension)
+         (py-call (prompt_channel.start "with-prompt" "tg_prompt.txt"))
+         (addChannelPromptExtension)
          (contains-text (getPromptExtensions) "TELEGRAM ROUTING:"))
        True)
 
 !(test (progn
-         (remove-prompt-extension tg-prompt)
+         (remove-prompt-extension channel-prompt)
+         (contains-text (getPromptExtensions) "TELEGRAM ROUTING:"))
+       False)
+
+; A channel without a prompt file adds nothing, even under the telegram id.
+!(test (progn
+         (py-call (prompt_channel.start "telegram" ""))
+         (addChannelPromptExtension)
          (contains-text (getPromptExtensions) "TELEGRAM ROUTING:"))
        False)
 
