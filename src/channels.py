@@ -62,6 +62,12 @@ class CommChannel:
         """Receive message from the communication channel"""
         raise NotImplementedError()
 
+    def is_tool_disabled(self, tool_name: str) -> bool:
+        """Return whether this channel currently refuses a core tool, such as
+        "websearch". A channel can use it for an admin switch; core asks
+        before running the tool. The default refuses nothing."""
+        return False
+
     def send(self, message: str) -> None:
         """Send message via the communication channel"""
         raise NotImplementedError()
@@ -100,6 +106,11 @@ def commChannelReceive():
     return " | ".join(
         message for message in messages if not handle_control_message(message)
     )
+
+def commChannelIsToolDisabled(tool_name):
+    """Whether the selected communication channel refuses a core tool."""
+    global _commchannel
+    return _commchannel is not None and bool(_commchannel.is_tool_disabled(str(tool_name)))
 
 def commChannelSend(message):
     """Send message via selected communication channel"""

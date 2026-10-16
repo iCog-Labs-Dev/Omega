@@ -69,3 +69,10 @@
        0)
 
 !(test (read-file "does-not-exist") (empty))
+
+; A channel that refuses websearch stops the skill before it searches.
+!(import! &self ./res/tool_veto_channel.py)
+!(test (progn
+         (py-call (tool_veto_channel.start "no-search" "websearch"))
+         (websearch "anything"))
+       (Error websearch "Refused: Search is disabled by admin."))

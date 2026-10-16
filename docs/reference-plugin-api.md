@@ -129,6 +129,18 @@ def loadOmegaPlugin():
 
 Here `"Example"` is an identifier of the communication channel.
 
+A channel can also refuse a core tool while it is active by overriding
+`is_tool_disabled`. Core asks before running the tool and returns an error to
+the agent instead. Only `websearch` asks at the moment. The default refuses
+nothing.
+
+```python
+class ExampleCommChannel(channels.CommChannel):
+
+    def is_tool_disabled(self, tool_name: str) -> bool:
+        return tool_name == "websearch" and self.search_switched_off
+```
+
 ### Using communication channel
 
 The communication channel identifier should be used as the value for the
