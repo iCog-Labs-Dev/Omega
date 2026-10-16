@@ -164,6 +164,11 @@ missing dependency; only the image can.
    Add `.2`, `.3` and so on for another rehearsal of the same notes.
 5. Repeat steps 3 and 4 with `prod-YYYY-MM-DD`. Production deploys.
 
+The announcement is the plugin's own, in `telegram/release_notes.py`. The deploy
+passes `releaseTag` and `releaseRepo`; on the first loop iteration the plugin
+fetches that release, has the model summarize it for chat users, and sends it
+once. `memory/announced_release` records the tag so a restart stays quiet.
+
 Production refuses to build unless the `CORE_REF` repository variable is a full
 40-character commit, so a branch moving mid-release cannot change what ships:
 

@@ -39,6 +39,10 @@
                 "Speak a reply aloud as Telegram voice messages. Long text is split and sent in order. Use when the user asks for speech. The argument is the exact text to speak"
                 (voice_text))
      (addTelegramPromptSection)
+     ; The heartbeat comes once the channel and the LLM provider are started,
+     ; which the announcement needs. release_notes.announce works only once.
+     (add-heartbeat-listener telegram-release-notes
+                             (|-> ($iteration) (py-call (release_notes.announce))))
      ()))
 
 ;; The channel talks to the public, so it carries scope limits the default

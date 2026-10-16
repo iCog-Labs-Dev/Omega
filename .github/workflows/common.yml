@@ -244,7 +244,8 @@ jobs:
 
           sys.path.insert(0, location)
           for module in ("telegram_channel", "media_handler", "vision", "gateway", "config_helper",
-                         "markdown_render", "text_splitter", "speech_text", "speech_language"):
+                         "markdown_render", "text_splitter", "speech_text", "speech_language",
+                         "release_notes"):
               __import__(module)
               print(f"imported: {module}")
           print("plugin loads")
