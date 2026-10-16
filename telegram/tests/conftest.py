@@ -83,7 +83,13 @@ def prepare(tmp_path):
     """Assemble the build context; hand back what run-plugin said and wrote.
 
     With expect_ok=False the run may fail, and the exit code comes back instead
-    of the context."""
+    of the context.
+
+    Skips where run-plugin is not beside the plugin, as inside a built image,
+    which copies only the plugin folder."""
+    if not RUN_PLUGIN.is_file():
+        pytest.skip("run-plugin is not beside the plugin here")
+
     def run(core: Path, expect_ok: bool = True) -> tuple:
         env_file = tmp_path / "env"
         env_file.write_text("TG_BOT_TOKEN=placeholder\n")
