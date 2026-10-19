@@ -49,8 +49,8 @@ Here `icog` is `git@github.com:iCog-Labs-Dev/Omega.git` and `cbots` is
 
 1. Put the keys in `.env`:
    - `TG_BOT_TOKEN`, from @BotFather
-   - `ANTHROPIC_API_KEY`, for reading images
-   - `OPENROUTER_API_KEY`, for chat, image generation and voice transcription
+   - `OPENROUTER_API_KEY`, for chat, reading images, image generation and voice transcription
+   - `ANTHROPIC_API_KEY`, optional, for reading images when OpenRouter cannot
    - `OPENAI_API_KEY`, for the Moderation API used by the safety checks
 2. Edit `telegram/telegram_profile.yaml` and fill in both of these. They ship
    empty, and the bot is not safe to run in a real chat until they are set:
@@ -93,17 +93,20 @@ Optional settings:
 
 | Variable | Purpose |
 | --- | --- |
-| `VISION_PROVIDER` | `Anthropic` (default) or `OpenRouter` |
-| `VISION_MODEL` | Overrides the vision provider's default model |
+| `VISION_PROVIDER` | Which vision provider to try first: `OpenRouter` (default) or `Anthropic` |
+| `VISION_MODEL` | Overrides the model of the provider tried first |
 | `IMAGE_PROVIDER` | `OpenRouter` (default, FLUX) or `OpenAI` |
 | `IMAGE_MODEL` | Overrides the image provider's default model |
 | `EDGE_TTS_VOICE` | Fixes the speech voice instead of choosing one by language |
 | `TG_PDF_FONT_DIR` | Where installed PDF fonts go; defaults to `fonts/` in core's memory folder, which survives restarts |
 | `TG_PROFILE_PATH`, `TG_POLICY_PATH`, `TG_PROMPT_PATH` | Use a profile, policy or prompt file from outside the plugin |
 
-Vision defaults to Anthropic. An OpenRouter account whose data policy excludes
-vision providers gets a 404 on every vision model, while text chat and image
-generation keep working on the same key.
+Vision tries OpenRouter first and falls back to Anthropic. An OpenRouter
+account whose data policy excludes vision providers gets a 404 on every vision
+model, while text chat and image generation keep working on the same key; the
+image then goes to Anthropic. Pass these settings with `--arg`, for example
+`./run-plugin --arg VISION_PROVIDER=Anthropic`, because the container does not
+pass environment variables through to the bot.
 
 ## Tests
 
