@@ -8,7 +8,7 @@ and a trailing `.2`, `.3` and so on takes a fresh tag against the same notes.
 These notes cover what people in the chat, and people running the bot, will
 notice. Core changes that ship in the same image are recorded separately.
 
-## prod-2026-10-13
+## prod-2026-10-20
 
 ### Added
 
@@ -25,6 +25,8 @@ notice. Core changes that ship in the same image are recorded separately.
 ### Fixed
 
 * Text from a message, file or QR code that contained the words core uses to stand for quotes and line breaks could, when repeated by the bot, be read as a command. These are now treated as plain text.
+* The bot no longer ends a message with its own working notes, such as a line starting `PROMPT:` that recaps what it was asked to do.
+* Photos are read even when one image-reading service is down or rejects the bot's key. The bot tries OpenRouter first and Anthropic second, and if both fail it says which one failed and why instead of a bare authentication error.
 
 ## prod-2026-09-17
 
