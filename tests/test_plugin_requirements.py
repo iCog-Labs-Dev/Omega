@@ -35,8 +35,9 @@ def _fake_repo(root, plugins):
     """A tree shaped like core, holding the script and the requirements it walks.
 
     `plugins` maps a plugin directory name to the text of its requirements.txt,
-    or to None for a plugin that ships none. Omit plugins entirely by passing
-    None instead of a mapping, which leaves out the plugins directory.
+    to bytes for a file that is not UTF-8, or to None for a plugin that ships
+    none. Omit plugins entirely by passing None instead of a mapping, which
+    leaves out the plugins directory.
     """
     (root / "scripts").mkdir(parents=True)
     shutil.copy(SCRIPT, root / "scripts" / SCRIPT.name)
@@ -46,10 +47,11 @@ def _fake_repo(root, plugins):
         (root / "plugins").mkdir()
         for name, requirements in plugins.items():
             (root / "plugins" / name).mkdir()
-            if requirements is not None:
-                (root / "plugins" / name / "requirements.txt").write_text(
-                    requirements, encoding="utf-8"
-                )
+            path = root / "plugins" / name / "requirements.txt"
+            if isinstance(requirements, bytes):
+                path.write_bytes(requirements)
+            elif requirements is not None:
+                path.write_text(requirements, encoding="utf-8")
     return root
 
 
@@ -219,6 +221,58 @@ def test_a_comment_is_not_an_option(tmp_path):
     """Refusing options must not refuse an ordinary file that explains itself."""
     ordinary = "# what the plugin imports\n\nrequests>=2.0\n"
     _, result, calls = _install(tmp_path, {"polite": ordinary})
+
+    assert result.returncode == 0, result.stderr
+    assert _installs(calls), "an ordinary plugin file was not installed"
+
+
+def test_an_option_after_a_requirement_is_refused(tmp_path):
+    """pip reads options anywhere a word on the line starts with "-", not only
+    at its start. A --hash there turns on hash checking for every package, and
+    core's own pins carry no hashes, so the whole install fails."""
+    carried = "requests>=2.0 --hash=sha256:00ff\n"
+    _, result, calls = _install(tmp_path, {"hashed": carried})
+
+    assert result.returncode != 0, "the install went ahead"
+    assert not _installs(calls), "pip installed something anyway"
+    assert "1:requests>=2.0 --hash=sha256:00ff" in result.stderr
+
+
+def test_a_byte_order_mark_does_not_hide_an_option(tmp_path):
+    """Some Windows editors start a file with a UTF-8 byte order mark. pip drops
+    it and reads the option behind it, so the check has to look past it too.
+    Missing it is silent: a --find-links folder can swap a package core uses
+    and both the install and pip check pass."""
+    hidden = "﻿--find-links /tmp/elsewhere\nrequests\n"
+    _, result, calls = _install(tmp_path, {"marked": hidden})
+
+    assert result.returncode != 0, "the install went ahead"
+    assert not _installs(calls), "pip installed something anyway"
+
+
+def test_a_file_grep_cannot_read_is_refused(tmp_path):
+    """pip decodes a UTF-16 file by its byte order mark, but to grep it is
+    bytes with a zero after every letter, so no option in it would be found."""
+    utf16 = "--index-url https://elsewhere.example/simple\n".encode("utf-16")
+    _, result, calls = _install(tmp_path, {"wide": utf16})
+
+    assert result.returncode != 0, "the install went ahead"
+    assert not _installs(calls), "pip installed something anyway"
+    assert "UTF-8" in result.stderr
+
+
+def test_ordinary_requirements_are_not_mistaken_for_options(tmp_path):
+    """A hyphen inside a name, an extra, a marker or a URL is not an option,
+    and neither is one inside a comment, which pip ignores."""
+    ordinary = (
+        "﻿telegramify-markdown>=0.5\n"
+        "uvicorn[standard]>=0.30\n"
+        'tomli>=2.0; python_version < "3.11"\n'
+        "pkg @ https://example.com/pkg-1.0-py3-none-any.whl\n"
+        "requests>=2.0  # see --help for the flags\n"
+        "# --index-url is not allowed here\n"
+    )
+    _, result, calls = _install(tmp_path, {"plain": ordinary})
 
     assert result.returncode == 0, result.stderr
     assert _installs(calls), "an ordinary plugin file was not installed"
