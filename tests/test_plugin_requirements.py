@@ -367,6 +367,20 @@ def test_the_readme_installs_the_torch_version_core_pins():
                 f"README installs torch without core's pin: {command}"
 
 
+def test_the_readme_upgrades_pip_before_installing_anything():
+    """A new venv on Python 3.11 comes with pip 23.0.1. From the CPU wheel index
+    that pip picks a source release of a torch dependency, needs flit_core to
+    build it, and the index has none, so the CPU step fails. The next step then
+    installs torch from PyPI, which is the CUDA build with its nvidia packages."""
+    commands = [
+        command for command in _unwrapped(README.read_text(encoding="utf-8"))
+        if "pip install" in command or SCRIPT.name in command
+    ]
+    assert commands, "the README installs nothing"
+    assert re.search(r"pip install (-U|--upgrade) pip\b", commands[0]), \
+        f"the README's first install is not a pip upgrade: {commands[0]}"
+
+
 def test_the_plugin_api_documents_declaring_dependencies():
     """The contract a plugin author reads. Without it the file is a convention
     that happens to work, which is how the gap went unnoticed."""

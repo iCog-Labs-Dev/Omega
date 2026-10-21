@@ -49,10 +49,12 @@ git clone https://github.com/patham9/petta_lib_chromadb.git repos/petta_lib_chro
 cp repos/Omega/run.metta ./
 ```
 
-Setup Python virtual environment (or use your own):
+Setup Python virtual environment (or use your own), and upgrade its pip. An older
+pip cannot install the CPU build of torch below and falls back to the GPU one:
 ```
 python3 -m venv ./.venv
 source ./.venv/bin/activate
+python3 -m pip install --upgrade pip
 ```
 
 If you have CPU only machine or don't want calculate embeddings on GPU:
