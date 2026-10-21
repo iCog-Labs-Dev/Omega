@@ -53,13 +53,31 @@ a requirements file — `--index-url` and `--extra-index-url` above all — as a
 instruction for the whole invocation rather than for the file carrying it, which
 would let one plugin choose where Omega's own packages are fetched from. Sharing
 one invocation is what makes Omega's pins win, so there is nowhere to scope such
-a line to, and a plugin that carries one stops the install with the line quoted.
+an option to. A plugin file that carries one, at the start of a line or after a
+requirement (`foo==1.0 --hash=...`), stops the install with the line quoted. The
+file must be UTF-8.
 
-Two limits are worth knowing. A plugin that pins a package Omega depends on
-*indirectly* can change it without any error, because nothing is violated: keep
-the list short for this reason. And a plugin mounted into an already built image
-gets no installation at all, since the packages are baked in at build time — that
-route needs an image built with the plugin present.
+Some limits are worth knowing:
+  - Only the exact versions in Omega's own `requirements.txt` are protected. A
+    package Omega installs without pinning, because something it pins pulls it
+    in, can be moved by a plugin with no error, since nothing is violated: a
+    plugin asking for `tqdm==4.67.1` replaces the newer one Omega would get.
+    List only what the plugin imports, with ranges, to keep this rare.
+  - Only `plugins/<name>/requirements.txt` is read. Every directory under
+    `plugins/` is installed whether or not `config/plugins.yaml` enables it, and
+    a plugin loaded from anywhere else gets nothing installed.
+  - A relative path in the file, such as a wheel shipped inside the plugin, is
+    resolved from the directory the install runs in, not the plugin's, and the
+    image build copies only `requirements.txt` from each plugin. Install such a
+    package from an index or a URL instead.
+  - After installing, `pip check` checks the whole environment. In a source
+    install into an environment that already holds a broken package, the
+    install succeeds and the script then fails naming that package.
+  - A plugin mounted into an already built image gets no installation at all,
+    since the packages are baked in at build time. That route needs an image
+    built with the plugin present.
+  - A plugin whose packages are missing does not fail on its own: the import
+    error stops the agent at startup with `ModuleNotFoundError`.
 
 As an example of a MeTTa plugin one can look at the code of the [workflow
 plugin](/plugins/workflow/workflow.metta). As an example of a Python plugin
