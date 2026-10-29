@@ -11,6 +11,10 @@ The profile used to read like a policy that nothing enforced: it forbade code
 execution while production ran 13,906 shell commands. So the channel refuses to
 start on a profile holding a key or a constraint this code does not act on, and
 the file cannot drift from the code again without someone noticing.
+
+internal_learning.durable_memory.categories_forbidden lists what remember may
+not keep; the channel screens every remember against it (see skill_veto.py), and
+a profile granting remember without the list is refused.
 """
 
 KNOWN_CONSTRAINTS = frozenset({"same_chat_only"})
@@ -46,6 +50,7 @@ SCHEMA = {
         "admin_alert_threshold": None,
     },
     "ethics_pass": {"blocked_categories": None},
+    "internal_learning": {"durable_memory": {"categories_forbidden": None}},
     "callable_capabilities": None,  # checked by _capability_problems
 }
 
@@ -88,13 +93,27 @@ def _capability_problems(capabilities):
     return problems
 
 
+def _memory_problems(profile):
+    if "remember" not in granted_skills(profile):
+        return []
+    learning = profile.get("internal_learning")
+    durable = learning.get("durable_memory") if isinstance(learning, dict) else None
+    forbidden = durable.get("categories_forbidden") if isinstance(durable, dict) else None
+    if not (isinstance(forbidden, list) and forbidden
+            and all(isinstance(c, str) and c for c in forbidden)):
+        return ["remember is granted but internal_learning.durable_memory."
+                "categories_forbidden does not list what it may not keep"]
+    return []
+
+
 def problems(profile):
     """Everything in the profile the plugin would not act on, as readable lines.
     Empty means the profile says only what the code does."""
     if not isinstance(profile, dict):
         return ["the profile is empty or not a mapping"]
     return (_unknown_keys(profile, SCHEMA, ())
-            + _capability_problems(profile.get("callable_capabilities")))
+            + _capability_problems(profile.get("callable_capabilities"))
+            + _memory_problems(profile))
 
 
 def _enabled(profile):

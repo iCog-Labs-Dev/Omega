@@ -24,6 +24,7 @@ outbound retry queue, and the channel auth handshake.
 | Scope limits | `prompt.txt` is added to the agent's prompt as its own section |
 | Authorization | `telegram_profile.yaml` chat/DM rules, plus core's auth handshake when enabled |
 | Skill allowlist | The agent may call only the skills `callable_capabilities` grants; the shell, file I/O, `metta` and any skill added later are refused, and a send stays in the chat being answered (`same_chat_only`). A profile key the plugin does not act on stops the bot at start |
+| Memory screen | Each `remember` is classified against the profile's forbidden memory categories before it runs; a note in one, or one that cannot be checked, is refused with `MEMORY_CATEGORY_FORBIDDEN` |
 | Delivery | Outbound messages queue until the bot connects, and are retried on failure |
 
 ## Install

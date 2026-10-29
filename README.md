@@ -88,7 +88,10 @@ spam thresholds, ethics categories, and `reply_constraints`, which turns
 features on and off (`allow_image_generation`, `allow_pdf_generation`,
 `allow_pdf_font_install`, `allow_voice_reply`). `callable_capabilities` is the
 allowlist of skills the model may call; every other skill, the shell and file
-I/O included, is refused. The bot will not start on a profile holding a key or
+I/O included, is refused. `internal_learning.durable_memory.categories_forbidden`
+lists what `remember` may not keep (secrets, credentials, sensitive personal
+data and so on); each note is checked against it by the classification model
+and refused if it falls in one, or if the check fails. The bot will not start on a profile holding a key or
 constraint the plugin does not act on, and the error names each one, so a host
 profile written for an older release has to be updated with it.
 `telegram/policy.md` holds the `/start`, `/about` and `/privacy` text.

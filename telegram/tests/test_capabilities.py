@@ -49,6 +49,13 @@ def test_the_prompt_names_exactly_the_granted_skills():
     assert named == capabilities.granted_skills(shipped())
 
 
+def test_without_remember_the_memory_list_may_be_left_out():
+    profile = shipped()
+    profile["callable_capabilities"]["working_memory"]["skills"] = ["pin", "query", "episodes"]
+    profile.pop("internal_learning")
+    assert capabilities.problems(profile) == []
+
+
 def test_a_disabled_capability_grants_nothing():
     profile = shipped()
     profile["callable_capabilities"]["voice_reply"]["enabled"] = False
@@ -70,6 +77,12 @@ def test_a_disabled_capability_grants_nothing():
     (lambda p: p["callable_capabilities"]["voice_reply"].update(enabled="yes"),
      "callable_capabilities.voice_reply.enabled should be true or false"),
     (lambda p: p.pop("callable_capabilities"), "callable_capabilities is missing"),
+    (lambda p: p["internal_learning"]["durable_memory"].update(categories_allowed=["x"]),
+     "internal_learning.durable_memory.categories_allowed is not read"),
+    (lambda p: p.pop("internal_learning"),
+     "remember is granted but internal_learning.durable_memory.categories_forbidden"),
+    (lambda p: p["internal_learning"]["durable_memory"].update(categories_forbidden=[]),
+     "remember is granted but internal_learning.durable_memory.categories_forbidden"),
 ])
 def test_anything_the_code_does_not_act_on_is_reported(edit, expected):
     profile = shipped()
@@ -88,7 +101,7 @@ def test_the_old_profile_is_refused():
     found = capabilities.problems(old)
     assert any("telegram_reply.skills should list" in line for line in found)
     assert any("'text_only'" in line for line in found)
-    assert any("internal_learning is not read" in line for line in found)
+    assert any("internal_learning.learned_skills is not read" in line for line in found)
 
 
 # The channel applies it.
@@ -155,6 +168,33 @@ def test_loading_the_plugin_without_starting_the_channel_changes_nothing(channel
     tm.loadOmegaPlugin()
 
     assert channel.helper.balance_parentheses("x") == '((send "hi") (shell "ls"))'
+
+
+def test_starting_the_channel_screens_remember(channel, monkeypatch):
+    checked = []
+
+    async def forbidden(text):
+        checked.append(text)
+        return "password" in text
+
+    monkeypatch.setattr(tm.config_helper, "is_memory_forbidden", forbidden)
+    channel.helper.balance_parentheses = lambda s: s
+    tm._channel.load_config(SHIPPED)
+    tm.TelegramChannel().start()
+
+    kept = '((remember "Paul is in UTC+2"))'
+    assert channel.helper.balance_parentheses(kept) == kept
+    out = channel.helper.balance_parentheses('((remember "the admin password is hunter2"))')
+    assert out.startswith("((Error MEMORY_CATEGORY_FORBIDDEN ")
+    assert checked == ["Paul is in UTC+2", "the admin password is hunter2"]
+
+
+def test_a_memory_check_that_fails_refuses_the_note(channel, monkeypatch):
+    async def broken(text):
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr(tm.config_helper, "is_memory_forbidden", broken)
+    assert tm._screen_memory("Paul is in UTC+2").startswith("(Error MEMORY_CATEGORY_FORBIDDEN ")
 
 
 @pytest.mark.parametrize("skill", ["shell", "read-file", "write-file", "metta", "get-io-policy"])

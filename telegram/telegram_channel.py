@@ -23,6 +23,7 @@ from aiogram.exceptions import (
 from markdown_render import to_markdownv2
 
 from config_helper import is_category_blocked, get_spam_protection_config
+import config_helper
 import media_handler
 import capabilities
 import skill_veto
@@ -1392,6 +1393,37 @@ _OTHER_CHAT_REFUSAL = "Error: Refused:"
 _NOT_ALLOWED_REFUSAL = "Error: Refused: not allowed:"
 
 
+MEMORY_REFUSAL = "MEMORY_CATEGORY_FORBIDDEN"
+# How long a remember waits for the classifier before it is refused.
+_MEMORY_CHECK_TIMEOUT = 30
+
+
+def _screen_memory(text):
+    """Refuse a note the profile forbids keeping, or one that could not be
+    checked; see config_helper.is_memory_forbidden for why an error refuses.
+
+    Runs on the agent loop's thread. The classifier client belongs to the bot's
+    event loop, so the check runs there while the bot is up."""
+    try:
+        loop = _channel.loop
+        if loop is not None and loop.is_running():
+            forbidden = asyncio.run_coroutine_threadsafe(
+                config_helper.is_memory_forbidden(text), loop,
+            ).result(timeout=_MEMORY_CHECK_TIMEOUT)
+        else:
+            forbidden = asyncio.run(config_helper.is_memory_forbidden(text))
+    except Exception as e:
+        logging.error(f"Memory check failed, refusing the note: {e!r}")
+        forbidden = True
+    if not forbidden:
+        return None
+    logging.warning("Refused a remember in a forbidden memory category")
+    return skill_veto.error_form(MEMORY_REFUSAL, (
+        "This note was not kept: it may hold a secret, a credential or "
+        "sensitive personal data, which this chat's memory may not keep, or "
+        "it could not be checked. Do not try to store it again."))
+
+
 class TelegramChannel(channels.CommChannel):
     """CommChannel wrapper around the aiogram-based _TelegramChannel above.
     start() launches the bot on its own thread and event loop and returns
@@ -1418,7 +1450,8 @@ class TelegramChannel(channels.CommChannel):
         # Core's agent loop calls the reply parser only after this returns, so
         # no skill call is evaluated before the allowlist is in place. Installed
         # here rather than at plugin load, so another channel is untouched.
-        skill_veto.install(_channel.granted_skills)
+        skill_veto.install(_channel.granted_skills,
+                           screens={"remember": _screen_memory})
 
     def stop(self) -> None:
         stop_telegram()

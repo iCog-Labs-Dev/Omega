@@ -100,6 +100,50 @@ def test_output_that_is_not_a_call_list_is_left_alone():
     assert refuse("shell ls") == "shell ls"
 
 
+# Screens: a granted skill's call may still be refused for what it says.
+
+def _no_secrets(text):
+    if "password" in text:
+        return skill_veto.error_form("MEMORY_CATEGORY_FORBIDDEN", "not kept")
+    return None
+
+
+_MEMORY_REFUSAL = '(Error MEMORY_CATEGORY_FORBIDDEN "not kept")'
+
+
+def screen(parsed, commands=()):
+    return skill_veto.refuse_ungranted_skills(parsed, GRANTED, commands,
+                                              {"remember": _no_secrets})
+
+
+def test_a_screened_call_it_refuses_is_replaced():
+    parsed = '((send "noted") (remember "the admin password is hunter2"))'
+    assert screen(parsed) == f'((send "noted") {_MEMORY_REFUSAL})'
+
+
+def test_a_screened_call_it_allows_is_untouched():
+    parsed = '((send "noted") (remember "Paul is in UTC+2"))'
+    assert screen(parsed) is parsed
+
+
+def test_the_screen_sees_the_unquoted_text():
+    seen = []
+    parsed = '((remember "she said \\"hi\\" (twice)\\nthen left"))'
+    skill_veto.refuse_ungranted_skills(parsed, GRANTED, (),
+                                       {"remember": lambda t: seen.append(t)})
+    assert seen == ['she said "hi" (twice)\nthen left']
+
+
+def test_an_ungranted_skill_is_refused_before_any_screen():
+    assert skill_veto.refuse_ungranted_skills(
+        '((shell "ls"))', GRANTED, (), {"shell": lambda t: 1 / 0}) == f"({_refusal('shell')})"
+
+
+def test_a_malformed_reply_naming_a_screened_skill_is_refused_whole():
+    out = screen('((send "unclosed) (remember "password"))', commands={"send", "remember"})
+    assert out.startswith("((Error SKILL_CALL_UNCHECKED ")
+
+
 def _fake_helper(output):
     helper = types.ModuleType("helper")
     helper.balance_parentheses = lambda s: output
@@ -114,6 +158,15 @@ def test_install_wraps_the_parser_once_and_takes_the_latest_grant():
     assert helper.balance_parentheses("x") == '((send "hi") (shell "ls"))'
     skill_veto.install({"send"}, helper)
     assert helper.balance_parentheses("x") == f'((send "hi") {_refusal("shell")})'
+
+
+def test_install_applies_the_screens_it_is_given():
+    helper = _fake_helper('((send "hi") (remember "my password is x"))')
+    helper.LLM_COMMANDS = {"send", "remember"}
+    skill_veto.install({"send", "remember"}, helper, {"remember": _no_secrets})
+    assert helper.balance_parentheses("x") == f'((send "hi") {_MEMORY_REFUSAL})'
+    skill_veto.install({"send", "remember"}, helper)
+    assert helper.balance_parentheses("x") == '((send "hi") (remember "my password is x"))'
 
 
 # Against core's own parser, when core is on the path.

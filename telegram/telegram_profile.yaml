@@ -52,6 +52,23 @@ ethics_pass:
     - self_harm_or_harm_instructions
     - safeguard_bypass_requests
 
+# What remember may not keep. Before each remember runs, the classification
+# model checks its text against these, and a note in one is refused with
+# MEMORY_CATEGORY_FORBIDDEN. So is every note while the check cannot be made.
+internal_learning:
+  durable_memory:
+    categories_forbidden:
+      - secret
+      - credential
+      - sensitive_personal_data
+      - inferred_demographic_trait
+      - political_or_religious_profile
+      - health_or_mental_state_profile
+      - vulnerability_profile
+      - reputation_score
+      - cross_service_identity_link
+      - indefinite_raw_message_archive
+
 # The skills the model may call. Each enabled capability grants the skills it
 # lists; when the channel starts, every other skill is refused, including the
 # shell, file reads and writes, MeTTa evaluation, and any skill core or another
