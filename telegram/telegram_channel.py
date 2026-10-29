@@ -1243,6 +1243,17 @@ def send_message(text):
 
         text = m.group(3)
 
+    # The model reads every chat's messages tagged with their ids, so it has
+    # what it needs to post one group's reply into another, or into an admin's
+    # DM. A reply goes only to the chat being answered; the prefix may repeat
+    # that chat but cannot name another.
+    current_chat_id = _channel.chat_id
+    if str(target_chat_id) != str(current_chat_id):
+        logging.warning(f"Refused a send to chat {target_chat_id} while answering chat {current_chat_id}")
+        return (f"Error: Refused: you are answering chat {current_chat_id}, and a "
+                f"reply cannot go to chat {target_chat_id}. Nothing was sent. "
+                f"Send without a chat prefix.")
+
     # Run the async check safely in a synchronous context
     try:
         loop = asyncio.get_running_loop()
@@ -1252,7 +1263,7 @@ def send_message(text):
 
     if is_blocked:
         alert_ethics_violation("send", text)
-        return "Error: Refused: Unsafe response content."
+        return _UNSAFE_REFUSAL
         
     _channel.send_message(text, chat_id=target_chat_id, reply_to_id=target_reply_id)
     # The agent has replied to the user, so drop any attached PDF/image context.
@@ -1337,6 +1348,24 @@ def alert_ethics_violation(tool_name, text=None):
             logging.error(f"Failed to schedule ethics alert to admin {admin_id} for tool {tool_name}: {e}")
 
 
+class SendRefused(Exception):
+    """The channel would not deliver a send; the message says why."""
+
+
+# The model sees a refusal as its exception's class name: janus hands core the
+# exception object, not its message. So each reason is a class named the way
+# core names the errors it reports to the model.
+class SEND_REFUSED_ONLY_THE_CURRENT_CHAT_CAN_BE_ANSWERED(SendRefused):
+    pass
+
+
+class SEND_REFUSED_UNSAFE_CONTENT(SendRefused):
+    pass
+
+
+_UNSAFE_REFUSAL = "Error: Refused: Unsafe response content."
+
+
 class TelegramChannel(channels.CommChannel):
     """CommChannel wrapper around the aiogram-based _TelegramChannel above.
     start() launches the bot on its own thread and event loop and returns
@@ -1360,7 +1389,15 @@ class TelegramChannel(channels.CommChannel):
         return getLastMessage()
 
     def send(self, message: str) -> None:
-        send_message(message)
+        # Core's send skill drops what this returns, so a refusal handed back
+        # as a value never reaches the model, which then retries or assumes
+        # the message went out. Raised, it comes back to the model as the
+        # failed result of its send.
+        result = send_message(message)
+        if isinstance(result, str) and result.startswith("Error:"):
+            refusal = (SEND_REFUSED_UNSAFE_CONTENT if result == _UNSAFE_REFUSAL
+                       else SEND_REFUSED_ONLY_THE_CURRENT_CHAT_CAN_BE_ANSWERED)
+            raise refusal(result.removeprefix("Error:").strip())
 
     def is_tool_disabled(self, tool_name: str) -> bool:
         return tool_name == "websearch" and is_search_disabled()
