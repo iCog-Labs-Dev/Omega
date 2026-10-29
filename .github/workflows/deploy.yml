@@ -249,12 +249,33 @@ jobs:
             echo "using the channel profile at ${profile} (mode ${profile_perms})"
           fi
 
-          mkdir -p /Backup/docker/PeTTa
+          # The bot's own memory, used by nothing else. /Backup/docker/PeTTa is
+          # the old autonomous Oma agent's memory and stays on disk as its
+          # archive: mounting it hid the prompts the image ships, so the bot
+          # ran Oma's "never idle" prompt with Oma's history and goals.
+          memory_dir=/Backup/docker/omega-telegram
+          mkdir -p "${memory_dir}"
 
           # The package is private, so the pull needs a login even here.
           echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
           docker pull "${IMAGE}"
           docker rm -f omega 2>/dev/null || true
+
+          # The mount covers the image's whole memory/ directory, so whatever
+          # the image ships there has to be in the folder too. An empty folder
+          # is seeded with all of it; after that only the prompts are replaced,
+          # so a new image's prompts take effect while the history, Chroma
+          # store and saved files carry over. Core reads prompt_<provider>.txt
+          # and falls back to prompt.txt only when that file is missing.
+          # Root in a throwaway container does the copy, since the files
+          # belong to the agent's uid and this account has no sudo.
+          docker run --rm --entrypoint sh \
+            -v "${memory_dir}:/seed" \
+            "${IMAGE}" \
+            -c 'set -e
+                [ -e /seed/history.metta ] || cp -a "$MEMORY_DIR"/. /seed/
+                cp -af "$MEMORY_DIR"/prompt*.txt /seed/
+                chown 65534:65534 /seed'
 
           # The prompt ships inside the plugin at plugins/telegram/prompt.txt and
           # is read from there, so it is not copied out of the image and mounted
@@ -264,6 +285,12 @@ jobs:
           # pipe, which www-data cannot open: the proxy dies with
           # "open() /dev/stderr failed (13: Permission denied)" and takes the
           # container with it.
+          # The loop limits are core's, and the command line wins over its
+          # config.yaml. Core's defaults give every message 50 turns and every
+          # wake-up more, which a public chat bot spends on follow-ups nobody
+          # asked for. Five turns answer a message, a search included. A
+          # wake-up still grants maxWakeLoops + 1 turns, so the interval is a
+          # day to keep the bot quiet between messages.
           docker run -d -it \
             --name omega \
             ${RESTART:+--restart=always} \
@@ -274,9 +301,12 @@ jobs:
             -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
             -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
             -e TG_BOT_TOKEN="${TG_BOT_TOKEN}" \
-            -v /Backup/docker/PeTTa:/PeTTa/repos/Omega/memory \
+            -v "${memory_dir}:/PeTTa/repos/Omega/memory" \
             "${IMAGE}" \
             commchannel=telegram \
+            maxNewInputLoops=5 \
+            maxWakeLoops=0 \
+            wakeupInterval=86400 \
             TG_CHAT_ID=${TG_CHAT_ID} \
             provider=${LLM_PROVIDER} \
             ${LLM_MODEL:+LLM=${LLM_MODEL}} \
