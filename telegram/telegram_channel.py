@@ -24,6 +24,7 @@ from markdown_render import to_markdownv2
 
 from config_helper import is_category_blocked, get_spam_protection_config
 import media_handler
+import skill_veto
 import channels
 from config import config_get_by_key
 
@@ -1344,6 +1345,10 @@ class TelegramChannel(channels.CommChannel):
     functions."""
 
     def start(self) -> None:
+        # Before the bot can take a message: a public chat must not reach the
+        # shell, the filesystem or the MeTTa evaluator. Installed here rather
+        # than at plugin load, so a deployment on another channel is untouched.
+        skill_veto.install()
         chat_id = config_get_by_key("TG_CHAT_ID", "")
         if auth.get_proxy_url():
             token = _PROXY_TOKEN
@@ -1363,6 +1368,8 @@ class TelegramChannel(channels.CommChannel):
         send_message(message)
 
     def is_tool_disabled(self, tool_name: str) -> bool:
+        if tool_name in skill_veto.DISABLED_SKILLS:
+            return True
         return tool_name == "websearch" and is_search_disabled()
 
 
