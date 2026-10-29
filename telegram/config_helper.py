@@ -8,7 +8,18 @@ import asyncio
 
 _config_cache = None
 _config_mtime = 0
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "telegram_profile.yaml")
+# The shipped profile. A host may mount its own and name it in TG_PROFILE_PATH,
+# which the channel reads; the ethics categories and spam limits here have to
+# come from the same file, or a host profile would govern only half the bot.
+SHIPPED_PROFILE = os.path.join(os.path.dirname(__file__), "telegram_profile.yaml")
+
+
+def _profile_path():
+    try:
+        from config import config_get_by_key
+    except ModuleNotFoundError:  # outside core, as in the standalone tests
+        return SHIPPED_PROFILE
+    return config_get_by_key("TG_PROFILE_PATH", SHIPPED_PROFILE)
 
 _openai_client = None
 
@@ -33,14 +44,15 @@ def _load_config():
     if _config_cache is not None:
         return _config_cache
 
-    if not os.path.exists(CONFIG_PATH):
-        raise FileNotFoundError(f"Critical Error: Telegram profile not found at {CONFIG_PATH}")
+    path = _profile_path()
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Critical Error: Telegram profile not found at {path}")
 
     try:
-        with open(CONFIG_PATH, "r") as f:
+        with open(path, "r") as f:
             _config_cache = yaml.safe_load(f)
     except Exception as e:
-        logging.error(f"Error loading {CONFIG_PATH}: {e}")
+        logging.error(f"Error loading {path}: {e}")
         _config_cache = {}
 
     return _config_cache
@@ -56,18 +68,11 @@ def get_blocked_ethics_categories():
     categories = config.get("ethics_pass", {}).get("blocked_categories", [])
     return categories
 
-def get_forbidden_memory_categories():
-    """Retrieves the list of forbidden categories for memory storage."""
-    config = _load_config()
-    return config.get("internal_learning", {}).get("durable_memory", {}).get("categories_forbidden", [])
-
 async def use_model(text, categories):
     """Uses an LLM to classify if text violates the provided categories."""
     config = _load_config()
     model_config = config.get("classification_model", {})
     model_name = model_config.get("name", "gpt-4o-mini")
-    max_tokens = model_config.get("max_tokens", 10)
-    temperature = model_config.get("temperature", 0.0)
 
     try:
         prompt = f"""
@@ -154,13 +159,6 @@ async def is_category_blocked(text):
     blocked = config.get("ethics_pass", {}).get("blocked_categories", [])
     return await _llm_classify(text, blocked)
 
-
-async def is_memory_forbidden(text):
-    """Checks if the text contains topics forbidden from long-term memory."""
-    config = _load_config()
-    forbidden = config.get("internal_learning", {}).get("durable_memory", {}).get("categories_forbidden", [])
-    text = text.lower()
-    return await _llm_classify(text, forbidden)
 
 def get_spam_protection_config():
     """Retrieves spam protection thresholds from the configuration."""

@@ -24,6 +24,7 @@ from markdown_render import to_markdownv2
 
 from config_helper import is_category_blocked, get_spam_protection_config
 import media_handler
+import capabilities
 import skill_veto
 import channels
 from config import config_get_by_key
@@ -128,6 +129,12 @@ class _TelegramChannel:
         self.restrict_to_config_chat = True
         self.allow_group_bots = False
         self.reply_constraints = None
+        # From the profile's callable_capabilities when it loads. Until then
+        # nothing is granted, sends keep to the current chat, and start()
+        # refuses to run.
+        self.granted_skills = None
+        self.send_constraints = frozenset({"same_chat_only"})
+        self.profile_problems = ["the profile has not been loaded"]
         
         # Policy messages
         self.start_msg = "Telegram mode active."
@@ -205,12 +212,17 @@ class _TelegramChannel:
         if not os.path.exists(config_path):
             print(f"Config file {config_path} not found. Using defaults.")
             logging.warning(f"Config file {config_path} not found. Using defaults.")
+            self.profile_problems = [f"no profile at {config_path}"]
             return
 
         try:
             with open(config_path, "r") as f:
                 config = yaml.safe_load(f)
-            
+
+            self.profile_problems = capabilities.problems(config)
+            self.granted_skills = capabilities.granted_skills(config)
+            self.send_constraints = capabilities.constraints_for(config, "send")
+
             tg_cfg = config.get("telegram", {})
             self.reply_only_on_tag = tg_cfg.get("reply_only_when_directly_tagged", True)
             self.reply_on_reply = tg_cfg.get("reply_on_reply_to_bot", True)
@@ -228,6 +240,7 @@ class _TelegramChannel:
             self._warn_about_open_defaults()
         except Exception as e:
             logging.error(f"Error loading config {config_path}: {e}")
+            self.profile_problems = [f"could not read {config_path}: {e}"]
 
     def _warn_about_open_defaults(self):
         """Say so when the shipped defaults leave the channel wide open.
@@ -1246,14 +1259,20 @@ def send_message(text):
 
     # The model reads every chat's messages tagged with their ids, so it has
     # what it needs to post one group's reply into another, or into an admin's
-    # DM. A reply goes only to the chat being answered; the prefix may repeat
-    # that chat but cannot name another.
+    # DM. Under the profile's same_chat_only a reply goes only to the chat being
+    # answered; the prefix may repeat that chat but cannot name another.
+    # Without it, a send may still reach only a chat the bot serves.
     current_chat_id = _channel.chat_id
     if str(target_chat_id) != str(current_chat_id):
-        logging.warning(f"Refused a send to chat {target_chat_id} while answering chat {current_chat_id}")
-        return (f"Error: Refused: you are answering chat {current_chat_id}, and a "
-                f"reply cannot go to chat {target_chat_id}. Nothing was sent. "
-                f"Send without a chat prefix.")
+        if "same_chat_only" in _channel.send_constraints:
+            logging.warning(f"Refused a send to chat {target_chat_id} while answering chat {current_chat_id}")
+            return (f"{_OTHER_CHAT_REFUSAL} you are answering chat {current_chat_id}, and a "
+                    f"reply cannot go to chat {target_chat_id}. Nothing was sent. "
+                    f"Send without a chat prefix.")
+        if not _channel._is_allowed_chat(target_chat_id) and target_chat_id not in _channel.admin_ids:
+            logging.warning(f"Refused a send to chat {target_chat_id}, which is not an allowed chat")
+            return (f"{_NOT_ALLOWED_REFUSAL} chat {target_chat_id} is not one this bot "
+                    f"serves. Nothing was sent.")
 
     # Run the async check safely in a synchronous context
     try:
@@ -1360,11 +1379,17 @@ class SEND_REFUSED_ONLY_THE_CURRENT_CHAT_CAN_BE_ANSWERED(SendRefused):
     pass
 
 
+class SEND_REFUSED_CHAT_NOT_ALLOWED(SendRefused):
+    pass
+
+
 class SEND_REFUSED_UNSAFE_CONTENT(SendRefused):
     pass
 
 
 _UNSAFE_REFUSAL = "Error: Refused: Unsafe response content."
+_OTHER_CHAT_REFUSAL = "Error: Refused:"
+_NOT_ALLOWED_REFUSAL = "Error: Refused: not allowed:"
 
 
 class TelegramChannel(channels.CommChannel):
@@ -1374,10 +1399,6 @@ class TelegramChannel(channels.CommChannel):
     functions."""
 
     def start(self) -> None:
-        # Before the bot can take a message: a public chat must not reach the
-        # shell, the filesystem or the MeTTa evaluator. Installed here rather
-        # than at plugin load, so a deployment on another channel is untouched.
-        skill_veto.install()
         chat_id = config_get_by_key("TG_CHAT_ID", "")
         if auth.get_proxy_url():
             token = _PROXY_TOKEN
@@ -1386,6 +1407,18 @@ class TelegramChannel(channels.CommChannel):
             if not token:
                 raise ValueError("TG_BOT_TOKEN is required")
         start_telegram(token, chat_id)
+        # The profile is read as the bot starts. A profile that says something
+        # the code does not do is refused rather than half-applied: anyone
+        # reading it would believe the bot is held to rules it is not.
+        if _channel.profile_problems:
+            stop_telegram()
+            raise ValueError("the Telegram channel profile at "
+                             f"{_channel.config_path} cannot be enforced: "
+                             + "; ".join(_channel.profile_problems))
+        # Core's agent loop calls the reply parser only after this returns, so
+        # no skill call is evaluated before the allowlist is in place. Installed
+        # here rather than at plugin load, so another channel is untouched.
+        skill_veto.install(_channel.granted_skills)
 
     def stop(self) -> None:
         stop_telegram()
@@ -1400,12 +1433,17 @@ class TelegramChannel(channels.CommChannel):
         # failed result of its send.
         result = send_message(message)
         if isinstance(result, str) and result.startswith("Error:"):
-            refusal = (SEND_REFUSED_UNSAFE_CONTENT if result == _UNSAFE_REFUSAL
-                       else SEND_REFUSED_ONLY_THE_CURRENT_CHAT_CAN_BE_ANSWERED)
+            if result == _UNSAFE_REFUSAL:
+                refusal = SEND_REFUSED_UNSAFE_CONTENT
+            elif result.startswith(_NOT_ALLOWED_REFUSAL):
+                refusal = SEND_REFUSED_CHAT_NOT_ALLOWED
+            else:
+                refusal = SEND_REFUSED_ONLY_THE_CURRENT_CHAT_CAN_BE_ANSWERED
             raise refusal(result.removeprefix("Error:").strip())
 
     def is_tool_disabled(self, tool_name: str) -> bool:
-        if tool_name in skill_veto.DISABLED_SKILLS:
+        granted = _channel.granted_skills
+        if granted is not None and tool_name not in granted:
             return True
         return tool_name == "websearch" and is_search_disabled()
 

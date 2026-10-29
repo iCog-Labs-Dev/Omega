@@ -1,35 +1,35 @@
-"""Keep the skills a public chat must not reach out of the model's hands.
+"""Refuse every skill the channel profile does not grant.
 
 In five days of production the Telegram bot ran 13,906 shell commands, pip
 installs, background jobs and a git push with a token it found on disk, steered
-by group members. The channel profile forbids code execution and file writes,
-but nothing reads that section, and core asks the channel for a veto only before
-websearch.
+by group members. The profile forbade all of it, but nothing read that part,
+and core asks the channel for a veto only before websearch.
 
 Core turns the model's reply into skill calls in one place, the Python function
 helper.balance_parentheses, and the loop reaches it through py-call, which looks
 the function up on every call. Wrapping it is the one point where a call to a
-forbidden skill can be stopped before it is evaluated, without a core change.
-A stopped call becomes an (Error ...) form, which the loop hands back to the
-model as ALERT_FAILED, so the model learns the skill is off instead of retrying.
+skill the channel does not grant can be stopped before it is evaluated, without
+a core change. A stopped call becomes an (Error ...) form, which the loop hands
+back to the model as ALERT_FAILED, so the model learns the skill is off instead
+of retrying.
 
 Taking the names out of helper.LLM_COMMANDS would not do: core refuses to remove
 its built-in commands, and a line it no longer recognises as a command is glued
 onto the command above it, so "shell ls" would be posted to the chat as the end
 of a send.
+
+The skills granted come from the profile's callable_capabilities; see
+capabilities.py.
 """
 import json
 import logging
-
-DISABLED_SKILLS = frozenset({
-    "shell",
-    "write-file",
-    "write-file-b64",
-    "append-file",
-    "metta",
-})
+import re
 
 REFUSAL = "SKILL_DISABLED_IN_TELEGRAM"
+
+# Core's own report of a line it could not read as a skill call. It is not a
+# call, and it has to reach the model as it is.
+_CORE_ERROR = "Error"
 
 
 def _refusal(skill):
@@ -81,9 +81,12 @@ def _head(form):
     return parts[0].rstrip(")") if parts else ""
 
 
-def refuse_disabled_skills(sexprs):
-    """Replace each call to a disabled skill in core's parsed reply with an
-    error the model reads back. Everything else is left exactly as it was."""
+def refuse_ungranted_skills(sexprs, granted, commands=()):
+    """Replace each call to a skill not in granted with an error the model reads
+    back. Everything else is left exactly as it was.
+
+    commands is every skill name core knows, used only when the reply cannot be
+    split into calls."""
     if not (isinstance(sexprs, str) and sexprs.startswith("(") and sexprs.endswith(")")):
         # Not a list of calls. The loop reports it to the model as malformed
         # and evaluates nothing.
@@ -92,9 +95,10 @@ def refuse_disabled_skills(sexprs):
     forms = _top_level_forms(inner)
     if forms is None:
         # Core could not quote something cleanly. Whatever MeTTa makes of it,
-        # it must not be a disabled skill, so a reply naming one is refused
-        # whole; anything else is left for the loop to report as before.
-        named = [s for s in sorted(DISABLED_SKILLS) if f"({s} " in inner or f"({s})" in inner]
+        # it must not be a skill the channel refuses, so a reply naming one is
+        # refused whole; anything else is left for the loop to report as before.
+        named = sorted({name for name in re.findall(r'\(([^\s()"]+)', inner)
+                        if name in commands and name not in granted})
         if not named:
             return sexprs
         logging.warning(f"Refused a malformed reply that calls {', '.join(named)}")
@@ -103,30 +107,31 @@ def refuse_disabled_skills(sexprs):
     out = []
     for form in forms:
         skill = _head(form)
-        if skill in DISABLED_SKILLS:
+        if skill != _CORE_ERROR and skill not in granted:
             refused.append(skill)
             out.append(_refusal(skill))
         else:
             out.append(form)
     if not refused:
         return sexprs
-    logging.warning(f"Refused disabled skills: {', '.join(refused)}")
+    logging.warning(f"Refused skills the profile does not grant: {', '.join(refused)}")
     return "(" + " ".join(out) + ")"
 
 
-def install(helper=None):
-    """Wrap core's reply parser so disabled skills are refused. Safe to call
-    more than once."""
+def install(granted, helper=None):
+    """Wrap core's reply parser so only granted skills reach evaluation. A
+    second call replaces the granted set rather than wrapping twice."""
     if helper is None:
         import helper
+    granted = frozenset(granted)
     current = helper.balance_parentheses
-    if getattr(current, "_refuses_disabled_skills", False):
-        return
+    original = getattr(current, "_unwrapped", current)
 
     def balance_parentheses(s):
-        return refuse_disabled_skills(current(s))
+        return refuse_ungranted_skills(original(s), granted,
+                                       getattr(helper, "LLM_COMMANDS", ()))
 
-    balance_parentheses._refuses_disabled_skills = True
-    balance_parentheses.__doc__ = current.__doc__
+    balance_parentheses._unwrapped = original
+    balance_parentheses.__doc__ = original.__doc__
     helper.balance_parentheses = balance_parentheses
-    logging.info(f"Disabled skills in this channel: {', '.join(sorted(DISABLED_SKILLS))}")
+    logging.info(f"Skills granted in this channel: {', '.join(sorted(granted))}")

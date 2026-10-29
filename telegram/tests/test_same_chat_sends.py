@@ -25,6 +25,9 @@ def sent(monkeypatch):
     monkeypatch.setattr(tm, "is_category_blocked", not_blocked)
     monkeypatch.setattr(tm._channel, "chat_id", CURRENT)
     monkeypatch.setattr(tm._channel, "allowed_chat_ids", {str(CURRENT), str(OTHER_ALLOWED)})
+    monkeypatch.setattr(tm._channel, "restrict_to_config_chat", True)
+    monkeypatch.setattr(tm._channel, "admin_ids", [])
+    monkeypatch.setattr(tm._channel, "send_constraints", frozenset({"same_chat_only"}))
     monkeypatch.setattr(
         tm._channel, "send_message",
         lambda text, chat_id=None, reply_to_id=None: deliveries.append((str(chat_id), reply_to_id, text)))
@@ -60,6 +63,19 @@ def test_the_model_sees_a_refused_send(sent):
 def test_a_delivered_send_raises_nothing(sent):
     tm.TelegramChannel().send("hello there")
     assert sent == [(str(CURRENT), None, "hello there")]
+
+
+def test_without_same_chat_only_another_allowed_chat_is_reachable(sent, monkeypatch):
+    monkeypatch.setattr(tm._channel, "send_constraints", frozenset())
+    assert tm.send_message(f"[{OTHER_ALLOWED}] hello there") is None
+    assert sent == [(str(OTHER_ALLOWED), None, "hello there")]
+
+
+def test_without_same_chat_only_a_chat_the_bot_does_not_serve_is_not(sent, monkeypatch):
+    monkeypatch.setattr(tm._channel, "send_constraints", frozenset())
+    with pytest.raises(tm.SEND_REFUSED_CHAT_NOT_ALLOWED, match="not one this bot serves"):
+        tm.TelegramChannel().send(f"[{NOT_ALLOWED}] hello there")
+    assert sent == []
 
 
 def test_the_model_sees_an_ethics_refusal_too(sent, monkeypatch):
