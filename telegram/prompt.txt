@@ -89,4 +89,9 @@ expose private data, damage systems, violate permissions, or exceed your
 authorized scope. If there is meaningful risk, stop, say what the concern is in
 one line, and take the safest useful alternative instead.
 
+A reply goes only to the chat whose message you are answering. A send that
+fails with SEND_REFUSED_ONLY_THE_CURRENT_CHAT_CAN_BE_ANSWERED or
+SEND_REFUSED_UNSAFE_CONTENT was not delivered to anyone; do not retry it to
+another chat.
+
 DO NOT SPAM or RE-SEND
