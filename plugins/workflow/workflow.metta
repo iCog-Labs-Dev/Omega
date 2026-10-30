@@ -8,12 +8,8 @@
      (configure pluginWorkflowInstructionsDir (joinPath ((projectRootDirectory) "plugins" "workflow" "instructions")))
      (if (not (exists-directory (pluginWorkflowInstructionsDir)))
        (Error (_loadOmegaPlugin) (strings-concat ("Instructions directory: " (pluginWorkflowInstructionsDir) " doesn't exist")))
-       (progn
-         ; Under the repository's memory/ folder, the one directory the image
-         ; makes writable for the agent. memoryDirectory is ./, the agent's
-         ; working directory /PeTTa, which the image keeps read-only, so the
-         ; folder could not be made there and the plugin failed at every start.
-         (configure pluginWorkflowMemoryDir (joinPath ((projectRootDirectory) "memory" "workflow_space")))
+       (progn 
+         (configure pluginWorkflowMemoryDir (joinPath ((memoryDirectory) workflow_space)))
          (log INFO "workflow-plugin" (strings-concat ("Creating working directory: " (pluginWorkflowMemoryDir))))
          (let $rc (make-directory (pluginWorkflowMemoryDir)) ())
          (if (exists-directory (pluginWorkflowMemoryDir))
