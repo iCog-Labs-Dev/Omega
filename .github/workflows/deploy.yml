@@ -291,6 +291,8 @@ jobs:
           # asked for. Five turns answer a message, a search included. A
           # wake-up still grants maxWakeLoops + 1 turns, so the interval is a
           # day to keep the bot quiet between messages.
+          # Core reads the model from the key `model`. Passed as LLM= it was
+          # read by nothing, and the provider's default model ran instead.
           docker run -d -it \
             --name omega \
             ${RESTART:+--restart=always} \
@@ -309,7 +311,7 @@ jobs:
             wakeupInterval=86400 \
             TG_CHAT_ID=${TG_CHAT_ID} \
             provider=${LLM_PROVIDER} \
-            ${LLM_MODEL:+LLM=${LLM_MODEL}} \
+            ${LLM_MODEL:+model=${LLM_MODEL}} \
             ${RELEASE_TAG:+releaseTag=${RELEASE_TAG} releaseRepo=${RELEASE_REPO}} \
             ${profile_arg} \
             embeddingprovider=OpenAI
