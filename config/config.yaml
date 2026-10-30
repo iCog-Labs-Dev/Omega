@@ -144,7 +144,7 @@ asione_model: "asi1-ultra"
 # for details.
 #pluginWorkflowInstructionsDir: ./plugins/workflow/instructions
 # Path to the directory to keep workflow working files when workflow is active.
-# Default value is <memoryDirectory>/workflow_space
+# Default value is <project_root>/memory/workflow_space
 #pluginWorkflowMemoryDir: ./memory/workflow_space
 
 # OpenClaw
