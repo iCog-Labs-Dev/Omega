@@ -250,11 +250,17 @@ jobs:
           fi
 
           # The bot's own memory, used by nothing else. /Backup/docker/PeTTa is
-          # the old autonomous Oma agent's memory and stays on disk as its
-          # archive: mounting it hid the prompts the image ships, so the bot
-          # ran Oma's "never idle" prompt with Oma's history and goals.
+          # the old autonomous Oma agent's memory and stays on disk untouched:
+          # mounting it hid the prompts the image ships, so the bot ran Oma's
+          # "never idle" prompt. Oma keeps what it remembers, though: the first
+          # deploy copies that folder's memory across, below.
           memory_dir=/Backup/docker/omega-telegram
+          oma_memory=/Backup/docker/PeTTa
           mkdir -p "${memory_dir}"
+          oma_mount=""
+          if [ -d "${oma_memory}" ]; then
+            oma_mount="-v ${oma_memory}:/oma:ro"
+          fi
 
           # The package is private, so the pull needs a login even here.
           echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
@@ -263,19 +269,39 @@ jobs:
 
           # The mount covers the image's whole memory/ directory, so whatever
           # the image ships there has to be in the folder too. An empty folder
-          # is seeded with all of it; after that only the prompts are replaced,
-          # so a new image's prompts take effect while the history, Chroma
-          # store and saved files carry over. Core reads prompt_<provider>.txt
-          # and falls back to prompt.txt only when that file is missing.
+          # takes Oma's memory when there is one (history, Chroma store, notes)
+          # and the image's otherwise. Never Oma's prompt.txt, which is what
+          # made the bot autonomous, its goals.txt, which that prompt worked
+          # through, or a .env: one there held a GitHub token the bot read and
+          # pushed with. Every deploy then replaces the prompts with the
+          # image's, so a new image's prompts take effect while memory carries
+          # over. Core reads prompt_<provider>.txt and falls back to prompt.txt
+          # only when that file is missing. A token left anywhere in the folder
+          # stops the deploy, since the agent can read what it remembers.
           # Root in a throwaway container does the copy, since the files
           # belong to the agent's uid and this account has no sudo.
           docker run --rm --entrypoint sh \
             -v "${memory_dir}:/seed" \
+            ${oma_mount} \
             "${IMAGE}" \
             -c 'set -e
-                [ -e /seed/history.metta ] || cp -a "$MEMORY_DIR"/. /seed/
+                if [ ! -e /seed/history.metta ]; then
+                  if [ -e /oma/history.metta ]; then
+                    echo "carrying over the Oma memory in /Backup/docker/PeTTa"
+                    tar -C /oma --exclude="./prompt*.txt" --exclude=./goals.txt \
+                        --exclude=".env" --exclude="*.env" -cf - . | tar -C /seed -xf -
+                  else
+                    cp -a "$MEMORY_DIR"/. /seed/
+                  fi
+                  chown -R 65534:65534 /seed
+                fi
                 cp -af "$MEMORY_DIR"/prompt*.txt /seed/
-                chown 65534:65534 /seed'
+                chown 65534:65534 /seed /seed/prompt*.txt
+                if grep -rIlE "ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,}|(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{32,}" /seed; then
+                  echo "the files above in the memory folder hold what looks like" \
+                       "a token, which the agent could read. Remove it and deploy again." >&2
+                  exit 1
+                fi'
 
           # The prompt ships inside the plugin at plugins/telegram/prompt.txt and
           # is read from there, so it is not copied out of the image and mounted

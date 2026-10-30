@@ -178,9 +178,12 @@ Images go to `ghcr.io/singnet/omega-telegram-snet`, tagged `staging-<sha>` or
 
 The deploy reads the keys from Infisical (`staging` or `prod`), connects over
 SSH, and replaces the container named `omega`. Memory lives in
-`/Backup/docker/omega-telegram`, seeded from the image on the first deploy;
-each later deploy replaces only the prompts in it. `/Backup/docker/PeTTa` is the
-old Oma agent's memory, kept as an archive and no longer mounted. Each message
+`/Backup/docker/omega-telegram`. The first deploy fills it with the old Oma
+agent's memory from `/Backup/docker/PeTTa` (history, Chroma store, notes), but
+not its prompt, its goals or any `.env`; with no such folder it starts from the
+image. Each later deploy replaces only the prompts. `/Backup/docker/PeTTa` is
+left untouched and no longer mounted, and a deploy stops if the memory folder
+holds anything that looks like a GitHub or API token. Each message
 gets at most five agent turns, and the bot wakes on its own once a day. If
 `~/omega/telegram_profile.yaml` exists on the host it is mounted in place of the
 shipped profile, and it must be readable by everyone, since the agent runs as
