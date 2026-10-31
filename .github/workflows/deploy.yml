@@ -273,11 +273,16 @@ jobs:
           # and the image's otherwise. Never Oma's prompt.txt, which is what
           # made the bot autonomous, its goals.txt, which that prompt worked
           # through, or a .env: one there held a GitHub token the bot read and
-          # pushed with. Every deploy then replaces the prompts with the
-          # image's, so a new image's prompts take effect while memory carries
-          # over. Core reads prompt_<provider>.txt and falls back to prompt.txt
-          # only when that file is missing. A token left anywhere in the folder
-          # stops the deploy, since the agent can read what it remembers.
+          # pushed with. config/github_token.txt stays behind for the same
+          # reason, and every token left in what is copied, about 25 in Oma's
+          # history and Chroma store, is masked: its prefix stays and the rest
+          # becomes asterisks of the same length, so the binary history and
+          # Chroma files keep their layout. Every deploy then replaces the
+          # prompts with the image's, so a new image's prompts take effect
+          # while memory carries over. Core reads prompt_<provider>.txt and
+          # falls back to prompt.txt only when that file is missing. A token
+          # still found anywhere in the folder stops the deploy, since the
+          # agent can read what it remembers.
           # Root in a throwaway container does the copy, since the files
           # belong to the agent's uid and this account has no sudo.
           docker run --rm --entrypoint sh \
@@ -289,7 +294,30 @@ jobs:
                   if [ -e /oma/history.metta ]; then
                     echo "carrying over the Oma memory in /Backup/docker/PeTTa"
                     tar -C /oma --exclude="./prompt*.txt" --exclude=./goals.txt \
-                        --exclude=".env" --exclude="*.env" -cf - . | tar -C /seed -xf -
+                        --exclude=".env" --exclude="*.env" \
+                        --exclude=./config/github_token.txt -cf - . | tar -C /seed -xf -
+                    python3 -c "if 1:
+                        import os, re
+                        token = re.compile(
+                            rb\"(ghp_)[A-Za-z0-9]{36}\"
+                            rb\"|(github_pat_)[A-Za-z0-9_]{40,}\"
+                            rb\"|(?<![A-Za-z0-9_-])(sk-)[A-Za-z0-9_-]{32,}\")
+                        def mask(match):
+                            prefix = match.group(1) or match.group(2) or match.group(3)
+                            return prefix + b\"*\" * (len(match.group(0)) - len(prefix))
+                        for root, dirs, files in os.walk(\"/seed\"):
+                            for name in files:
+                                path = os.path.join(root, name)
+                                if os.path.islink(path):
+                                    continue
+                                with open(path, \"rb\") as f:
+                                    data = f.read()
+                                data, count = token.subn(mask, data)
+                                if count:
+                                    with open(path, \"r+b\") as f:
+                                        f.write(data)
+                                    print(\"masked\", count, \"token(s) in\", path)
+                    "
                   else
                     cp -a "$MEMORY_DIR"/. /seed/
                   fi
