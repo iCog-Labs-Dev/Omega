@@ -339,12 +339,24 @@ jobs:
           # pipe, which www-data cannot open: the proxy dies with
           # "open() /dev/stderr failed (13: Permission denied)" and takes the
           # container with it.
-          # The loop limits are core's, and the command line wins over its
-          # config.yaml. Core's defaults give every message 50 turns and every
-          # wake-up more, which a public chat bot spends on follow-ups nobody
-          # asked for. Five turns answer a message, a search included. A
-          # wake-up still grants maxWakeLoops + 1 turns, so the interval is a
-          # day to keep the bot quiet between messages.
+          # The loop limits are core's. Its defaults give every message 50
+          # turns and every wake-up more, which a public chat bot spends on
+          # follow-ups nobody asked for. Five turns answer a message, a search
+          # included. A wake-up still grants maxWakeLoops + 1 turns, so the
+          # interval is a day to keep the bot quiet between messages.
+          # They go in a copy of the image's config.yaml, not on the command
+          # line: core reads a command-line value as text, and its loop stops
+          # on the first sum with '5'. The copy is mounted in place of the
+          # image's, so it must be readable by the agent, which runs as nobody.
+          docker run --rm --entrypoint python3 "${IMAGE}" -c "if 1:
+              import os, sys, yaml
+              path = os.path.join(os.environ['OMEGA_DIR'], 'config', 'config.yaml')
+              config = yaml.safe_load(open(path)) or {}
+              config.update(maxNewInputLoops=5, maxWakeLoops=0, wakeupInterval=86400)
+              yaml.safe_dump(config, sys.stdout, sort_keys=False)
+          " > "${env_dir}/config.yaml"
+          chmod 644 "${env_dir}/config.yaml"
+
           # Core reads the model from the key `model`. Passed as LLM= it was
           # read by nothing, and the provider's default model ran instead.
           docker run -d -it \
@@ -358,11 +370,10 @@ jobs:
             -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
             -e TG_BOT_TOKEN="${TG_BOT_TOKEN}" \
             -v "${memory_dir}:/PeTTa/repos/Omega/memory" \
+            -v "${env_dir}/config.yaml:/etc/omega/config.yaml:ro" \
             "${IMAGE}" \
+            config=/etc/omega/config.yaml \
             commchannel=telegram \
-            maxNewInputLoops=5 \
-            maxWakeLoops=0 \
-            wakeupInterval=86400 \
             TG_CHAT_ID=${TG_CHAT_ID} \
             provider=${LLM_PROVIDER} \
             ${LLM_MODEL:+model=${LLM_MODEL}} \
