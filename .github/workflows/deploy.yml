@@ -249,12 +249,87 @@ jobs:
             echo "using the channel profile at ${profile} (mode ${profile_perms})"
           fi
 
-          mkdir -p /Backup/docker/PeTTa
+          # The bot's own memory, used by nothing else. /Backup/docker/PeTTa is
+          # the old autonomous Oma agent's memory and stays on disk untouched:
+          # mounting it hid the prompts the image ships, so the bot ran Oma's
+          # "never idle" prompt. Oma keeps what it remembers, though: the first
+          # deploy copies that folder's memory across, below.
+          memory_dir=/Backup/docker/omega-telegram
+          oma_memory=/Backup/docker/PeTTa
+          mkdir -p "${memory_dir}"
+          oma_mount=""
+          if [ -d "${oma_memory}" ]; then
+            oma_mount="-v ${oma_memory}:/oma:ro"
+          fi
 
           # The package is private, so the pull needs a login even here.
           echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
           docker pull "${IMAGE}"
           docker rm -f omega 2>/dev/null || true
+
+          # The mount covers the image's whole memory/ directory, so whatever
+          # the image ships there has to be in the folder too. An empty folder
+          # takes Oma's memory when there is one (history, Chroma store, notes)
+          # and the image's otherwise. Never Oma's prompt.txt, which is what
+          # made the bot autonomous, its goals.txt, which that prompt worked
+          # through, or a .env: one there held a GitHub token the bot read and
+          # pushed with. config/github_token.txt stays behind for the same
+          # reason, and every token left in what is copied, about 25 in Oma's
+          # history and Chroma store, is masked: its prefix stays and the rest
+          # becomes asterisks of the same length, so the binary history and
+          # Chroma files keep their layout. Every deploy then replaces the
+          # prompts with the image's, so a new image's prompts take effect
+          # while memory carries over. Core reads prompt_<provider>.txt and
+          # falls back to prompt.txt only when that file is missing. A token
+          # still found anywhere in the folder stops the deploy, since the
+          # agent can read what it remembers.
+          # Root in a throwaway container does the copy, since the files
+          # belong to the agent's uid and this account has no sudo.
+          docker run --rm --entrypoint sh \
+            -v "${memory_dir}:/seed" \
+            ${oma_mount} \
+            "${IMAGE}" \
+            -c 'set -e
+                if [ ! -e /seed/history.metta ]; then
+                  if [ -e /oma/history.metta ]; then
+                    echo "carrying over the Oma memory in /Backup/docker/PeTTa"
+                    tar -C /oma --exclude="./prompt*.txt" --exclude=./goals.txt \
+                        --exclude=".env" --exclude="*.env" \
+                        --exclude=./config/github_token.txt -cf - . | tar -C /seed -xf -
+                    python3 -c "if 1:
+                        import os, re
+                        token = re.compile(
+                            rb\"(ghp_)[A-Za-z0-9]{36}\"
+                            rb\"|(github_pat_)[A-Za-z0-9_]{40,}\"
+                            rb\"|(?<![A-Za-z0-9_-])(sk-)[A-Za-z0-9_-]{32,}\")
+                        def mask(match):
+                            prefix = match.group(1) or match.group(2) or match.group(3)
+                            return prefix + b\"*\" * (len(match.group(0)) - len(prefix))
+                        for root, dirs, files in os.walk(\"/seed\"):
+                            for name in files:
+                                path = os.path.join(root, name)
+                                if os.path.islink(path):
+                                    continue
+                                with open(path, \"rb\") as f:
+                                    data = f.read()
+                                data, count = token.subn(mask, data)
+                                if count:
+                                    with open(path, \"r+b\") as f:
+                                        f.write(data)
+                                    print(\"masked\", count, \"token(s) in\", path)
+                    "
+                  else
+                    cp -a "$MEMORY_DIR"/. /seed/
+                  fi
+                  chown -R 65534:65534 /seed
+                fi
+                cp -af "$MEMORY_DIR"/prompt*.txt /seed/
+                chown 65534:65534 /seed /seed/prompt*.txt
+                if grep -rIlE "ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,}|(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{32,}" /seed; then
+                  echo "the files above in the memory folder hold what looks like" \
+                       "a token, which the agent could read. Remove it and deploy again." >&2
+                  exit 1
+                fi'
 
           # The prompt ships inside the plugin at plugins/telegram/prompt.txt and
           # is read from there, so it is not copied out of the image and mounted
@@ -264,6 +339,26 @@ jobs:
           # pipe, which www-data cannot open: the proxy dies with
           # "open() /dev/stderr failed (13: Permission denied)" and takes the
           # container with it.
+          # The loop limits are core's. Its defaults give every message 50
+          # turns and every wake-up more, which a public chat bot spends on
+          # follow-ups nobody asked for. Five turns answer a message, a search
+          # included. A wake-up still grants maxWakeLoops + 1 turns, so the
+          # interval is a day to keep the bot quiet between messages.
+          # They go in a copy of the image's config.yaml, not on the command
+          # line: core reads a command-line value as text, and its loop stops
+          # on the first sum with '5'. The copy is mounted in place of the
+          # image's, so it must be readable by the agent, which runs as nobody.
+          docker run --rm --entrypoint python3 "${IMAGE}" -c "if 1:
+              import os, sys, yaml
+              path = os.path.join(os.environ['OMEGA_DIR'], 'config', 'config.yaml')
+              config = yaml.safe_load(open(path)) or {}
+              config.update(maxNewInputLoops=5, maxWakeLoops=0, wakeupInterval=86400)
+              yaml.safe_dump(config, sys.stdout, sort_keys=False)
+          " > "${env_dir}/config.yaml"
+          chmod 644 "${env_dir}/config.yaml"
+
+          # Core reads the model from the key `model`. Passed as LLM= it was
+          # read by nothing, and the provider's default model ran instead.
           docker run -d -it \
             --name omega \
             ${RESTART:+--restart=always} \
@@ -274,12 +369,14 @@ jobs:
             -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
             -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
             -e TG_BOT_TOKEN="${TG_BOT_TOKEN}" \
-            -v /Backup/docker/PeTTa:/PeTTa/repos/Omega/memory \
+            -v "${memory_dir}:/PeTTa/repos/Omega/memory" \
+            -v "${env_dir}/config.yaml:/etc/omega/config.yaml:ro" \
             "${IMAGE}" \
+            config=/etc/omega/config.yaml \
             commchannel=telegram \
             TG_CHAT_ID=${TG_CHAT_ID} \
             provider=${LLM_PROVIDER} \
-            ${LLM_MODEL:+LLM=${LLM_MODEL}} \
+            ${LLM_MODEL:+model=${LLM_MODEL}} \
             ${RELEASE_TAG:+releaseTag=${RELEASE_TAG} releaseRepo=${RELEASE_REPO}} \
             ${profile_arg} \
             embeddingprovider=OpenAI
