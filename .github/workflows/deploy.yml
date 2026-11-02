@@ -269,15 +269,20 @@ jobs:
 
           # The mount covers the image's whole memory/ directory, so whatever
           # the image ships there has to be in the folder too. An empty folder
-          # takes Oma's memory when there is one (history, Chroma store, notes)
+          # takes Oma's memory when there is one (Chroma store, notes, research)
           # and the image's otherwise. Never Oma's prompt.txt, which is what
           # made the bot autonomous, its goals.txt, which that prompt worked
           # through, or a .env: one there held a GitHub token the bot read and
-          # pushed with. config/github_token.txt stays behind for the same
-          # reason, and every token left in what is copied, about 25 in Oma's
-          # history and Chroma store, is masked: its prefix stays and the rest
-          # becomes asterisks of the same length, so the binary history and
-          # Chroma files keep their layout. Every deploy then replaces the
+          # pushed with. Not its history either: the last 30 KB of history.metta
+          # go into every prompt, and Oma's is its research log, so on staging
+          # the bot spent every turn after a reply continuing that research.
+          # What Oma learned stays reachable through query, which reads the
+          # Chroma store. config/github_token.txt stays behind, and every token
+          # left in what is copied is masked: its prefix stays and the rest
+          # becomes asterisks of the same length, so the binary Chroma files
+          # keep their layout. A folder an earlier deploy filled, history
+          # included, has that history set aside under a dated name, which
+          # nothing reads. .seeded marks a folder done. Every deploy then replaces the
           # prompts with the image's, so a new image's prompts take effect
           # while memory carries over. Core reads prompt_<provider>.txt and
           # falls back to prompt.txt only when that file is missing. A token
@@ -290,11 +295,16 @@ jobs:
             ${oma_mount} \
             "${IMAGE}" \
             -c 'set -e
-                if [ ! -e /seed/history.metta ]; then
-                  if [ -e /oma/history.metta ]; then
+                if [ ! -e /seed/.seeded ]; then
+                  if [ -e /seed/history.metta ]; then
+                    echo "setting aside the history an earlier deploy carried over from Oma"
+                    mv /seed/history.metta "/seed/history-before-$(date +%F).metta"
+                  elif [ -e /oma/history.metta ]; then
                     echo "carrying over the Oma memory in /Backup/docker/PeTTa"
                     tar -C /oma --exclude="./prompt*.txt" --exclude=./goals.txt \
                         --exclude=".env" --exclude="*.env" \
+                        --exclude=./history.metta --exclude=./history.metta.bak \
+                        --exclude=./.history.metta.swp \
                         --exclude=./config/github_token.txt -cf - . | tar -C /seed -xf -
                     python3 -c "if 1:
                         import os, re
@@ -321,6 +331,7 @@ jobs:
                   else
                     cp -a "$MEMORY_DIR"/. /seed/
                   fi
+                  touch /seed/.seeded
                   chown -R 65534:65534 /seed
                 fi
                 cp -af "$MEMORY_DIR"/prompt*.txt /seed/
@@ -342,8 +353,10 @@ jobs:
           # The loop limits are core's. Its defaults give every message 50
           # turns and every wake-up more, which a public chat bot spends on
           # follow-ups nobody asked for. Five turns answer a message, a search
-          # included. A wake-up still grants maxWakeLoops + 1 turns, so the
-          # interval is a day to keep the bot quiet between messages.
+          # included. maxWakeLoops=0 turns waking off: a wake-up sets
+          # maxWakeLoops + 1 turns and the next iteration takes one away before
+          # it calls the model, so none is left. The bot speaks only when spoken
+          # to; the day-long interval only keeps the wake check rare.
           # They go in a copy of the image's config.yaml, not on the command
           # line: core reads a command-line value as text, and its loop stops
           # on the first sum with '5'. The copy is mounted in place of the
