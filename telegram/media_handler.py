@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from collections import OrderedDict
 from itertools import groupby
 from speech_text import prepare_speech
+import leak_guard
 from speech_language import speech_parts, speech_chunks
 
 logger = logging.getLogger(__name__)
@@ -446,6 +447,10 @@ def generate_and_send(prompt):
         return "IMAGE_DISABLED: image generation is turned off"
     if _prompt_is_unsafe(prompt):
         return "Refused: unsafe image prompt"
+    # The prompt goes out as the photo's caption.
+    leak = leak_guard.find_leak(prompt)
+    if leak is not None:
+        return f"IMAGE_REFUSED_INTERNAL_CONTENT: nothing was sent, because {leak.reason}"
     image_bytes = _generate_image_bytes(prompt)
     if not image_bytes:
         return f"IMAGE_FAILED: could not generate image for: {prompt}"
@@ -625,6 +630,9 @@ def speak(text=""):
         return "VOICE_DISABLED: voice replies are turned off"
     if _prompt_is_unsafe(text):
         return "Refused: unsafe voice content"
+    leak = leak_guard.find_leak(text)
+    if leak is not None:
+        return f"VOICE_REFUSED_INTERNAL_CONTENT: nothing was sent, because {leak.reason}"
     text = prepare_speech(text)
     if not text:
         return "VOICE_INVALID_INPUT: no speakable text after cleanup; ask for text instead of retrying"
@@ -1116,6 +1124,9 @@ def generate_and_send_pdf(content):
         return "Refused: unsafe PDF content"
     if _prompt_is_unsafe(content):
         return "Refused: unsafe PDF content"
+    leak = leak_guard.find_leak(content)
+    if leak is not None:
+        return f"PDF_REFUSED_INTERNAL_CONTENT: nothing was sent, because {leak.reason}"
     try:
         fonts = _load_pdf_fonts(_pdf_font_dir())
     except Exception as error:

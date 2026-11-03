@@ -256,6 +256,30 @@ jobs:
           docker pull "${IMAGE}"
           docker rm -f omega 2>/dev/null || true
 
+          # The memory folder is the old Oma agent's, mounted whole, and it holds
+          # Oma's own prompt.txt: "self-chosen long-term goals", "use send
+          # commands to keep people engaged", "Do not idle". Core reads
+          # memory/prompt_<provider>.txt and falls back to prompt.txt only when
+          # that file is missing, which it is in this folder, so the bot ran
+          # Oma's prompt. The image's prompts are copied out here and mounted
+          # read-only over the same names: the bot reads them, and Oma's files
+          # stay as they are on disk. Where a name is new to the folder, Docker
+          # leaves an empty file there to mount onto.
+          # The folder's .env held a GitHub token the bot read and pushed with.
+          # /dev/null is mounted over it, so the bot sees an empty file and the
+          # file itself is left alone.
+          prompt_dir="${env_dir}/prompts"
+          rm -rf "${prompt_dir}"
+          mkdir -p "${prompt_dir}"
+          docker run --rm --entrypoint sh "${IMAGE}" \
+            -c 'cd "$MEMORY_DIR" && tar -cf - prompt*.txt' | tar -C "${prompt_dir}" -xf -
+          chmod 644 "${prompt_dir}"/prompt*.txt
+          memory_mounts="-v /dev/null:/PeTTa/repos/Omega/memory/.env:ro"
+          for prompt in "${prompt_dir}"/prompt*.txt; do
+            memory_mounts="${memory_mounts} -v ${prompt}:/PeTTa/repos/Omega/memory/${prompt##*/}:ro"
+          done
+          echo "the image's prompts are mounted over the memory folder's:" "${prompt_dir}"/prompt*.txt
+
           # The prompt ships inside the plugin at plugins/telegram/prompt.txt and
           # is read from there, so it is not copied out of the image and mounted
           # back. To override it, mount a file and point TG_PROMPT_PATH at it.
@@ -275,6 +299,7 @@ jobs:
             -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
             -e TG_BOT_TOKEN="${TG_BOT_TOKEN}" \
             -v /Backup/docker/PeTTa:/PeTTa/repos/Omega/memory \
+            ${memory_mounts} \
             "${IMAGE}" \
             commchannel=telegram \
             TG_CHAT_ID=${TG_CHAT_ID} \
