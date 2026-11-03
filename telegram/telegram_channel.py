@@ -24,6 +24,7 @@ from markdown_render import to_markdownv2
 
 from config_helper import is_category_blocked, get_spam_protection_config
 import media_handler
+import leak_guard
 import channels
 from config import config_get_by_key
 
@@ -1254,6 +1255,13 @@ def send_message(text):
                 f"reply cannot go to chat {target_chat_id}. Nothing was sent. "
                 f"Send without a chat prefix.")
 
+    # The model reads its whole prompt and working state every turn and can be
+    # talked into copying them out; a reply that does is not delivered.
+    leak = leak_guard.find_leak(text)
+    if leak is not None:
+        logging.warning(f"Refused a send that gives away internal context: {leak.reason}")
+        return f"{_INTERNAL_REFUSAL} {leak.reason}"
+
     # Run the async check safely in a synchronous context
     try:
         loop = asyncio.get_running_loop()
@@ -1363,7 +1371,12 @@ class SEND_REFUSED_UNSAFE_CONTENT(SendRefused):
     pass
 
 
+class SEND_REFUSED_INTERNAL_CONTENT(SendRefused):
+    pass
+
+
 _UNSAFE_REFUSAL = "Error: Refused: Unsafe response content."
+_INTERNAL_REFUSAL = "Error: Refused: Nothing was sent, because"
 
 
 class TelegramChannel(channels.CommChannel):
@@ -1395,8 +1408,12 @@ class TelegramChannel(channels.CommChannel):
         # failed result of its send.
         result = send_message(message)
         if isinstance(result, str) and result.startswith("Error:"):
-            refusal = (SEND_REFUSED_UNSAFE_CONTENT if result == _UNSAFE_REFUSAL
-                       else SEND_REFUSED_ONLY_THE_CURRENT_CHAT_CAN_BE_ANSWERED)
+            if result == _UNSAFE_REFUSAL:
+                refusal = SEND_REFUSED_UNSAFE_CONTENT
+            elif result.startswith(_INTERNAL_REFUSAL):
+                refusal = SEND_REFUSED_INTERNAL_CONTENT
+            else:
+                refusal = SEND_REFUSED_ONLY_THE_CURRENT_CHAT_CAN_BE_ANSWERED
             raise refusal(result.removeprefix("Error:").strip())
 
     def is_tool_disabled(self, tool_name: str) -> bool:
