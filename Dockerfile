@@ -59,18 +59,6 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages \
     torch==2.12.1 \
  && python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 
-# A plugin declares its own dependencies in plugins/<name>/requirements.txt, so
-# they are installed here rather than being added to the root requirements of
-# every deployment that does not enable the plugin.
-COPY ./plugins /tmp/plugins
-RUN for req in /tmp/plugins/*/requirements.txt; do \
-      if [ -f "$req" ]; then \
-        echo "Installing plugin dependencies from $req" \
-        && python3 -m pip install --no-cache-dir --break-system-packages -r "$req"; \
-      fi; \
-    done \
- && rm -rf /tmp/plugins
-
 # Pre-download the sentence-transformers model so runtime does not need network access.
 RUN mkdir -p "${HF_HOME}" "${SENTENCE_TRANSFORMERS_HOME}" \
  && python3 - <<PY
@@ -118,7 +106,10 @@ RUN apt-get update \
       git \
       nginx-light \
       gettext-base \
+      graphviz \
+      fonts-dejavu-core \
       poppler-utils \
+      util-linux \
       curl \
  && rm -rf /var/lib/apt/lists/*
 
@@ -146,11 +137,14 @@ COPY --from=versioned-source /omega-source ${OMEGA_DIR}
 
 RUN cp ${OMEGA_DIR}/run.metta /PeTTa/run.metta \
  && mkdir -p ${MEMORY_DIR}/chroma_db \
+ && mkdir -p /memory-transfer \
  && ln -s ${MEMORY_DIR}/chroma_db ./chroma_db \
  && chmod +x ${OMEGA_DIR}/entrypoint.sh \
  && chmod +x ${OMEGA_DIR}/scripts/import_knowledge.sh \
  && chmod +x ${OMEGA_DIR}/scripts/omega \
  && chown -R 65534:65534 ${MEMORY_DIR} \
+ && chown 65534:65534 /memory-transfer \
+ && chmod 0700 /memory-transfer \
  && find ${MEMORY_DIR} -type f -exec chmod 0644 {} \; \
  && chmod 0444 ${MEMORY_DIR}/prompt.txt \
  && chown -R 65534:65534 /opt/huggingface /opt/sentence_transformers
