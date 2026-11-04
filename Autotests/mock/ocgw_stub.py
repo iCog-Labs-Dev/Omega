@@ -15,17 +15,20 @@ the task text is the one thing a test controls all the way through:
 
 The stub records every request, so a test can check what the Gateway received
 instead of inferring it from the agent's history: whether Nginx injected the
-token, and whether two delegations landed in separate sessions.
+token, whether two delegations landed in separate sessions, and whether a
+persistent subagent supplied ``previous_response_id`` when it resumed.
 """
 import json
+import os
 import re
 import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-GATEWAY_PORT = 18789
+GATEWAY_PORT = int(os.environ.get("OMEGA_GATEWAY_PORT", "18789"))
 RESPONSES_PATH = "/v1/responses"
+TOOL_BUDGET_HEALTH_PATH = "/plugins/omega-tool-budget/health"
 
 
 class GatewayRecorder:
@@ -78,9 +81,27 @@ def _make_handler(recorder):
             for key, value in (extra_headers or {}).items():
                 self.send_header(key, value)
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                # Expected when a deadline closes the client connection and
+                # aborts a run before this deterministic stub wakes up.
+                pass
 
         def do_GET(self):
+            if self.path == TOOL_BUDGET_HEALTH_PATH:
+                auth = self.headers.get("Authorization", "")
+                if not recorder.token or auth != f"Bearer {recorder.token}":
+                    return self._reply(401, {
+                        "error": {"message": "invalid or missing token",
+                                  "type": "invalid_token"}
+                    })
+                return self._reply(200, {
+                    "ok": True,
+                    "id": "omega-tool-budget",
+                    "protocol": 1,
+                    "enforcement": "before_tool_call",
+                })
             self._reply(200, {"status": "alive"})
 
         def do_POST(self):
@@ -100,6 +121,7 @@ def _make_handler(recorder):
                 "auth_ok": bool(recorder.token) and auth == f"Bearer {recorder.token}",
                 "model": body.get("model"),
                 "input": task,
+                "previous_response_id": body.get("previous_response_id"),
                 "response_id": None,
                 "received_at": time.time(),
             }
@@ -138,7 +160,16 @@ def _make_handler(recorder):
                                          "output": [{"type": "reasoning", "summary": []}]})
 
             exact = re.search(r"Reply with exactly:\s*(.+?)\s*$", task, re.S)
-            reply = exact.group(1).strip() if exact else f"ack: {task[:200]}"
+            if entry["agent"] in {"research-agent", "coding-agent", "reviewer-agent"}:
+                reply = json.dumps({
+                    "status": "completed",
+                    "summary": f"stub result from {entry['agent']}",
+                    "findings": ["bounded context received"],
+                    "artifacts": [],
+                    "evidence": [f"response_id={response_id}"],
+                })
+            else:
+                reply = exact.group(1).strip() if exact else f"ack: {task[:200]}"
             entry["outcome"] = "200 ok"
             entry["reply"] = reply
             recorder.record(entry)

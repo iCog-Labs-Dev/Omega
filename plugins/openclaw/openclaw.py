@@ -28,6 +28,8 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 RESPONSES_PATH = "/v1/responses"
+TOOL_BUDGET_HEALTH_PATH = "/plugins/omega-tool-budget/health"
+TOOL_BUDGET_MARKER_PREFIX = "OMEGA_TOOL_BUDGET_V1 "
 # Required by the request schema, but it selects the agent rather than a
 # model: the run uses whatever model that agent is configured with.
 MODEL_ROUTE = "openclaw"
@@ -49,13 +51,14 @@ _seq = 0
 class OpenClawError(RuntimeError):
     """Base error raised by the OpenClaw bridge."""
 
-    def __init__(self, msg: str = "OpenClaw Error"):
+    def __init__(self, msg: str = "OpenClaw Error", outcome: str = "failed"):
         """Store the human-readable failure description.
 
         Args:
             msg (str): Message shown to the agent in the skill result.
         """
         self.msg = msg
+        self.outcome = outcome
         super().__init__(msg)
 
 
@@ -267,7 +270,11 @@ def _run(
 def _send_with_startup_retry(
     message: str,
     openclaw_url: str,
-    openclaw_agent: str
+    openclaw_agent: str,
+    previous_response_id: str | None = None,
+    max_output_tokens: int | None = None,
+    max_tool_calls: int | None = None,
+    timeout_seconds: float = SESSION_TIMEOUT,
 ) -> str:
     """Run one turn, retrying while the Gateway reports it is still starting.
 
@@ -292,7 +299,11 @@ def _send_with_startup_retry(
             return _send(
                 message=message,
                 openclaw_url=openclaw_url,
-                openclaw_agent=openclaw_agent
+                openclaw_agent=openclaw_agent,
+                previous_response_id=previous_response_id,
+                max_output_tokens=max_output_tokens,
+                max_tool_calls=max_tool_calls,
+                timeout_seconds=timeout_seconds,
             )
         except OpenClawStartupError as startup_error:
             last_error = startup_error
@@ -310,7 +321,11 @@ def _send_with_startup_retry(
 def _send(
     message: str,
     openclaw_url: str,
-    openclaw_agent: str
+    openclaw_agent: str,
+    previous_response_id: str | None = None,
+    max_output_tokens: int | None = None,
+    max_tool_calls: int | None = None,
+    timeout_seconds: float = SESSION_TIMEOUT,
 ) -> str:
     """Post one agent turn to the Gateway and return the result.
 
@@ -336,22 +351,101 @@ def _send(
     try:
         with requests.Session() as session:
             session.trust_env = False
+            message_with_budget = message
+            if max_tool_calls is not None:
+                health_url, health_headers = _request_target_for_path(
+                    openclaw_url, TOOL_BUDGET_HEALTH_PATH
+                )
+                _verify_tool_budget_enforcer(
+                    session,
+                    health_url,
+                    health_headers,
+                    min(float(timeout_seconds), 10.0),
+                )
+                message_with_budget = _budgeted_message(message, max_tool_calls)
+            payload = {
+                "model": MODEL_ROUTE,
+                "input": message_with_budget,
+            }
+            if previous_response_id:
+                payload["previous_response_id"] = previous_response_id
+            if max_output_tokens is not None:
+                payload["max_output_tokens"] = int(max_output_tokens)
+            if max_tool_calls is not None:
+                # OpenResponses accepts this field but currently ignores it.
+                # The companion omega-tool-budget extension enforces the
+                # first-line marker before each worker tool execution. Keep the
+                # field as well for future native endpoint compatibility.
+                payload["max_tool_calls"] = int(max_tool_calls)
             response = session.post(
                 url=endpoint,
-                json={
-                    "model": MODEL_ROUTE,
-                    "input": message,
-                },
+                json=payload,
                 headers=headers,
-                timeout=SESSION_TIMEOUT,
+                timeout=float(timeout_seconds),
             )
+    except requests.Timeout as request_error:
+        raise OpenClawError(
+            f"OpenClaw Gateway timed out: {request_error}", "timed_out"
+        ) from request_error
     except requests.RequestException as request_error:
         raise OpenClawError(
             f"Cannot reach OpenClaw Gateway: {request_error}"
-        )
+        ) from request_error
     if not response.ok:
         raise _http_error(response)
     return _extract_reply(response.json())
+
+
+def _budgeted_message(message: str, max_tool_calls: int) -> str:
+    """Prepend the machine-readable budget consumed by the Gateway hook."""
+    limit = int(max_tool_calls)
+    if limit < 1:
+        raise OpenClawError("max_tool_calls must be a positive integer")
+    marker = json.dumps(
+        {"max_tool_calls": limit}, ensure_ascii=True, separators=(",", ":")
+    )
+    return f"{TOOL_BUDGET_MARKER_PREFIX}{marker}\n{message}"
+
+
+def _verify_tool_budget_enforcer(
+    session: requests.Session,
+    health_url: str,
+    headers: dict,
+    timeout_seconds: float,
+) -> None:
+    """Fail closed unless the OpenClaw pre-tool enforcement hook is active."""
+    try:
+        response = session.get(
+            url=health_url,
+            headers=headers,
+            timeout=timeout_seconds,
+        )
+    except requests.RequestException as exc:
+        raise OpenClawError(
+            f"Cannot verify OpenClaw tool-budget enforcement: {exc}"
+        ) from exc
+    if not response.ok:
+        raise OpenClawError(
+            "OpenClaw tool-budget enforcer is required but its authenticated "
+            f"health endpoint returned HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise OpenClawError(
+            "OpenClaw tool-budget enforcer returned an invalid health response"
+        ) from exc
+    expected = {
+        "ok": True,
+        "id": "omega-tool-budget",
+        "protocol": 1,
+        "enforcement": "before_tool_call",
+    }
+    if any(payload.get(key) != value for key, value in expected.items()):
+        raise OpenClawError(
+            "OpenClaw tool-budget enforcer did not advertise the required "
+            "before_tool_call protocol"
+        )
 
 
 def _request_target(openclaw_url: str):
@@ -376,10 +470,15 @@ def _request_target(openclaw_url: str):
         tuple[str, dict]: The request URL and the headers to seed (the caller
             still adds `x-openclaw-agent-id`).
     """
+    return _request_target_for_path(openclaw_url, RESPONSES_PATH)
+
+
+def _request_target_for_path(openclaw_url: str, path: str):
+    """Build an authenticated proxy or direct target for one Gateway path."""
     gateway_url = config_get_by_key("GATEWAY_URL")
     if gateway_url:
         logger.debug(f"Using the Nginx proxy at {gateway_url} for OpenClaw")
-        return f"{gateway_url.rstrip('/')}/openclaw{RESPONSES_PATH}", {}
+        return f"{gateway_url.rstrip('/')}/openclaw{path}", {}
     token = _get_token()
     if not token:
         # Sending an empty Bearer would come back as a plain 401, which is
@@ -389,7 +488,9 @@ def _request_target(openclaw_url: str):
             "empty, so the request cannot be authenticated"
         )
     logger.debug("No GATEWAY_URL, calling the OpenClaw Gateway directly")
-    return _endpoint(openclaw_url), {"Authorization": f"Bearer {token}"}
+    return _gateway_base(openclaw_url) + path, {
+        "Authorization": f"Bearer {token}"
+    }
 
 
 def _endpoint(openclaw_url: str) -> str:
@@ -404,12 +505,17 @@ def _endpoint(openclaw_url: str) -> str:
     Returns:
         str: Absolute URL of the OpenResponses endpoint.
     """
+    return _gateway_base(openclaw_url) + RESPONSES_PATH
+
+
+def _gateway_base(openclaw_url: str) -> str:
+    """Normalize a configured HTTP or legacy WebSocket Gateway base URL."""
     base = openclaw_url.strip().rstrip("/")
     for ws_scheme, http_scheme in (("wss://", "https://"), ("ws://", "http://")):
         if base.startswith(ws_scheme):
             base = http_scheme + base[len(ws_scheme):]
             break
-    return base + RESPONSES_PATH
+    return base
 
 
 def _http_error(response: requests.Response) -> OpenClawError:
@@ -445,7 +551,16 @@ def _http_error(response: requests.Response) -> OpenClawError:
             )
             retry_after = 1.0
         return OpenClawStartupError(message, retry_after)
-    return OpenClawError(f"HTTP {response.status_code}: {message}")
+    lowered = str(message).lower()
+    if response.status_code in (408, 504) or "timeout" in lowered:
+        outcome = "timed_out"
+    elif "cancel" in lowered:
+        outcome = "cancelled"
+    elif response.status_code in (403, 409, 423, 429):
+        outcome = "blocked"
+    else:
+        outcome = "failed"
+    return OpenClawError(f"HTTP {response.status_code}: {message}", outcome)
 
 
 def _extract_reply(payload: dict) -> str:
@@ -473,6 +588,21 @@ def _extract_reply(payload: dict) -> str:
         if isinstance(fragment, dict) and fragment.get("type") == "output_text"
     ]
     reply = "\n".join(text for text in texts if text.strip()).strip()
+    response_status = str(payload.get("status", "completed")).lower()
+    if response_status in {"cancelled", "canceled", "blocked", "failed"}:
+        return json.dumps({
+            "status": response_status,
+            "responseId": payload.get("id"),
+            "message": reply or str(payload.get("error") or response_status),
+        }, ensure_ascii=False)
+    if response_status == "incomplete":
+        reason = str((payload.get("incomplete_details") or {}).get("reason", ""))
+        status = "timed_out" if "timeout" in reason else "blocked"
+        return json.dumps({
+            "status": status,
+            "responseId": payload.get("id"),
+            "message": reply or f"OpenClaw response incomplete: {reason or 'unknown'}",
+        }, ensure_ascii=False)
     if not reply:
         raise OpenClawError(
             f"OpenClaw returned no textual reply; keys={sorted(payload)}"

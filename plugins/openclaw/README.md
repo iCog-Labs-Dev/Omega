@@ -1,13 +1,40 @@
 # OpenClaw plugin
 
+> **OpenClaw is used only as the MVP worker-execution adapter. It lets the
+> team validate persistent multi-agent delegation against a real runtime; it
+> is not proposed as a mandatory Omega core dependency. Selection, bounded
+> context, persistence, and structured results are Omega-owned contracts, and
+> the next architecture phase will add a native Omega executor behind an
+> explicit replaceable backend interface.**
+
 Adds the `delegate-task-to-openclaw-agent` skill, which hands a self-contained
 task to an agent running on an external [OpenClaw](https://docs.openclaw.ai)
 Gateway and reports its reply.
+
+It also contains the experimental persistent-subagent MVP. The MVP keeps
+Omega as the continuous orchestrator and adds three definitions around one
+runtime:
+
+| Definition | Capabilities | Tool categories |
+| --- | --- | --- |
+| `research-agent` | research, search, comparison, summarisation | web search, file/memory reads |
+| `coding-agent` | coding, debugging, testing, repository inspection | file reads/writes, shell, tests, git reads |
+| `reviewer-agent` | review, validation, critique | file/test/result inspection |
+
+The definitions are routing and policy metadata, not three copied agent
+implementations. All three use the same selector, context projector, OpenClaw
+executor, SQLite session store, and structured result contract.
 
 Each delegation runs in its own OpenClaw session: the
 [OpenResponses HTTP API](https://docs.openclaw.ai/gateway/openresponses-http-api)
 is stateless per request and generates a fresh session key for every call, so
 delegated tasks never inherit context from each other.
+
+Persistent subagent calls are the deliberate exception: a new task still gets
+a new session, while `resume-subagent-session` sends the stored
+`previous_response_id`. OpenClaw then continues that one worker session. The
+session id, run records, projected prompts, raw worker replies, compact
+summaries, and continuation id are indexed in one local SQLite database.
 
 Delegation is **asynchronous**. A Gateway turn can take minutes while the agent
 loop is single-threaded, so the skill hands the task to a worker thread and
@@ -48,7 +75,42 @@ The target agent must exist in `openclaw.json` under `agents.entries`. The
 default install provides `main`. The run uses whatever model that agent is
 configured with - the plugin never overrides it.
 
-### 3. Get the Gateway token
+For the persistent-subagent skills, configure agents with these exact ids:
+`research-agent`, `coding-agent`, and `reviewer-agent`. Give each a separate
+workspace and an OpenClaw `tools.allow`/`tools.deny` policy matching the table
+above. The Omega runtime rejects explicitly requested tool categories that
+are outside its definition, while the Gateway policy is the enforcement layer
+for tools the worker can actually invoke. Specialists should not be allowed to
+delegate recursively in this MVP.
+
+### 3. Install the required tool-budget enforcer
+
+OpenClaw's OpenResponses endpoint accepts `max_tool_calls` but does not enforce
+it. Persistent workers therefore require the companion native OpenClaw plugin
+in [`tool-budget-enforcer`](./tool-budget-enforcer). It registers a
+`before_tool_call` gate, counts each attempted worker tool call, and blocks the
+`N+1` call before execution. The dedicated Omega worker ids fail closed when a
+run has no valid budget marker.
+
+From the Omega checkout:
+
+```bash
+cd plugins/openclaw/tool-budget-enforcer
+npm test
+openclaw plugins install --link "$PWD" --force
+openclaw plugins enable omega-tool-budget
+openclaw config set plugins.entries.omega-tool-budget.hooks.allowConversationAccess true
+openclaw plugins reload omega-tool-budget
+openclaw plugins inspect omega-tool-budget --runtime --json
+```
+
+The conversation-access grant lets `before_agent_run` read the first-line
+budget marker and bind it to the OpenClaw run. The enforcement hook itself runs
+before every tool. Omega verifies the plugin's authenticated health endpoint
+before submitting any bounded worker request and refuses the run if the plugin
+is absent or incompatible.
+
+### 4. Get the Gateway token
 
 Token auth is the default (`gateway.auth.mode: "token"`). The value lives in
 the Gateway's `.env` as `OPENCLAW_GATEWAY_TOKEN`.
@@ -61,6 +123,7 @@ the Gateway's `.env` as `OPENCLAW_GATEWAY_TOKEN`.
 openClawEnabled: enabled
 openClawURL: "http://172.17.0.1:18789"
 openClawAgent: "main"
+subagentStorePath: "./memory/subagent_sessions.sqlite3"
 ```
 
 `config/plugins.yaml`:
@@ -178,6 +241,211 @@ Two consequences worth knowing:
 `reply` is truncated to `MAX_REPLY_CHARS` so that one large answer cannot evict
 the rest of the history window (`maxHistory`).
 
+## Persistent subagent MVP
+
+### Delegate a new task
+
+The selector is deterministic. `research`, `coding`, and `review` select the
+matching definition; an explicit-agent skill is available for tests or when
+Omega already knows the desired worker.
+
+```text
+delegate-task-to-subagent(
+  task="Research persistent OpenClaw sessions",
+  capability="research",
+  context="Only compare session creation and continuation; cite evidence"
+)
+```
+
+At the MeTTa skill surface this is:
+
+```metta
+(delegate-task-to-subagent
+  "Research persistent OpenClaw sessions"
+  "research"
+  "Only compare session creation and continuation; cite evidence")
+```
+
+The third argument can instead be a JSON object with `context`, `facts`,
+`constraints`, `artifacts`, `expected_output`, `evaluation_criteria`,
+`requested_tools`, `scope_id`, and `budget`. Nothing from Omega's full history
+is added implicitly. A budget may lower (but never raise) the system ceilings
+for context characters, output tokens, tool calls, and elapsed seconds:
+
+```json
+{
+  "scope_id": "workflow-42",
+  "requested_tools": ["read-file"],
+  "budget": {
+    "max_context_chars": 8000,
+    "max_output_tokens": 1000,
+    "max_tool_calls": 5,
+    "timeout_seconds": 120
+  }
+}
+```
+
+Channel users can request this in ordinary language. On `dev/experimental`,
+Omega's provider-native structured tool calls keep task, capability, and
+context as separate named parameters. If context begins like a structured
+object but is not valid JSON, delegation is rejected instead of silently using
+the default scope or budget.
+
+The resolved tool subset is retained in the prepared run and worker prompt.
+The adapter forwards `max_output_tokens` and `max_tool_calls`, prepends a
+machine-readable budget marker, and verifies the enforcement plugin before the
+worker starts. The OpenClaw plugin binds that marker to the run and blocks tool
+attempts beyond the limit in `before_tool_call`. Per-agent
+`tools.allow`/`tools.deny` remains the authorization boundary for *which* tools
+may run; the budget hook independently limits *how many* may run. A future
+native executor must enforce both contracts directly.
+
+The immediate result identifies the persisted work:
+
+```json
+{
+  "status": "accepted",
+  "agent_id": "research-agent",
+  "session_id": "ses-...",
+  "run_id": "run-..."
+}
+```
+
+When the worker finishes, the heartbeat adds one bounded line to Omega's
+history. Completion is first committed to a SQLite outbox, then leased,
+appended and flushed to history, and finally acknowledged. An interrupted
+delivery is retried without duplicating a result already present in history.
+The full projected prompt and raw reply remain only in SQLite:
+
+```text
+SUBAGENT_RESULT agent=research-agent session=ses-... run=run-... status=completed summary=... findings=... evidence=...
+```
+
+Terminal states remain distinct: `completed`, `failed`, `cancelled`,
+`blocked`, and `timed_out` are persisted and reported without coercion.
+A timed-out result includes a retry hint for the coordinator, but retry is a
+decision rather than an automatic loop: the coordinator should first inspect
+possible partial effects and then submit a smaller task if repeating it is
+safe.
+
+There is no universal subagent runtime standard. This MVP uses a practical
+three-tier policy: about 120 seconds for quick review/lookup work, 300 seconds
+as the normal default, and up to the 600-second system ceiling for bounded
+coding or deeper research. Set `budget.timeout_seconds` per run. When the
+deadline expires, Omega closes the OpenResponses request; OpenClaw connects
+that client disconnect to its run abort signal, and Omega persists and
+delivers `timed_out` back to the coordinator.
+
+### Resume the same task
+
+Use the earlier `session_id`. This creates a different `run_id` and sends the
+last OpenClaw response id as `previous_response_id`:
+
+```metta
+(resume-subagent-session
+  "ses-..."
+  "Continue the research and verify restart persistence"
+  "Limit the follow-up to continuation behavior")
+```
+
+Use a new delegation, not resume, for unrelated work. A session cannot be
+resumed as a different agent. SQLite serializes run creation, and a second
+run for the same session is rejected while the first remains `running`.
+
+### Inspect progress
+
+The coordinator can inspect one known session without loading its private
+worker messages into the main context:
+
+```metta
+(inspect-subagent-session "ses-...")
+```
+
+The result contains the selected agent, current session status, summary, total
+run count, and up to 20 recent run records. It excludes projected prompts, raw
+worker replies, and the OpenClaw continuation id. This makes questions such as
+"which specialist is handling this?" and "did the resumed run finish?"
+answerable through Telegram, IRC, or any other configured channel.
+
+### Dispose sessions and workflow scopes
+
+Dispose an idle session while retaining non-sensitive run metadata:
+
+```metta
+(dispose-subagent-session "ses-..." false)
+```
+
+This deletes private messages, clears the continuation id, removes pending
+delivery records, and prevents later resume. Pass `true` to purge the session
+and all of its runs. To clean up all sessions assigned the same `scope_id`:
+
+```metta
+(cleanup-subagent-scope "workflow-42" true)
+```
+
+Active sessions are reported as busy rather than being deleted underneath a
+running worker. Omega does not yet expose a generic cross-plugin space-delete
+event, so workflow/space owners must call this cleanup skill from their
+existing teardown path.
+
+For an end-to-end chat demonstration and expected messages, see
+[`docs/tutorial-09-persistent-subagents.md`](../../docs/tutorial-09-persistent-subagents.md).
+
+### Explicit worker override
+
+```metta
+(delegate-task-to-specific-subagent
+  "Review the implementation against the acceptance criteria"
+  "reviewer-agent"
+  "Inspect only the supplied patch and test results")
+```
+
+### Stored model
+
+The single SQLite file has four tables:
+
+- `subagent_sessions`: worker/scope ownership, lifecycle state, summary, and
+  the latest OpenClaw continuation id;
+- `subagent_runs`: one row for every initial invocation or resume;
+- `subagent_messages`: the bounded input projection, raw reply, and failures;
+- `subagent_outbox`: durable result delivery state, attempts, leases, and
+  acknowledgements.
+
+OpenClaw remains the source of truth for the worker's internal tool transcript;
+the local table records what HyperClaw sent and what the worker returned. This
+avoids copying large child traces into Omega while keeping enough local state
+for audit, selection, and resume.
+
+There is intentionally no FTS table in this first MVP. Search, learned ranking,
+parallel orchestration policy, child-to-child messaging, recursive delegation,
+and crash recovery/reconciliation for in-flight worker threads are follow-up
+work. Completed result delivery survives restart; a request that was still
+executing when the process died does not.
+
+### Run the focused MVP tests
+
+From the repository root:
+
+```bash
+python -m pytest Autotests/unit/test_subagents_unit.py \
+  Autotests/unit/test_openclaw_unit.py -q
+npm --prefix plugins/openclaw/tool-budget-enforcer test
+```
+
+These tests require no live Gateway. For a live demo, enable the plugin and
+OpenResponses endpoint, create the three OpenClaw agents, delegate a research
+task, copy its returned `session_id`, and call the resume skill. Inspect run
+separation with:
+
+```bash
+sqlite3 memory/subagent_sessions.sqlite3 \
+  "select session_id, agent_id, status, summary from subagent_sessions;"
+sqlite3 memory/subagent_sessions.sqlite3 \
+  "select run_id, session_id, goal, status from subagent_runs order by started_at;"
+sqlite3 memory/subagent_sessions.sqlite3 \
+  "select delivery_id, run_id, state, attempts from subagent_outbox;"
+```
+
 ## Troubleshooting
 
 | Error | Cause |
@@ -188,6 +456,8 @@ the rest of the history window (`maxHistory`).
 | `Cannot reach OpenClaw Gateway` | Wrong `openClawURL`, or the Gateway is bound to loopback only |
 | `missing scope ... (MISSING_SCOPE)` | The request went to the WebSocket surface instead of `/v1/responses` |
 | `HTTP 504` | The Gateway took longer than the proxy's `proxy_read_timeout` to answer |
+| `tool-budget enforcer is required` | Install/enable `omega-tool-budget`, grant its conversation hook access, and reload the Gateway plugin |
+| Worker tool reports `max_tool_calls exhausted` | The enforced per-run call limit was reached; inspect partial work and submit a new bounded run only if safe |
 | `busy` and no delegation starts | `MAX_IN_FLIGHT` tasks are still running; they clear as the Gateway answers |
 | No `OPENCLAW_RESULT` ever appears | The container restarted mid-flight, or the plugin's heartbeat listener was not registered - check for `openclaw-plugin: OpenClaw integration is enabled` on startup |
 
