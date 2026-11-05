@@ -5,7 +5,7 @@
 # copies the plugin into core and adds it the way core supports, without changing
 # any core file. Point it at whichever core you want:
 #
-#   ./run-plugin                                   # singnet/Omega main, built from source
+#   ./run-plugin                                   # telegram-core, built from source
 #   ./run-plugin --base-image IMAGE                # layer onto a published core image
 #   ./run-plugin --core-dir ../Omega               # an existing core checkout
 #   ./run-plugin --test                            # the plugin's own suite, inside the container
@@ -25,8 +25,10 @@
 # them is what broke the previous launcher against newer core.
 set -euo pipefail
 
-CORE_REMOTE="https://github.com/singnet/Omega.git"
-CORE_REF="main"
+# singnet/Omega main plus the open core changes this plugin needs; see the
+# telegram-core-recipe branch of iCog-Labs-Dev/Omega.
+CORE_REMOTE="https://github.com/iCog-Labs-Dev/Omega.git"
+CORE_REF="telegram-core"
 CORE_DIR=""
 BASE_IMAGE=""
 PLUGIN_DIR=""
@@ -54,8 +56,8 @@ usage() {
     sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; $d'
     cat <<'USAGE'
 Options:
-  --core-remote URL     git remote to build core from (default: singnet/Omega)
-  --core-ref REF        branch, tag or sha (default: main)
+  --core-remote URL     git remote to build core from (default: iCog-Labs-Dev/Omega)
+  --core-ref REF        branch, tag or sha (default: telegram-core)
   --core-dir PATH       use an existing core checkout instead of cloning
   --base-image IMAGE    layer onto a published core image; skips the core build
   --plugin-dir PATH     plugin source (default: ./telegram or ./plugins/telegram)
