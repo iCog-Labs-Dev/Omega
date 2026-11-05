@@ -26,8 +26,8 @@
 set -euo pipefail
 
 # singnet/Omega main plus the open core changes this plugin needs; see the
-# telegram-core-recipe branch of iCog-Labs-Dev/Omega.
-CORE_REMOTE="https://github.com/iCog-Labs-Dev/Omega.git"
+# telegram-core-recipe branch of singnet/Omega_CustomBots.
+CORE_REMOTE="https://github.com/singnet/Omega_CustomBots.git"
 CORE_REF="telegram-core"
 CORE_DIR=""
 BASE_IMAGE=""
@@ -56,7 +56,7 @@ usage() {
     sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; $d'
     cat <<'USAGE'
 Options:
-  --core-remote URL     git remote to build core from (default: iCog-Labs-Dev/Omega)
+  --core-remote URL     git remote to build core from (default: singnet/Omega_CustomBots)
   --core-ref REF        branch, tag or sha (default: telegram-core)
   --core-dir PATH       use an existing core checkout instead of cloning
   --base-image IMAGE    layer onto a published core image; skips the core build
