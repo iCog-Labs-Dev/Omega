@@ -1,0 +1,12 @@
+# Branches merged onto singnet/Omega main to make telegram-core.
+#
+# One branch of iCog-Labs-Dev/Omega per line, merged in this order. The
+# optional second field names the upstream PR; once that PR is merged the
+# branch is skipped. A branch that is already part of main is skipped too.
+#
+#   <branch>                            [<owner/repo>#<number>]
+
+feat/install-plugin-requirements      singnet/Omega#372
+feat/plugin-manifest-dropins
+fix/channel-owns-its-prompt
+feat/channel-tool-veto

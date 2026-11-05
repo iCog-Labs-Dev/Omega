@@ -1,0 +1,104 @@
+name: telegram-core
+
+# Builds the core the Telegram bot runs on: singnet/Omega main with the
+# branches in branches.txt merged on top (see merge.sh).
+#
+# A push to this branch runs it. To pick up a newer upstream main without
+# changing the list, push an empty commit:
+#
+#   git commit --allow-empty -m "sync with upstream main" && git push
+#
+# The result is tested the way upstream's CI tests core (MeTTa suite inside the
+# image, Python suite on the runner) and only then published: force-pushed as
+# branch telegram-core, plus a telegram-core-<date>-<sha> tag that keeps the
+# commit fetchable after the branch moves on. Staging builds from the branch;
+# production pins CORE_REF to a tagged commit that has passed staging.
+#
+# The workflow lives on this branch only, not on the default branch, so it has
+# no schedule or manual trigger; GitHub runs those from the default branch.
+
+on:
+  push:
+    branches: [telegram-core-recipe]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: telegram-core
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: telegram-core
+  IMAGE: telegram-core:ci
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the recipe
+        uses: actions/checkout@v4
+        with:
+          path: recipe
+          persist-credentials: false
+
+      - name: Merge the branches onto upstream main
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./recipe/merge.sh recipe/branches.txt core
+
+      - name: Compare with the published core
+        id: published
+        working-directory: core
+        env:
+          HEAD_SHA: ${{ steps.merge.outputs.head }}
+        run: |
+          set -euo pipefail
+          # Same tree as what is published means nothing the bot runs changed,
+          # so there is nothing to test or publish.
+          if git fetch -q fork "+refs/heads/${TARGET_BRANCH}:refs/remotes/fork/${TARGET_BRANCH}" 2>/dev/null \
+             && git diff --quiet "fork/${TARGET_BRANCH}" "$HEAD_SHA"; then
+            echo "unchanged=true" >> "$GITHUB_OUTPUT"
+            echo "${TARGET_BRANCH} already has this tree: $(git rev-parse "fork/${TARGET_BRANCH}")"
+          else
+            echo "unchanged=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the core image
+        if: steps.published.outputs.unchanged == 'false'
+        run: docker build -t "$IMAGE" core
+
+      - name: MeTTa tests
+        if: steps.published.outputs.unchanged == 'false'
+        run: |
+          docker run --rm -e PETTA_PATH=/PeTTa \
+            --entrypoint /PeTTa/repos/Omega/tests/mettatest.sh "$IMAGE"
+
+      - name: Python tests
+        if: steps.published.outputs.unchanged == 'false'
+        run: |
+          pip install pytest pyyaml
+          ./core/tests/pytest.sh
+
+      - name: Publish
+        if: steps.published.outputs.unchanged == 'false'
+        working-directory: core
+        env:
+          TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.merge.outputs.head }}
+          SUMMARY: ${{ steps.merge.outputs.summary }}
+        run: |
+          set -euo pipefail
+          tag="${TARGET_BRANCH}-$(date -u +%Y%m%d)-${HEAD_SHA:0:7}"
+          git tag -a "$tag" -m "$SUMMARY" "$HEAD_SHA"
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          git -c "http.extraheader=AUTHORIZATION: basic ${auth}" push --force \
+            "https://github.com/${GITHUB_REPOSITORY}.git" \
+            "${HEAD_SHA}:refs/heads/${TARGET_BRANCH}" "refs/tags/${tag}"
+          {
+            echo "### ${TARGET_BRANCH} → \`${HEAD_SHA}\` (tag \`${tag}\`)"
+            echo '```'
+            printf '%s' "$SUMMARY"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
