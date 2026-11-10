@@ -6,6 +6,7 @@ takes ten minutes and a network, so these hand it the smallest tree it accepts
 and stop at --prepare-only, before docker is involved.
 """
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -25,6 +26,20 @@ RUN :
 FROM scratch AS runtime
 RUN :
 """
+
+
+@pytest.fixture(autouse=True)
+def _fresh_reply_gate():
+    """Start each test with a reply gate that has seen no turn yet.
+
+    The channel is one module-level object, so turns counted by one test would
+    otherwise decide whether the next test's sends are delivered."""
+    channel_module = sys.modules.get("telegram_channel")
+    if channel_module is not None:
+        from reply_gate import ReplyGate
+        channel_module._channel.reply_gate = ReplyGate()
+        channel_module._channel._notice_alerted_at = {}
+    yield
 
 
 @pytest.fixture

@@ -34,8 +34,10 @@ _ALLOWED_UNDECLARED = set()
 # Provided by core, not installable from here. Only what is actually imported:
 # if the plugin starts using another of core's modules, the test says so.
 # channels/config/helper/plugin come from core's src/; auth and delivery_queue are
-# shared channel infrastructure that lives in core's channels/ folder.
-_CORE_MODULES = {"channels", "config", "helper", "plugin", "auth", "delivery_queue", "rag"}
+# shared channel infrastructure that lives in core's channels/ folder;
+# lib_llm_ext is core's provider library in providers/.
+_CORE_MODULES = {"channels", "config", "helper", "plugin", "auth", "delivery_queue", "rag",
+                 "lib_llm_ext"}
 
 
 def _plugin_modules():

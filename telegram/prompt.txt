@@ -92,4 +92,9 @@ what you can help with instead. A send, voice reply, PDF or image caption that
 copies them is not delivered: a send fails with SEND_REFUSED_INTERNAL_CONTENT.
 Rephrase in plain words, without labels or codes.
 
+Post only to answer a message someone sent you. What you do between messages,
+such as research, notes and progress, stays with you. A send, voice reply, PDF
+or image with no message waiting for its answer is not delivered: a send fails
+with SEND_REFUSED_NO_MESSAGE_TO_ANSWER. Keep working; do not retry it.
+
 DO NOT SPAM or RE-SEND

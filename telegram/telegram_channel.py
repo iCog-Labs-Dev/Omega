@@ -25,6 +25,8 @@ from markdown_render import to_markdownv2
 from config_helper import is_category_blocked, get_spam_protection_config
 import media_handler
 import leak_guard
+import core_notices
+from reply_gate import ReplyGate
 import channels
 from config import config_get_by_key
 
@@ -152,6 +154,10 @@ class _TelegramChannel:
         # version banner right after the channel starts, before the polling
         # thread has connected, and a send that fails should be retried.
         self._outbox = PendingMessages()
+        # Posts go out only while a message is waiting for its answer.
+        self.reply_gate = ReplyGate()
+        # When each kind of core notice last reached the admins.
+        self._notice_alerted_at = {}
         self._typing_threads = {}
         self._TYPING_TIMEOUT = 120  # max seconds to show typing regardless of agent state
 
@@ -288,6 +294,7 @@ class _TelegramChannel:
         Doubles as the outbox pump: the agent calls this once per loop from its
         own thread, which is where a blocking delivery is safe to run."""
         media_handler.next_turn()
+        self.reply_gate.next_turn()
         self._flush_outbox()
         with self.msg_lock:
             if self._message_queue:
@@ -296,6 +303,7 @@ class _TelegramChannel:
                 if not self._is_allowed_chat(ready_chat_id) and ready_chat_id not in self.admin_ids:
                         return ""
 
+                self.reply_gate.message_arrived(ready_chat_id)
                 self.chat_id = ready_chat_id
                 self._reply_to_id = reply_id
                 context = None
@@ -974,6 +982,15 @@ class _TelegramChannel:
         """The chat and message the agent is answering right now."""
         return self.chat_id, self._reply_to_id
 
+    def may_post(self):
+        """None if a post to the chat being answered may go out now, else the
+        reply_gate.Refusal saying why not."""
+        return self.reply_gate.check(self.chat_id)
+
+    def posted(self):
+        """A post to the chat being answered went out."""
+        self.reply_gate.delivered(self.chat_id)
+
     def queue_event(self, chat_id, reply_to_id, text):
         """Hand the agent a note from the plugin itself, such as a finished
         background download, the way a user message reaches it: the agent
@@ -1255,6 +1272,13 @@ def send_message(text):
                 f"reply cannot go to chat {target_chat_id}. Nothing was sent. "
                 f"Send without a chat prefix.")
 
+    # The agent works on between messages; what it finds stays with it unless
+    # someone in the chat is waiting for an answer.
+    refusal = _channel.may_post()
+    if refusal is not None:
+        logging.warning(f"Refused a send to chat {current_chat_id}: {refusal.reason}")
+        return f"{_NOT_WAITING_REFUSAL} {refusal.reason}. Keep working; post only to answer a message."
+
     # The model reads its whole prompt and working state every turn and can be
     # talked into copying them out; a reply that does is not delivered.
     leak = leak_guard.find_leak(text)
@@ -1274,6 +1298,7 @@ def send_message(text):
         return _UNSAFE_REFUSAL
         
     _channel.send_message(text, chat_id=target_chat_id, reply_to_id=target_reply_id)
+    _channel.posted()
     # The agent has replied to the user, so drop any attached PDF/image context.
     # This bounds the out-of-band slot to "arrival → first reply" and stops the
     # 20k-char PDF (or large base64 image) being re-injected on idle-tail cycles.
@@ -1332,28 +1357,63 @@ def alert_ethics_violation(tool_name, text=None):
     a callback rather than as a raised exception, and a channel with no admins
     configured says so instead of dropping the alert without a trace.
     """
+    _alert_admins(f"🚨 Ethics Pass Triggered!\nAction Blocked: {tool_name} | With message: {text}",
+                  f"Ethics alert for {tool_name}")
+
+
+def _alert_admins(text, about):
+    """DM every admin `text`. `about` names the alert in the log lines that
+    say it could not go out."""
     if not (_channel.loop and _channel.bot):
-        logging.error(f"Ethics alert for {tool_name} not sent: the bot is not running")
+        logging.error(f"{about} not sent: the bot is not running")
         return
 
     if not _channel.admin_ids:
-        logging.error(f"Ethics alert for {tool_name} not sent: no admin_ids are configured")
+        logging.error(f"{about} not sent: no admin_ids are configured")
         return
 
     for admin_id in _channel.admin_ids:
         def _log_outcome(fut, admin_id=admin_id):
             exc = fut.exception()
             if exc is not None:
-                logging.error(f"Failed to send ethics alert to admin {admin_id} for tool {tool_name}: {exc}")
+                logging.error(f"Failed to send {about} to admin {admin_id}: {exc}")
 
         try:
             fut = asyncio.run_coroutine_threadsafe(
-                _channel.bot.send_message(chat_id=admin_id, text=f"🚨 Ethics Pass Triggered!\nAction Blocked: {tool_name} | With message: {text}"),
+                _channel.bot.send_message(chat_id=admin_id, text=text),
                 _channel.loop
             )
             fut.add_done_callback(_log_outcome)
         except Exception as e:
-            logging.error(f"Failed to schedule ethics alert to admin {admin_id} for tool {tool_name}: {e}")
+            logging.error(f"Failed to schedule {about} to admin {admin_id}: {e}")
+
+
+# What a user sees when core reports that the model failed, instead of core's
+# instructions for whoever runs the bot.
+_PUBLIC_NOTICE = "Seems there is a problem, please try again later."
+
+# One admin alert per kind of core notice in this long, however often it fires.
+_NOTICE_ALERT_EVERY_S = 30 * 60
+
+
+def _handle_core_notice(notice):
+    """Pass core's notice to the admins and tell a waiting user only that
+    something went wrong. Nothing reaches a chat where nobody is waiting."""
+    chat_id = _channel.chat_id
+    now = time.monotonic()
+    last = _channel._notice_alerted_at.get(notice.kind)
+    if last is None or now - last >= _NOTICE_ALERT_EVERY_S:
+        _channel._notice_alerted_at[notice.kind] = now
+        _alert_admins(f"⚠️ Core notice ({notice.kind}) while answering chat {chat_id}:\n\n{notice.text}",
+                      f"Core {notice.kind} notice")
+    else:
+        logging.warning(f"Core {notice.kind} notice again; admins were told within the last "
+                        f"{_NOTICE_ALERT_EVERY_S // 60} minutes")
+
+    if _channel.reply_gate.claim_notice(chat_id):
+        _channel.send_message(_PUBLIC_NOTICE, chat_id=chat_id)
+    else:
+        logging.info(f"Core {notice.kind} notice kept out of chat {chat_id}: nobody there is waiting")
 
 
 class SendRefused(Exception):
@@ -1375,8 +1435,13 @@ class SEND_REFUSED_INTERNAL_CONTENT(SendRefused):
     pass
 
 
+class SEND_REFUSED_NO_MESSAGE_TO_ANSWER(SendRefused):
+    pass
+
+
 _UNSAFE_REFUSAL = "Error: Refused: Unsafe response content."
 _INTERNAL_REFUSAL = "Error: Refused: Nothing was sent, because"
+_NOT_WAITING_REFUSAL = "Error: Refused: Nothing was sent:"
 
 
 class TelegramChannel(channels.CommChannel):
@@ -1406,12 +1471,18 @@ class TelegramChannel(channels.CommChannel):
         # as a value never reaches the model, which then retries or assumes
         # the message went out. Raised, it comes back to the model as the
         # failed result of its send.
+        notice = core_notices.recognise(message)
+        if notice is not None:
+            _handle_core_notice(notice)
+            return
         result = send_message(message)
         if isinstance(result, str) and result.startswith("Error:"):
             if result == _UNSAFE_REFUSAL:
                 refusal = SEND_REFUSED_UNSAFE_CONTENT
             elif result.startswith(_INTERNAL_REFUSAL):
                 refusal = SEND_REFUSED_INTERNAL_CONTENT
+            elif result.startswith(_NOT_WAITING_REFUSAL):
+                refusal = SEND_REFUSED_NO_MESSAGE_TO_ANSWER
             else:
                 refusal = SEND_REFUSED_ONLY_THE_CURRENT_CHAT_CAN_BE_ANSWERED
             raise refusal(result.removeprefix("Error:").strip())

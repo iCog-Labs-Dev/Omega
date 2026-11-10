@@ -1182,6 +1182,10 @@ def test_agent_poll_separates_voice_turns():
             assert mh.speak("Poll turn check") == "VOICE_SENT"
             assert len(sent) == 2
             ch.get_last_message()
+            # Nobody is waiting on this turn, so the repeat is not even made.
+            assert mh.speak("Poll turn check").startswith("VOICE_REFUSED_NO_MESSAGE_TO_ANSWER")
+            # With the chat still open, the delivery ledger catches the repeat.
+            ch.reply_gate.message_arrived(7)
             assert "already delivered" in mh.speak("Poll turn check")
             assert len(sent) == 2
     finally:
