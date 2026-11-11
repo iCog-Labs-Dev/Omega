@@ -35,14 +35,16 @@ Also creates shared state slots:
 3. **Receive** — `(receive)` via the active channel.
 4. **Detect new input** — compare against `&prevmsg`. If different and non-empty, reset `&loops` to `maxNewInputLoops`.
 5. **Set next wake** — `&nextWakeAt := now + wakeupInterval`.
-6. **Add the user message** — the new human message, or a fixed line that tells the model to continue autonomous work, goes into `&messages_all` with role `user`.
-7. **Call the LLM** — `llmRequest` combines the system message, `&messages_all`, and the tool schemas from `collectTools`. `(llmProviderChat $request)` sends it to the provider started on turn 1 and checks the response. Providers are plugins registered with `registerLLMProvider` (see [reference-plugin-api.md](./reference-plugin-api.md#llm-provider-integration)).
-8. **Convert** — `providers.llmResponseToSExpr` turns the calls of the response into an s-expression, and `sread` parses it. `&error` and `&messages_all` are reset at this point.
-9. **Dispatch tool calls** — one `assistant` message with the calls is added to `&messages_all`. Then `(superpose $resp)` runs each tool call, capturing errors via `HandleError`.
-10. **Return results** — every call adds a message with role `tool`, the call id, and the result, cut to the last `maxFeedback` characters. The messages stay in `&messages_all` for the next request.
-11. **Record** — `addToHistory` appends human message + tool calls + any errors to `memory/history.metta`, provided something new happened.
-12. **Sleep** — `(sleep (sleepInterval))`.
-13. **Recurse** — `(omega (+ 1 $k))`.
+6. **Turn start** — `(turn-event start $k)` notifies the turn listeners.
+7. **Add the user message** — the new human message, or a fixed line that tells the model to continue autonomous work, goes into `&messages_all` with role `user`.
+8. **Call the LLM** — `llmRequest` combines the system message, `&messages_all`, and the tool schemas from `collectTools`. `(llmProviderChat $request)` sends it to the provider started on turn 1 and checks the response. Providers are plugins registered with `registerLLMProvider` (see [reference-plugin-api.md](./reference-plugin-api.md#llm-provider-integration)).
+9. **Convert** — `providers.llmResponseToSExpr` turns the calls of the response into an s-expression, and `sread` parses it. `&error` and `&messages_all` are reset at this point.
+10. **Dispatch tool calls** — one `assistant` message with the calls is added to `&messages_all`. Then `(superpose $resp)` runs each tool call through the tool listeners, capturing errors via `HandleError`.
+11. **Return results** — every call adds a message with role `tool`, the call id, and the result, cut to the last `maxFeedback` characters. The messages stay in `&messages_all` for the next request.
+12. **Record** — `addToHistory` appends human message + tool calls + any errors to `memory/history.metta`, provided something new happened.
+13. **Turn end** — `(turn-event end $k)` notifies the turn listeners.
+14. **Sleep** — `(sleep (sleepInterval))`.
+15. **Recurse** — `(omega (+ 1 $k))`.
 
 See [reference-internals-tool-dispatch.md](./reference-internals-tool-dispatch.md) for the schema, the response checks, and the dispatch steps.
 
