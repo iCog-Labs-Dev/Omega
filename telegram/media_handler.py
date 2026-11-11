@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from collections import OrderedDict
 from itertools import groupby
 from speech_text import prepare_speech
+import leak_guard
 from speech_language import speech_parts, speech_chunks
 
 logger = logging.getLogger(__name__)
@@ -406,6 +407,21 @@ def _log_pdf_fonts():
         logger.error(f"Could not load PDF fonts: {error}")
 
 
+def _no_message_to_answer():
+    """The reply_gate.Refusal for posting to the chat being answered, or None
+    when a post may go out. Checked before generating, so nothing is paid for
+    that would not be sent."""
+    may_post = getattr(_live_channel, "may_post", None)
+    return may_post() if may_post is not None else None
+
+
+def _posted():
+    """Tell the channel a post went out to the chat being answered."""
+    posted = getattr(_live_channel, "posted", None)
+    if posted is not None:
+        posted()
+
+
 def _image_generation_allowed():
     """Read the allow_image_generation gate from the active channel's reply
     constraints. Fail closed (False) if unavailable."""
@@ -444,8 +460,15 @@ def generate_and_send(prompt):
         return "IMAGE_FAILED: empty prompt"
     if not _image_generation_allowed():
         return "IMAGE_DISABLED: image generation is turned off"
+    refusal = _no_message_to_answer()
+    if refusal is not None:
+        return f"IMAGE_REFUSED_NO_MESSAGE_TO_ANSWER: nothing was sent, because {refusal.reason}"
     if _prompt_is_unsafe(prompt):
         return "Refused: unsafe image prompt"
+    # The prompt goes out as the photo's caption.
+    leak = leak_guard.find_leak(prompt)
+    if leak is not None:
+        return f"IMAGE_REFUSED_INTERNAL_CONTENT: nothing was sent, because {leak.reason}"
     image_bytes = _generate_image_bytes(prompt)
     if not image_bytes:
         return f"IMAGE_FAILED: could not generate image for: {prompt}"
@@ -456,6 +479,7 @@ def generate_and_send(prompt):
     except Exception as e:
         logger.error(f"Failed to send generated image: {e}")
         return f"IMAGE_FAILED: generated but could not send: {e}"
+    _posted()
     return f"IMAGE_SENT: {prompt}"
 
 # --- Text-to-speech (outbound) ---------------------------------------------
@@ -623,8 +647,14 @@ def speak(text=""):
         return "VOICE_INVALID_INPUT: empty text; ask for text instead of retrying"
     if not _tts_allowed():
         return "VOICE_DISABLED: voice replies are turned off"
+    refusal = _no_message_to_answer()
+    if refusal is not None:
+        return f"VOICE_REFUSED_NO_MESSAGE_TO_ANSWER: nothing was sent, because {refusal.reason}"
     if _prompt_is_unsafe(text):
         return "Refused: unsafe voice content"
+    leak = leak_guard.find_leak(text)
+    if leak is not None:
+        return f"VOICE_REFUSED_INTERNAL_CONTENT: nothing was sent, because {leak.reason}"
     text = prepare_speech(text)
     if not text:
         return "VOICE_INVALID_INPUT: no speakable text after cleanup; ask for text instead of retrying"
@@ -708,6 +738,7 @@ def speak(text=""):
             if ledger:
                 ledger.set_many(indices, "sent", message_id)
             sent += len(indices)
+            _posted()
         except Exception:
             logger.exception("Voice chunk delivery uncertain")
             if ledger:
@@ -1105,6 +1136,9 @@ def generate_and_send_pdf(content):
         return "PDF_FAILED: empty content"
     if not _pdf_generation_allowed():
         return "PDF_DISABLED: PDF generation is turned off"
+    refusal = _no_message_to_answer()
+    if refusal is not None:
+        return f"PDF_REFUSED_NO_MESSAGE_TO_ANSWER: nothing was sent, because {refusal.reason}"
     if len(content) > MAX_PDF_CHARS:
         return f"PDF_FAILED: content exceeds {MAX_PDF_CHARS} characters"
     delivery = _pdf_delivery_key(content)
@@ -1116,6 +1150,9 @@ def generate_and_send_pdf(content):
         return "Refused: unsafe PDF content"
     if _prompt_is_unsafe(content):
         return "Refused: unsafe PDF content"
+    leak = leak_guard.find_leak(content)
+    if leak is not None:
+        return f"PDF_REFUSED_INTERNAL_CONTENT: nothing was sent, because {leak.reason}"
     try:
         fonts = _load_pdf_fonts(_pdf_font_dir())
     except Exception as error:
@@ -1145,6 +1182,7 @@ def generate_and_send_pdf(content):
     except Exception as error:
         logger.error(f"Failed to send generated PDF: {error}")
         return "PDF_FAILED: generated but could not send"
+    _posted()
     if delivery is not None:
         _record_pdf_delivery(delivery)
     return (f"PDF_SENT: {PDF_FILENAME} was delivered to the user. "
