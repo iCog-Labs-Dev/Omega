@@ -71,7 +71,7 @@
 !(test (read-file "does-not-exist") (empty))
 
 ; Tool and turn listeners. test-tool stands in for a skill and counts its runs.
-; Calls are built with sread, as the loop gets them, so they are not run early.
+; Calls are built with cons-atom, so they stay data and are not run early.
 (= (test-tool $x)
    (progn (change-state! &test_tool_runs (+ 1 (get-state &test_tool_runs)))
           (strings-concat ("ran " $x))))
@@ -158,6 +158,28 @@
                        ((car-atom $rc) (get-state &test_tool_runs)))))
        (Error 0))
 
+; Adding a handle again moves its listener to the end of the order.
+!(test (progn (reset-tool-test)
+              (add-tool-listener test-deny (|-> ($id $tool $args) (Deny "first")) (|-> ($id $result) ()))
+              (add-tool-listener test-deny-2 (|-> ($id $tool $args) (Deny "second")) (|-> ($id $result) ()))
+              (add-tool-listener test-deny (|-> ($id $tool $args) (Deny "first again")) (|-> ($id $result) ()))
+              (let $rc (runToolCall call-1 (test-call "a"))
+                (progn (remove-tool-listener test-deny)
+                       (remove-tool-listener test-deny-2)
+                       $rc)))
+       (Error (test-call "a") "Refused: second"))
+
+; A listener removed by an earlier listener during the call is not asked.
+!(test (progn (reset-tool-test)
+              (add-tool-listener test-remover
+                                 (|-> ($id $tool $args) (progn (remove-tool-listener test-deny) Allow))
+                                 (|-> ($id $result) ()))
+              (add-tool-listener test-deny (|-> ($id $tool $args) (Deny "no")) (|-> ($id $result) ()))
+              (let $rc (runToolCall call-1 (test-call "a"))
+                (progn (remove-tool-listener test-remover)
+                       ((contains-text $rc "ran a") (get-state &test_tool_runs)))))
+       (True 1))
+
 ; After a call, every listener gets the call id and the result.
 !(test (progn (reset-tool-test)
               (add-tool-listener test-after (|-> ($id $tool $args) Allow) (|-> ($id $result) (record-tool-result $id $result)))
@@ -192,3 +214,28 @@
               (turn-event start 4)
               (get-state &test_turns))
        ((start 3) (end 3)))
+
+(= (record-turn $x) (change-state! &test_turns (append (get-state &test_turns) ($x))))
+
+(= (raising-turn-listener $event $turn) (/ 1 0))
+
+; An error in a turn listener is caught, and the other listeners still run.
+!(test (progn (change-state! &test_turns ())
+              (add-turn-listener test-raise raising-turn-listener)
+              (add-turn-listener test-turn (|-> ($event $turn) (record-turn ($event $turn))))
+              (turn-event start 5)
+              (remove-turn-listener test-raise)
+              (remove-turn-listener test-turn)
+              (get-state &test_turns))
+       ((start 5)))
+
+; Adding a turn listener's handle again replaces it and moves it to the end.
+!(test (progn (change-state! &test_turns ())
+              (add-turn-listener test-a (|-> ($event $turn) (record-turn old-a)))
+              (add-turn-listener test-b (|-> ($event $turn) (record-turn b)))
+              (add-turn-listener test-a (|-> ($event $turn) (record-turn a)))
+              (turn-event start 6)
+              (remove-turn-listener test-a)
+              (remove-turn-listener test-b)
+              (get-state &test_turns))
+       (b a))
