@@ -1100,7 +1100,9 @@ def generate_and_send_pdf(content):
     but a user should get each document once, so the same text for the same
     user message answers PDF_ALREADY_SENT and is not sent again. A new message,
     or different text, sends as usual."""
-    content = (content or "").strip()
+    if not isinstance(content, str):
+        content = str(content or "")
+    content = content.replace("\\n", "\n").strip()
     if not content:
         return "PDF_FAILED: empty content"
     if not _pdf_generation_allowed():
