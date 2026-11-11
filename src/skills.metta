@@ -84,6 +84,120 @@
      (collapse (match &self (= (heartbeat-listener $handle $arg) $body) (remove-atom &self (= (heartbeat-listener $handle $arg) $body))))
      True))
 
+; Turn events are sent when the agentic loop starts and ends a turn, that is
+; one LLM request and the tool calls of its reply. $event is start or end,
+; $turn is the iteration number. Code can make itself notified about them
+; using add-turn-listener/remove-turn-listener functions. An error raised by
+; a listener is caught, so it stops neither the loop nor the other listeners.
+(= (turn-event $event $turn)
+   (let* (($handles (turn-listeners))
+          ($_ (collapse (let $handle (superpose $handles)
+                          (catch (turn-listener $handle $event $turn))))))
+     ()))
+
+; Handles of the turn listeners in the order they were added.
+(= (turn-listeners)
+   (collapse (match &self (= (turn-listener $handle $event $turn) $body) $handle)))
+
+; placeholder to eliminate error when no turn listener is added
+(= (turn-listener placeholder $_ $_) (empty))
+
+; Subscribe on turn event notifications. Adding a handle again replaces its
+; listener and moves it to the end of the order.
+; $handle - symbol to identify the subscription
+; $callback - lambda of ($event $turn) to evaluate on event
+(= (add-turn-listener $handle $callback)
+   (progn
+     (remove-turn-listener $handle)
+     (log INFO "skills" (strings-concat ("Add turn listener " $handle)))
+     (add-atom &self (= (turn-listener $handle $event $turn) ($callback $event $turn)))))
+
+; Unsubscribe from turn event notifications
+; $handle - symbol to identify the subscription
+(= (remove-turn-listener $handle)
+   (progn
+     (log INFO "skills" (strings-concat ("Remove turn listener: " $handle)))
+     (collapse (match &self (= (turn-listener $handle $event $turn) $body) (remove-atom &self (= (turn-listener $handle $event $turn) $body))))
+     True))
+
+; Tool listeners see every tool call the agent makes, before and after it runs.
+; Before a call, a listener gets the call id, the tool name and the tuple of
+; arguments, and answers one of:
+;   Allow            - run the call
+;   (Deny $reason)   - do not run it; the agent gets a refusal with the reason
+;   (Replace $call)  - run $call instead, for instance the same tool with
+;                      changed arguments
+; Listeners are asked in the order they were added. The first Deny wins and the
+; listeners after it are not asked. A Replace is passed on, so the next
+; listener sees the replaced call. Any other answer, or an error raised by the
+; listener, denies the call.
+; After a call, every listener gets the call id and the result text the agent
+; will see, including the refusal of a denied call.
+; A listener removed by an earlier listener during the same call is not asked.
+; The agent waits for a listener's answer, so a listener may block, for
+; instance to ask a person. The whole agent pauses until it answers, and
+; nothing times out; messages that arrive meanwhile are read on the next turn.
+(= (tool-listener-before placeholder $_ $_ $_) (empty))
+(= (tool-listener-after placeholder $_ $_) (empty))
+
+; Subscribe on tool calls. Adding a handle again replaces its listener and
+; moves it to the end of the order.
+; $handle - symbol to identify the subscription
+; $before - lambda of ($callid $tool $arguments) answering Allow, (Deny $reason)
+;           or (Replace $call)
+; $after - lambda of ($callid $result) to evaluate after the call
+(= (add-tool-listener $handle $before $after)
+   (progn
+     (remove-tool-listener $handle)
+     (log INFO "skills" (strings-concat ("Add tool listener " $handle)))
+     (add-atom &self (= (tool-listener-before $handle $callid $tool $args) ($before $callid $tool $args)))
+     (add-atom &self (= (tool-listener-after $handle $callid $result) ($after $callid $result)))
+     (add-atom &self (tool-listener $handle))))
+
+; Unsubscribe from tool calls
+; $handle - symbol to identify the subscription
+(= (remove-tool-listener $handle)
+   (progn
+     (log INFO "skills" (strings-concat ("Remove tool listener: " $handle)))
+     (collapse (match &self (tool-listener $handle) (remove-atom &self (tool-listener $handle))))
+     (collapse (match &self (= (tool-listener-before $handle $callid $tool $args) $body) (remove-atom &self (= (tool-listener-before $handle $callid $tool $args) $body))))
+     (collapse (match &self (= (tool-listener-after $handle $callid $result) $body) (remove-atom &self (= (tool-listener-after $handle $callid $result) $body))))
+     True))
+
+; Handles of the tool listeners in the order they were added.
+(= (tool-listeners)
+   (collapse (match &self (tool-listener $handle) $handle)))
+
+; Asks the tool listeners about a call and returns (Run $call), with the call
+; to run, or (Deny $reason).
+(= (tool-call-verdict $callid $call)
+   (ask-tool-listeners (tool-listeners) $callid $call))
+
+(= (ask-tool-listeners $handles $callid $call)
+   (if (== $handles ())
+       (Run $call)
+       (let $handle (car-atom $handles)
+         (if (tool-listener-added $handle)
+             (let $answer (catch (collapse (tool-listener-before $handle $callid (car-atom $call) (cdr-atom $call))))
+               (case $answer
+                 (((Allow) (ask-tool-listeners (cdr-atom $handles) $callid $call))
+                  (((Replace $new)) (ask-tool-listeners (cdr-atom $handles) $callid $new))
+                  (((Deny $reason)) (Deny $reason))
+                  ($other (Deny (strings-concat ("tool listener " $handle " answered " (swrite $other)
+                                                 ", expected Allow, (Deny reason) or (Replace call)")))))))
+             (ask-tool-listeners (cdr-atom $handles) $callid $call)))))
+
+; True if the tool listener $handle is still added.
+(= (tool-listener-added $handle)
+   (== (collapse (match &self (tool-listener $handle) True)) (True)))
+
+; Tells every tool listener the result of a call.
+(= (tool-call-result $callid $result)
+   (let* (($handles (tool-listeners))
+          ($_ (collapse (let $handle (superpose $handles)
+                          (catch (tool-listener-after $handle $callid $result))))))
+     ()))
+
 (= (read-file $file)
    (progn (translatePredicate (exists_file $file))
           (translatePredicate (read_file_to_string $file $content ()))

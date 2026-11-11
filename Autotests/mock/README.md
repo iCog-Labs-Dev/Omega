@@ -65,7 +65,7 @@ source venv/bin/activate
 pytest -s -v mock/test_*_mock.py
 ```
 
-The `LlmMockController`, `CommMockServer`, and the OpenClaw Gateway stub are provided by session-scoped fixtures in `mock/conftest.py`, so all three are started once per pytest session. Expected output: `54 passed`, minus the ones whose optional variables are unset - `test_git_push_to_remote_mock` skips without `OMEGA_GIT_TOKEN`, and the eight OpenClaw tests skip without `OMEGA_OPENCLAW_TOKEN` (see "OpenClaw plugin" below).
+The `LlmMockController`, `CommMockServer`, and the OpenClaw Gateway stub are provided by session-scoped fixtures in `mock/conftest.py`, so all three are started once per pytest session. Expected output: `55 passed`, minus the ones whose optional variables are unset - `test_git_push_to_remote_mock` skips without `OMEGA_GIT_TOKEN`, and the eight OpenClaw tests skip without `OMEGA_OPENCLAW_TOKEN` (see "OpenClaw plugin" below).
 
 ## 5a. OpenClaw plugin (`test_openclaw_delegate_mock.py`)
 
@@ -108,7 +108,7 @@ This removes the `omega` container and the `omega-memory` volume created by the 
 
 # Tests description
 
-All 54 tests follow the same pattern: the test registers a fixed mock-LLM answer for the prompt via `llm.set_answer(prompt, response)`, delivers the prompt to the agent over the test channel via `comm.send_message(prompt)`, then verifies the resulting tool calls and side effects (filesystem, `history.metta`, ChromaDB, docker logs). The OpenClaw group additionally drives the stub Gateway, whose replies are real rather than scripted. Because the LLM is deterministic, no `try_with_clarification` retries are needed; every test either passes on the first attempt or fails outright.
+All 55 tests follow the same pattern: the test registers a fixed mock-LLM answer for the prompt via `llm.set_answer(prompt, response)`, delivers the prompt to the agent over the test channel via `comm.send_message(prompt)`, then verifies the resulting tool calls and side effects (filesystem, `history.metta`, ChromaDB, docker logs). The OpenClaw group additionally drives the stub Gateway, whose replies are real rather than scripted. Because the LLM is deterministic, no `try_with_clarification` retries are needed; every test either passes on the first attempt or fails outright.
 
 ## Creating files
 
@@ -452,3 +452,12 @@ Loading a workflow again must not repeat its tools in the request to the LLM. An
 
 - Mock answers: `send` for an ordinary turn, then `nop` for the idle message. The test removes the idle answer with `clear_answer`, so later tests get no answer on idle turns. Then it answers one more ordinary turn with `send`, which restarts the idle iteration count, so idle requests follow it again.
 - Checks: `nop` is among the tools of the request that carries its result; the result is `SUCCESS` without an error; nothing reaches the channel while the agent idles; after `clear_answer` the idle requests get no answer again.
+
+## Tool and turn listeners
+
+### 44. test_tool_listeners_mock.py
+
+A tool listener can deny, replace or hold a call, sees every result, and a turn listener sees each turn start and end. With the listeners removed, calls run as before.
+
+- Mock answers: `metta` that adds a tool listener and a turn listener, written as named functions, and `send`. Then `write-file`, which the listener denies, `shell` with `echo original-<run_id>`, which it replaces with `echo replaced-<run_id>`, `read-file`, which it holds for 5 seconds before allowing it, and `send`. Then `send` alone. Last, `metta` that removes both listeners, `write-file` and `send`; this answer runs even when a check fails.
+- Checks: the calls take at least the 5 seconds of the hold; the `REQUEST:` line after the calls has the refusal with the listener's reason as the `write-file` result, and the file does not exist; the `shell` result is the replacement's output; the held `read-file` returns the file; among the records written after the setup turn ended, since mock call ids repeat across replies, the after-hook recorded every call id with its result and the refusal, and some turn has both a start and an end event; the agent answers the next message; after the listeners are removed, `write-file` writes its file.

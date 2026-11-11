@@ -244,3 +244,68 @@ One can add the callback which is called on each main agent loop iteration:
 Callback is called once in the beginning of the each loop iteration and it has
 a single parameter which receives the iteration number. Please see [unit
 tests](/tests/src_skills.metta) for an example of usage.
+
+### Tool and turn listeners
+
+A plugin can watch the tool calls the agent makes, refuse them or change them,
+without editing the tools. A channel can use this to switch a tool off, to wait
+for approval before a call runs, or to report each call and its result.
+
+- `(add-tool-listener $handle $before $after)` - adds tool listener
+- `(remove-tool-listener $handle)` - removes tool listener
+- `(add-turn-listener $handle $callback)` - adds turn listener
+- `(remove-turn-listener $handle)` - removes turn listener
+
+Adding a handle again replaces its listener and moves it to the end of the
+order.
+
+`$before` is called before each tool call with three parameters: the call id and
+the tool name, both symbols, and the tuple of the call's arguments, which are
+strings. It answers one of:
+
+- `Allow` - the call runs
+- `(Deny $reason)` - the call does not run. The LLM gets the call's result as a
+  failure, `ALERT_FAILED(Error <call> "Refused: <reason>")`, so it knows the
+  call was refused and why
+- `(Replace $call)` - `$call` runs instead, for instance the same tool with
+  other arguments. Build `$call` as data, such as with
+  `(cons-atom $tool $arguments)`, since a call written out in place is
+  evaluated straight away. The `COMMAND_RETURN` log line and the history
+  record still show the call the LLM made, not the replacement
+
+Listeners are asked in the order they were added. The first `Deny` wins, and
+the listeners after it are not asked. A `Replace` is passed on, so the next
+listener is asked about the replacement and can allow, deny or replace it in
+turn. Any other answer, or an error in the listener, denies the call. A
+listener that an earlier listener removes while the call is being checked is
+not asked.
+
+`$after` is called after each tool call with two parameters: the call id and
+the result text the LLM gets, for a denied call the refusal. Every listener's
+`$after` is called, also for a call that an earlier listener denied.
+
+The agent waits for `$before` to answer, so a listener can block, for instance
+until a person allows the call. The whole agent pauses until the listener
+answers, and nothing times out. Messages that arrive in the meantime are read
+on the next turn.
+
+`$callback` of a turn listener is called with two parameters: `start` or `end`,
+and the iteration number. A turn is one LLM request and the tool calls of its
+reply. `start` comes before the request, `end` after the calls and the history
+record. An error in a turn listener is caught and does not stop the agent or
+the other turn listeners.
+
+```metta
+(= (no-shell-before $callid $tool $arguments)
+   (if (== $tool shell) (Deny "shell is switched off in this chat") Allow))
+
+(= (no-shell-after $callid $result) ())
+
+(= (loadOmegaPlugin)
+   (add-tool-listener no-shell no-shell-before no-shell-after))
+```
+
+A lambda works in place of a named function in a loaded file. In a string
+evaluated by the `metta` tool, use named functions. The `metta` tool itself is
+one tool call: the listeners see it, not the expressions it evaluates. Please
+see [unit tests](/tests/src_skills.metta) for more examples.
