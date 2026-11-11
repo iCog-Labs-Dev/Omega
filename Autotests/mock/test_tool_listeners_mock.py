@@ -80,6 +80,8 @@ def test_tool_listeners_mock(llm, comm):
         slow = f"{workdir}/slow.txt"
         allowed = f"{workdir}/allowed.txt"
         dexec("mkdir", "-p", workdir)
+        # append-file only appends to a file that exists.
+        dexec("touch", record)
         dexec("sh", "-c", f"echo slow-{run_id} > {slow}")
 
         try:
@@ -92,6 +94,16 @@ def test_tool_listeners_mock(llm, comm):
                 c.fail("setup", "the agent did not finish the setup answer")
             c.ok("setup")
 
+            # Mock call ids repeat from one reply to the next, so only the
+            # records written after the setup turn has ended are checked.
+            deadline = time.time() + 30
+            before = dexec("cat", record).stdout
+            while "turn end " not in before and time.time() < deadline:
+                time.sleep(1)
+                before = dexec("cat", record).stdout
+            if "turn end " not in before:
+                c.fail("setup", f"the setup turn did not end: {before!r}")
+
             c.step("run a denied, a replaced, a slow and an allowed call")
             started = time.time()
             run_prompt(c, llm, comm, f"{run_id}-calls", "Run the four calls.", [
@@ -103,6 +115,8 @@ def test_tool_listeners_mock(llm, comm):
             if wait_for_skill_call(f"{run_id}-calls", "send", timeout=60 + SLOW_SECONDS) is None:
                 c.fail("calls", "the agent did not reach the send after the listener calls")
             elapsed = time.time() - started
+            if elapsed < SLOW_SECONDS:
+                c.fail("calls", f"the calls took {elapsed:.1f}s, less than the {SLOW_SECONDS}s hold")
             c.ok("calls", f"{elapsed:.1f}s")
 
             c.step("read what the model got back")
@@ -137,11 +151,17 @@ def test_tool_listeners_mock(llm, comm):
             c.ok("slow listener", read_result)
 
             c.step("check the after-hook and turn events")
-            seen = dexec("cat", record).stdout
+            seen = dexec("cat", record).stdout[len(before):]
+            markers = {
+                "write-file": "Refused: hooktest says no",
+                "shell": f"replaced-{run_id}",
+                "read-file": f"slow-{run_id}",
+                "send": "",
+            }
             for name, callid in ids.items():
-                if f"after {callid} " not in seen:
+                if not re.search(rf"after {re.escape(callid)} [^\n]*{re.escape(markers[name])}", seen):
                     c.fail("after-hook", f"no after line for {name} ({callid}) in {seen!r}")
-            if not re.search(rf"after {re.escape(ids['write-file'])} ALERT_FAILED.*Refused", seen):
+            if not re.search(rf"after {re.escape(ids['write-file'])} ALERT_FAILED[^\n]*Refused", seen):
                 c.fail("after-hook", f"the after line of the denied call has no refusal: {seen!r}")
             c.ok("after-hook")
             turns = re.findall(r"turn (start|end) (\d+)", seen)
