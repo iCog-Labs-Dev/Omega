@@ -59,6 +59,13 @@
                                  True)))))
       ($else False))))
 
+; Runs one tool call of the LLM reply, unless a tool listener denies it, and
+; returns the result or an Error for HandleError.
+(= (runToolCall $callid $call)
+   (case (tool-call-verdict $callid $call)
+     (((Deny $reason) (Error $call (strings-concat ("Refused: " $reason))))
+      ((Run $run) (catch (let $R (collapse (eval $run)) (py-call (helper.normalize_string $R))))))))
+
 (= (collectTools)
    (py-call (providers.getTools (getSkills))))
 
@@ -100,6 +107,7 @@
                                 (let* (($lastmessage (if $msgnew $msg "[NO NEW USER INPUT. CONTINUE AUTONOMOUS WORK. DO NOT REPEAT THE PREVIOUS RESPONSE. ONLY USE send FOR GENUINELY NEW INFORMATION OR WHEN USER INPUT IS NEEDED.]"))
                                        ($_ (change-state! &nextWakeAt (+ (get_time) (wakeupInterval))))
                                        ($_ (log INFO "loop" $lastmessage))
+                                       ($_ (turn-event start $k))
                                        ($system (llmRequestMessage role "system" content $prompt))
                                        ($_ (messagesAppend (llmRequestMessage role "user" content $lastmessage)))
                                        ($request (llmRequest $system (messagesGet) (maxOutputToken) (reasoningMode) (collectTools)))
@@ -120,13 +128,15 @@
                                                          (let ($callid $s) (superpose $resp)
                                                            (let $result
                                                              (if (HandleError (quote $s) $error) $error
-                                                               (let $rc (catch (let $R (collapse (eval $s)) (py-call (helper.normalize_string $R))))
+                                                               (let $rc (runToolCall $callid $s)
                                                                  (if (HandleError $rc $error) $error (strings-concat ("SUCCESS, RETURN: " $rc)))))
                                                              (progn
+                                                               (tool-call-result $callid $result)
                                                                ($_ (log INFO "loop" (COMMAND_RETURN: ((quote $s) $result))))
                                                                (messagesAppend (llmToolCallResponseMessage role "tool" callid $callid content (last_chars $result (maxFeedback))))
                                                                (quote $s)))))))))
-                                           (if (or $msgnew  (not (== $sexpr ()))) (addToHistory $msg $sexpr $msgnew) _))
+                                      (progn (if (or $msgnew  (not (== $sexpr ()))) (addToHistory $msg $sexpr $msgnew) _)
+                                             (turn-event end $k)))
                                 (if (> (get_time) (get-state &nextWakeAt))
                                     (change-state! &loops (+ 1 (maxWakeLoops))) _)))
                       (sleep (sleepInterval))
