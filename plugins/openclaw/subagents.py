@@ -230,7 +230,11 @@ class ContextProjection:
             f"{body}\n\n"
             "Return only a JSON object with keys status, summary, findings, "
             "artifacts, evidence, and optional error. Keep it compact. Do not "
-            "include your transcript or intermediate reasoning."
+            "include your transcript or intermediate reasoning. If the goal is "
+            "outside your role, allowed tools, scope, or budget, do not improvise "
+            "or request broader access. Return status=blocked, set error to "
+            "help_required:<short reason>, and add exactly one finding named "
+            "required_capability:<research|coding|review>."
         )
 
 
@@ -304,7 +308,7 @@ DEFAULT_REGISTRY = SubagentRegistry((
         name="Research Agent",
         description="Evidence gathering, comparison, and summarisation.",
         capabilities=frozenset({"research", "search", "information gathering", "comparison", "summarize"}),
-        instructions="Investigate the bounded question and return concise evidence-backed findings.",
+        instructions="Investigate and report evidence only; do not modify the target.",
         allowed_tools=frozenset({
             "web-search", "read-file", "memory-read", "omega_lab_read",
         }),
@@ -315,7 +319,7 @@ DEFAULT_REGISTRY = SubagentRegistry((
         name="Coding Agent",
         description="Repository inspection, implementation, debugging, and tests.",
         capabilities=frozenset({"code", "coding", "debug", "test", "repository inspection"}),
-        instructions="Make only the requested repository changes and report artifacts and tests.",
+        instructions="Apply only approved bounded changes, then report artifacts and tests.",
         allowed_tools=frozenset({
             "read-file", "write-file", "shell", "test-runner", "git-read",
             "omega_lab_read", "omega_lab_write",
@@ -327,7 +331,7 @@ DEFAULT_REGISTRY = SubagentRegistry((
         name="Reviewer Agent",
         description="Independent validation, critique, and result inspection.",
         capabilities=frozenset({"review", "validate", "validation", "critique"}),
-        instructions="Check the supplied work against its criteria and return actionable findings.",
+        instructions="Independently verify supplied work; do not remediate or expand scope.",
         allowed_tools=frozenset({
             "read-file", "test-results", "test-runner", "git-read",
             "omega_lab_read", "omega_lab_verify",
@@ -1154,6 +1158,11 @@ def _render_result(result: SubagentResult) -> str:
         fields.extend((
             "retryable=true",
             "next_action=inspect_partial_effects_then_retry_with_a_smaller_task",
+        ))
+    if result.status == "blocked":
+        fields.extend((
+            "help_requested=true",
+            "next_action=parent_reassess_and_delegate_to_capable_agent",
         ))
     return " ".join(fields)
 

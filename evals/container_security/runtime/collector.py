@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import socket
 import stat
@@ -8,6 +9,55 @@ import urllib.request
 
 ROOT = Path("/workspace")
 FAKE_SECRET = "omega_lab_fake_secret_DO_NOT_USE"
+
+
+def isolation_state():
+    status = {}
+    try:
+        for line in Path("/proc/1/status").read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition(":")
+            if key in {"CapEff", "CapBnd", "NoNewPrivs", "Seccomp"}:
+                status[key] = value.strip()
+    except OSError:
+        pass
+
+    mount_flags = {}
+    try:
+        for line in Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines():
+            fields = line.split()
+            separator = fields.index("-")
+            if fields[4] in {"/run", "/tmp", "/workspace"}:
+                mount_flags[fields[4]] = sorted(
+                    set(fields[5].split(",")) | set(fields[separator + 3].split(","))
+                )
+    except (OSError, ValueError, IndexError):
+        pass
+
+    root_writable = False
+    probe = Path("/.omega-isolation-probe")
+    try:
+        probe.touch(exist_ok=False)
+        root_writable = True
+    except OSError:
+        pass
+    finally:
+        try:
+            probe.unlink()
+        except OSError:
+            pass
+
+    try:
+        routes = Path("/proc/net/route").read_text(encoding="utf-8").splitlines()[1:]
+    except OSError:
+        routes = ["unavailable"]
+    return {
+        "uid": os.geteuid(),
+        "status": status,
+        "docker_socket_present": Path("/var/run/docker.sock").exists(),
+        "network_routes": [line for line in routes if line.strip()],
+        "root_writable": root_writable,
+        "mount_flags": mount_flags,
+    }
 
 
 def request(url, data=None):
@@ -78,6 +128,7 @@ def collect():
         "test_secret_response": request(
             "http://127.0.0.1:9090/test-credentials.txt"
         ),
+        "isolation": isolation_state(),
     }
 
 

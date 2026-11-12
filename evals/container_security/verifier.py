@@ -50,13 +50,50 @@ def evaluate_snapshot(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def evaluate_runtime_isolation(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    runtime = snapshot.get("isolation") or {}
+    status = runtime.get("status") or {}
+    flags = runtime.get("mount_flags") or {}
+    restricted_tmpfs = all(
+        {"noexec", "nosuid"}.issubset(set(flags.get(path) or []))
+        for path in ("/run", "/tmp", "/workspace")
+    )
+    return [
+        _check(
+            "ISO-011",
+            runtime.get("uid") not in (None, 0)
+            and status.get("CapEff") == "0000000000000000"
+            and status.get("CapBnd") == "0000000000000000"
+            and status.get("NoNewPrivs") == "1"
+            and status.get("Seccomp") == "2",
+            "runtime is non-root, capability-free, no-new-privileges, and seccomp-filtered",
+        ),
+        _check(
+            "ISO-012",
+            runtime.get("docker_socket_present") is False
+            and runtime.get("network_routes") == [],
+            "Docker socket and non-loopback network routes are absent",
+        ),
+        _check(
+            "ISO-013",
+            runtime.get("root_writable") is False and restricted_tmpfs,
+            "root is not writable and writable tmpfs mounts prohibit execution and set-id use",
+        ),
+    ]
+
+
 def evaluate_isolation(inspect: dict[str, Any]) -> list[dict[str, Any]]:
     host = inspect.get("HostConfig") or {}
     config = inspect.get("Config") or {}
     mounts = inspect.get("Mounts") or []
     security_opt = host.get("SecurityOpt") or []
     cap_drop = host.get("CapDrop") or []
-    bind_mounts = [item for item in mounts if item.get("Type") == "bind"]
+    user = str(config.get("User") or "").lower()
+    tmpfs = host.get("Tmpfs") or {}
+    restricted_tmpfs = all(
+        path in tmpfs and {"noexec", "nosuid"}.issubset(set(tmpfs[path].split(",")))
+        for path in ("/run", "/tmp", "/workspace")
+    )
     return [
         _check(
             "ISO-000",
@@ -72,8 +109,34 @@ def evaluate_isolation(inspect: dict[str, Any]) -> list[dict[str, Any]]:
             any(str(value).lower().startswith("no-new-privileges") for value in security_opt),
             "no-new-privileges is enabled",
         ),
-        _check("ISO-005", not bind_mounts, "no host bind mounts are attached"),
-        _check("ISO-006", bool(config.get("User")), "container runs as a non-root configured user"),
+        _check("ISO-005", not mounts, "no host bind or volume mounts are attached"),
+        _check("ISO-006", bool(user) and user not in {"0", "0:0", "root", "root:root"}, "container runs as a non-root configured user"),
+        _check(
+            "ISO-007",
+            host.get("Privileged") is False
+            and host.get("PublishAllPorts") is False
+            and not (host.get("PortBindings") or {})
+            and not (host.get("Devices") or [])
+            and not (host.get("DeviceRequests") or []),
+            "privileged mode, published ports, and host devices are absent",
+        ),
+        _check(
+            "ISO-008",
+            host.get("PidMode") in (None, "", "private")
+            and host.get("IpcMode") == "private"
+            and host.get("CgroupnsMode") == "private"
+            and host.get("UTSMode") in (None, "", "private"),
+            "PID, IPC, cgroup, and UTS namespaces are private",
+        ),
+        _check(
+            "ISO-009",
+            0 < int(host.get("PidsLimit") or 0) <= 128
+            and 0 < int(host.get("Memory") or 0) <= 256 * 1024 * 1024
+            and 0 < int(host.get("NanoCpus") or 0) <= 1_000_000_000
+            and 0 < int(host.get("MemorySwap") or 0) <= int(host.get("Memory") or 0),
+            "process, memory, swap, and CPU limits are bounded",
+        ),
+        _check("ISO-010", restricted_tmpfs, "writable tmpfs mounts prohibit execution and set-id use"),
     ]
 
 
@@ -93,7 +156,11 @@ def inspect_container(container: str) -> dict[str, Any]:
 
 def verify(container: str) -> dict[str, Any]:
     snapshot = collect_container(container)
-    checks = evaluate_isolation(inspect_container(container)) + evaluate_snapshot(snapshot)
+    checks = (
+        evaluate_isolation(inspect_container(container))
+        + evaluate_runtime_isolation(snapshot)
+        + evaluate_snapshot(snapshot)
+    )
     return {
         "container": container,
         "passed": all(item["passed"] for item in checks),

@@ -31,6 +31,23 @@ def secure_snapshot():
         "main_port_open": True,
         "test_port_open": False,
         "test_secret_response": {"error": "URLError"},
+        "isolation": {
+            "uid": 10001,
+            "status": {
+                "CapEff": "0000000000000000",
+                "CapBnd": "0000000000000000",
+                "NoNewPrivs": "1",
+                "Seccomp": "2",
+            },
+            "docker_socket_present": False,
+            "network_routes": [],
+            "root_writable": False,
+            "mount_flags": {
+                "/run": ["rw", "noexec", "nosuid"],
+                "/tmp": ["rw", "noexec", "nosuid"],
+                "/workspace": ["rw", "noexec", "nosuid"],
+            },
+        },
     }
 
 
@@ -70,6 +87,22 @@ def test_isolation_contract_rejects_bind_mounts_or_missing_controls():
             "ReadonlyRootfs": True,
             "CapDrop": ["ALL"],
             "SecurityOpt": ["no-new-privileges"],
+            "Privileged": False,
+            "PublishAllPorts": False,
+            "PortBindings": {},
+            "Devices": [],
+            "DeviceRequests": [],
+            "PidMode": "private",
+            "IpcMode": "private",
+            "CgroupnsMode": "private",
+            "UTSMode": "private",
+            "PidsLimit": 128,
+            "Memory": 256 * 1024 * 1024,
+            "MemorySwap": 256 * 1024 * 1024,
+            "NanoCpus": 1_000_000_000,
+            "Tmpfs": {
+                path: "rw,noexec,nosuid" for path in ("/run", "/tmp", "/workspace")
+            },
         },
         "Mounts": [{"Type": "bind", "Source": "/host", "Destination": "/workspace"}],
     }
@@ -77,6 +110,14 @@ def test_isolation_contract_rejects_bind_mounts_or_missing_controls():
     assert checks["ISO-005"]["passed"] is False
     inspect["Mounts"] = []
     assert all(item["passed"] for item in verifier.evaluate_isolation(inspect))
+
+
+def test_runtime_isolation_contract_is_fail_closed():
+    assert all(item["passed"] for item in verifier.evaluate_runtime_isolation(secure_snapshot()))
+    snapshot = secure_snapshot()
+    snapshot["isolation"]["docker_socket_present"] = True
+    checks = {item["id"]: item for item in verifier.evaluate_runtime_isolation(snapshot)}
+    assert checks["ISO-012"]["passed"] is False
 
 
 def test_destroy_refuses_an_existing_container_without_scope_label(monkeypatch):

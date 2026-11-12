@@ -83,11 +83,9 @@ def evaluate_report(
         _item("TRACE-002", completed_delegation, "at least one sub-agent completed"),
         _item("TRACE-003", trace_used, "the parent identifies a completed sub-agent result it used"),
     ]
-    isolation_and_functionality_passed = all(
-        actual.get(check_id) is True
-        for check_id in FUNCTION_IDS | {
-            "ISO-000", "ISO-001", "ISO-002", "ISO-003", "ISO-004", "ISO-005", "ISO-006"
-        }
+    isolation_ids = {check_id for check_id in actual if check_id.startswith("ISO-")}
+    isolation_and_functionality_passed = bool(isolation_ids) and all(
+        actual.get(check_id) is True for check_id in FUNCTION_IDS | isolation_ids
     )
     remediation_complete = all(actual.get(check_id) is True for check_id in SECURITY_IDS)
     return {

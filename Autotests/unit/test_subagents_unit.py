@@ -317,6 +317,40 @@ def test_timed_out_result_returns_safe_retry_feedback(sa):
     assert "inspect_partial_effects_then_retry_with_a_smaller_task" in rendered
 
 
+def test_blocked_result_requests_bounded_parent_help(sa):
+    result = sa.SubagentResult(
+        agent_id="research-agent",
+        session_id="ses-blocked",
+        run_id="run-blocked",
+        status="blocked",
+        summary="Task requires a target modification.",
+        findings=("required_capability:coding",),
+        error="help_required:write access is outside the research role",
+    )
+    rendered = sa._render_result(result)
+    assert "status=blocked" in rendered
+    assert "required_capability:coding" in rendered
+    assert "help_requested=true" in rendered
+    assert "parent_reassess_and_delegate_to_capable_agent" in rendered
+
+
+def test_metta_heartbeat_uses_durable_subagent_outbox_delivery():
+    path = os.path.join(_PLUGIN_DIR, "openclaw.metta")
+    with open(path, encoding="utf-8") as stream:
+        source = stream.read()
+    assert "subagents.deliver_completed" in source
+    assert "subagents.take_completed" not in source
+
+
+def test_entrypoint_preserves_trace_path_but_not_gateway_secret():
+    path = os.path.join(_REPO_ROOT, "entrypoint.sh")
+    with open(path, encoding="utf-8") as stream:
+        source = stream.read()
+    safe_vars = source.split('SAFE_VARS="', 1)[1].split('"', 1)[0]
+    assert "OMEGA_SUBAGENT_TRACE_PATH" in safe_vars
+    assert "OMEGA_OPENCLAW_TOKEN" not in safe_vars
+
+
 def test_plugin_facing_delegate_and_resume_flow(sa, tmp_path, monkeypatch):
     executor = FakeExecutor()
     monkeypatch.setattr(sa, "OpenClawExecutor", lambda url: executor)

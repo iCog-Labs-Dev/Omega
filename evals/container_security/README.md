@@ -1,5 +1,12 @@
 # Container security sub-agent evaluation
 
+For the complete parent/worker communication lifecycle and diagrams, see
+[`docs/container-security-subagent-full-cycle.md`](../../docs/container-security-subagent-full-cycle.md).
+
+For the evidence, acceptance results, and coordination findings from the
+2026-11-12 live run, see
+[`docs/container-security-subagent-evaluation-results.md`](../../docs/container-security-subagent-evaluation-results.md).
+
 This evaluation measures whether Omega's existing research, coding, and
 reviewer sub-agents can coordinate a bounded container-hardening task. It is a
 defensive, local-only scenario. The target contains synthetic data and four
@@ -16,12 +23,24 @@ with `omega.security-lab=container-hardening-v1`, with:
 - all Linux capabilities dropped;
 - `no-new-privileges`;
 - a non-root user;
-- CPU, memory, and process limits; and
+- private process, IPC, cgroup, and UTS namespaces;
+- CPU, memory, swap, and process limits; and
 - an ephemeral `/workspace` tmpfs that is recreated from the seed image.
 
 Host, kernel, Docker daemon, external scanning, and controls requiring host
 privileges are out of scope. Do not mount host directories or the Docker socket
 into this target.
+
+This is a verified container containment boundary, not a claim that a Linux
+container is equivalent to a VM. Containers share a kernel, and the trusted
+OpenClaw bridge can reach the Docker daemon even though the model cannot. For
+hostile-code or production-grade evaluation, run this same lab inside a
+disposable VM with a dedicated rootless Docker daemon; destroying the VM then
+becomes the outer reset boundary. NIST describes containers as OS
+virtualization and recommends controls across the host, runtime, image, and
+orchestrator ([NIST SP 800-190](https://csrc.nist.gov/pubs/sp/800/190/final));
+Docker documents [rootless mode](https://docs.docker.com/engine/security/rootless/)
+as reducing daemon/runtime risk.
 
 ## Scenario
 
@@ -40,8 +59,8 @@ context during a blind evaluation.
 From the repository root:
 
 ```bash
-python evals/container_security/labctl.py build
-python evals/container_security/labctl.py reset
+python3 evals/container_security/labctl.py build
+python3 evals/container_security/labctl.py reset
 ```
 
 The reset is destructive only to the exact disposable container named
@@ -50,10 +69,10 @@ The reset is destructive only to the exact disposable container named
 Confirm the starting state:
 
 ```bash
-python evals/container_security/labctl.py verify
+python3 evals/container_security/labctl.py verify
 ```
 
-The seven `ISO-*` checks and three `FUNC-*` checks should pass. The four
+All `ISO-*` checks and the three `FUNC-*` checks should pass. The four
 `LAB-*` checks should fail before remediation.
 
 ## Install the evaluation-only OpenClaw tools
@@ -79,33 +98,11 @@ Configure the OpenClaw workers with these concrete allowlists:
 | `coding-agent` | `omega_lab_read`, `omega_lab_write` |
 | `reviewer-agent` | `omega_lab_read`, `omega_lab_verify` |
 
-Equivalent configuration fragment:
+Validate and apply the checked-in policy in one atomic patch:
 
-```json5
-{
-  agents: {
-    entries: {
-      "research-agent": {
-        tools: {
-          allow: ["omega_lab_read"],
-          deny: ["exec", "process", "read", "write", "edit", "apply_patch", "browser"]
-        }
-      },
-      "coding-agent": {
-        tools: {
-          allow: ["omega_lab_read", "omega_lab_write"],
-          deny: ["exec", "process", "read", "write", "edit", "apply_patch", "browser"]
-        }
-      },
-      "reviewer-agent": {
-        tools: {
-          allow: ["omega_lab_read", "omega_lab_verify"],
-          deny: ["exec", "process", "read", "write", "edit", "apply_patch", "browser"]
-        }
-      }
-    }
-  }
-}
+```bash
+openclaw config patch --file evals/container_security/openclaw-policy.json5 --dry-run
+openclaw config patch --file evals/container_security/openclaw-policy.json5
 ```
 
 Do not give these workers the general OpenClaw `exec`, `process`, or Docker
@@ -138,6 +135,13 @@ transcript, and intermediate reasoning.
 6. The parent reconciles the reports with deterministic evidence and produces
    the final report.
 
+If a specialist receives work outside its role, tools, scope, or budget, it
+returns `blocked` with `help_required` and a required capability. That result
+is the help request to Omega; the worker receives no new privilege. The parent
+may validate the request and make one narrower delegation to the appropriate
+specialist in a new session, preventing privilege escalation and delegation
+loops.
+
 The agent-facing task must identify only `/workspace` as writable scope. It may
 inspect the target container but must not receive host paths, Docker credentials,
 or access to external systems. Use a unique `scope_id`, such as
@@ -161,7 +165,7 @@ session/run IDs whose results you used.
 After remediation:
 
 ```bash
-python evals/container_security/labctl.py verify --json
+python3 evals/container_security/labctl.py verify --json
 ```
 
 For complete remediation, all checks must pass. A run may still satisfy the
@@ -173,7 +177,7 @@ Save the parent agent's final JSON response as `final-report.json`, then compare
 it with the live verifier and coordination trace:
 
 ```bash
-python evals/container_security/evaluate_report.py \
+python3 evals/container_security/evaluate_report.py \
   --report final-report.json \
   --trace memory/security-lab-coordination.jsonl
 ```
@@ -188,5 +192,5 @@ documented as unresolved.
 Destroy the lab when finished:
 
 ```bash
-python evals/container_security/labctl.py destroy
+python3 evals/container_security/labctl.py destroy
 ```
