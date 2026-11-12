@@ -92,6 +92,36 @@ def test_two_questions_in_a_row_each_get_their_answer():
     assert gate.check(CHAT) is None
 
 
+def test_questions_answered_in_one_post_still_close_the_chat():
+    # The model often answers two questions in one post. The gate cannot see
+    # that, so the second question keeps its posts, but no more than that.
+    gate = ReplyGate()
+    gate.next_turn()
+    gate.message_arrived(CHAT)
+    gate.message_arrived(CHAT)
+    for _ in range(4):
+        assert gate.check(CHAT) is None
+        gate.delivered(CHAT)
+        gate.next_turn()
+    assert gate.check(CHAT) is not None
+
+
+def test_an_old_question_expires_while_a_newer_one_waits():
+    clock = Clock()
+    gate = ReplyGate(clock=clock)
+    gate.next_turn()
+    gate.message_arrived(CHAT)
+    clock.now += WAITING_FOR_S - 60
+    gate.message_arrived(CHAT)
+    clock.now += 120
+    # The first message is too old; the post counts against the second.
+    gate.delivered(CHAT)
+    gate.next_turn()
+    gate.delivered(CHAT)
+    gate.next_turn()
+    assert gate.check(CHAT) is not None
+
+
 def test_a_message_opens_only_its_own_chat():
     gate = ReplyGate()
     gate.next_turn()
@@ -226,6 +256,17 @@ def test_a_waiting_user_hears_only_that_something_went_wrong(chat, core_with_not
     # The real answer can still follow.
     tm.TelegramChannel().send("I can search the web and make PDFs.")
     assert chat.sent == [tm._PUBLIC_NOTICE, "I can search the web and make PDFs."]
+
+
+def test_a_failure_after_a_status_note_goes_to_admins_only(chat, core_with_notices):
+    # The trade-off in claim_notice: once anything went out, the chat is not
+    # told about a failure, even if it was only the note.
+    chat.message_turn("population of Ethiopia?")
+    tm.TelegramChannel().send("Starting now, looking it up.")
+    chat.idle_turn()
+    tm.TelegramChannel().send(TOKEN_LIMIT)
+    assert chat.sent == ["Starting now, looking it up."]
+    assert len(core_with_notices) == 1
 
 
 def test_admins_hear_about_each_kind_once_in_a_while(chat, core_with_notices):
