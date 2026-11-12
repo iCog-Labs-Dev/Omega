@@ -148,10 +148,24 @@ def test_a_waiting_chat_hears_about_a_failure_once():
     assert gate.claim_notice(CHAT) is False
 
 
-def test_a_chat_that_got_a_reply_does_not_hear_about_a_failure():
+def test_a_chat_that_got_only_a_note_hears_about_a_failure():
+    # The gate cannot tell a note from an answer, so anyone still waiting is
+    # told; at worst a user with an answer hears it once.
     gate = ReplyGate()
     gate.next_turn()
     gate.message_arrived(CHAT)
+    gate.delivered(CHAT)
+    gate.next_turn()
+    assert gate.claim_notice(CHAT) is True
+    assert gate.claim_notice(CHAT) is False
+
+
+def test_a_chat_whose_message_had_both_posts_does_not_hear_about_a_failure():
+    gate = ReplyGate()
+    gate.next_turn()
+    gate.message_arrived(CHAT)
+    gate.delivered(CHAT)
+    gate.next_turn()
     gate.delivered(CHAT)
     gate.next_turn()
     assert gate.claim_notice(CHAT) is False
@@ -242,9 +256,11 @@ def test_a_core_notice_on_an_idle_turn_goes_to_admins_only(chat, core_with_notic
     chat.message_turn()
     tm.TelegramChannel().send("hello")
     chat.idle_turn()
+    tm.TelegramChannel().send("anything else?")
+    chat.idle_turn()
     # Core's send writes line breaks as a literal backslash-n.
     tm.TelegramChannel().send(TOKEN_LIMIT.replace("\n", "\\n"))
-    assert chat.sent == ["hello"]
+    assert chat.sent == ["hello", "anything else?"]
     assert len(core_with_notices) == 1 and "maxOutputToken" in core_with_notices[0]
 
 
@@ -258,14 +274,12 @@ def test_a_waiting_user_hears_only_that_something_went_wrong(chat, core_with_not
     assert chat.sent == [tm._PUBLIC_NOTICE, "I can search the web and make PDFs."]
 
 
-def test_a_failure_after_a_status_note_goes_to_admins_only(chat, core_with_notices):
-    # The trade-off in claim_notice: once anything went out, the chat is not
-    # told about a failure, even if it was only the note.
+def test_a_user_left_with_only_a_note_hears_that_something_went_wrong(chat, core_with_notices):
     chat.message_turn("population of Ethiopia?")
     tm.TelegramChannel().send("Starting now, looking it up.")
     chat.idle_turn()
     tm.TelegramChannel().send(TOKEN_LIMIT)
-    assert chat.sent == ["Starting now, looking it up."]
+    assert chat.sent == ["Starting now, looking it up.", tm._PUBLIC_NOTICE]
     assert len(core_with_notices) == 1
 
 
