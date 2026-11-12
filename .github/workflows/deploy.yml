@@ -264,12 +264,14 @@ jobs:
           # would pick from the image is copied out here and mounted read-only
           # over prompt.txt: the bot reads it, and Oma's file stays as it is on
           # disk.
-          # It is mounted only over names already in the folder. A name new to
-          # the folder makes Docker leave an empty file behind, and an empty
-          # prompt_<provider>.txt wins over prompt.txt, so a release that mounts
-          # the folder whole would start with no prompt. An earlier deploy left
-          # such files; where one is there for this provider, it is mounted
-          # over as well, since core would read it first.
+          # A name new to the folder makes Docker leave an empty file behind,
+          # and an empty prompt_<provider>.txt wins over prompt.txt, so a
+          # release that mounts the folder whole would start with no prompt.
+          # So no prompt_<provider>.txt is mounted unless it is already there.
+          # An earlier deploy left such files; where one is there for this
+          # provider, it is mounted over as well, since core would read it
+          # first. On a fresh host Docker does make an empty prompt.txt, which
+          # core reads the same as a missing one.
           # The folder's .env held a GitHub token the bot read and pushed with.
           # /dev/null is mounted over it, so the bot sees an empty file and the
           # file itself is left alone.
@@ -287,10 +289,12 @@ jobs:
           chmod 644 "${prompt_dir}/prompt.txt"
           memory_mounts="-v /dev/null:/PeTTa/repos/Omega/memory/.env:ro"
           memory_mounts="${memory_mounts} -v ${prompt_dir}/prompt.txt:/PeTTa/repos/Omega/memory/prompt.txt:ro"
+          prompt_names="prompt.txt"
           if [ -e "${memory}/prompt_${LLM_PROVIDER}.txt" ]; then
             memory_mounts="${memory_mounts} -v ${prompt_dir}/prompt.txt:/PeTTa/repos/Omega/memory/prompt_${LLM_PROVIDER}.txt:ro"
+            prompt_names="${prompt_names} prompt_${LLM_PROVIDER}.txt"
           fi
-          echo "the image's prompt is mounted over the memory folder's:" ${memory_mounts}
+          echo "the image's prompt is mounted over the memory folder's ${prompt_names}"
 
           # The prompt ships inside the plugin at plugins/telegram/prompt.txt and
           # is read from there, so it is not copied out of the image and mounted

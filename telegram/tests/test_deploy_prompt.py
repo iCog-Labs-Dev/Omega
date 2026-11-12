@@ -50,8 +50,8 @@ def _prompt_block():
             if "memory_mounts" in script:
                 lines = script.splitlines()
                 start = next(i for i, line in enumerate(lines) if line.startswith("memory="))
-                end = next(i for i, line in enumerate(lines) if "memory_mounts}" in line
-                           and line.startswith("echo"))
+                end = next(i for i, line in enumerate(lines)
+                           if line.startswith("echo \"the image's prompt"))
                 return "\n".join(lines[start:end + 1])
     raise AssertionError("no step in deploy.yml builds memory_mounts")
 
