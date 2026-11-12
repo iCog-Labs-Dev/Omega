@@ -97,11 +97,10 @@ class ReplyGate:
 
     def claim_notice(self, chat_id):
         """Whether `chat_id` should hear that something went wrong: true once
-        per waiting message, and never when nobody is waiting. A message that
-        got a note may still be waiting for its answer, and the gate cannot
-        tell a note from an answer, so it counts as waiting until both of its
-        posts went out."""
-        unnotified = [w for w in self._live_waiting(str(chat_id)) if not w.notified]
+        per waiting message that has had no post yet, and never otherwise. A
+        user who already got a reply is not told about a later turn's failure."""
+        unnotified = [w for w in self._live_waiting(str(chat_id))
+                      if not w.notified and w.posts_left == POSTS_PER_MESSAGE]
         if not unnotified:
             return False
         unnotified[0].notified = True
