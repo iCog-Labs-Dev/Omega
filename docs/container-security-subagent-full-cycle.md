@@ -116,10 +116,18 @@ The runtime resolves the requested tool subset against the agent definition,
 rejects forbidden tools, renders the bounded prompt, and rejects a context
 larger than its budget.
 
+For cybersecurity goals, the optional knowledge adapter searches only the
+manifest-approved cybersecurity corpus. It uses the bounded goal plus a
+role-specific focus and adds at most three short excerpts if the context budget
+has room. These excerpts are explicitly advisory, cannot change permissions or
+scope, and are not target evidence. An unavailable index does not block the
+delegation.
+
 Before contacting OpenClaw, Omega creates a session and run in SQLite and emits
 a `delegation_prepared` trace record containing the selection reason, scope,
 context size and digest, facts, constraints, resolved permissions, and budget.
-The trace deliberately excludes the raw prompt and private reasoning.
+For retrieved knowledge it also records source provenance and excerpt length,
+but excludes the excerpt, raw prompt, and private reasoning.
 
 ### 4. Research inspects the lab
 
@@ -136,7 +144,8 @@ Research returns compact JSON such as:
   "summary": "Four security weaknesses were observed.",
   "findings": ["LAB-001 ...", "LAB-002 ..."],
   "artifacts": ["config/app.json", "config/services.json"],
-  "evidence": ["mode=0666", "debug=true", "test service enabled"]
+  "evidence": ["mode=0666", "debug=true", "test service enabled"],
+  "knowledge_sources": ["assessment-and-evidence-contract.md"]
 }
 ```
 
