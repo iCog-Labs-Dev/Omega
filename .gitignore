@@ -2,6 +2,7 @@
 memory/chroma_db/
 knowledge_db/
 chroma_db/
+knowledge-priors/omega-cybersec--*.md
 
 # pulled in repos
 repos/

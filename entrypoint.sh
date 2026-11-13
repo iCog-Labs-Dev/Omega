@@ -37,6 +37,8 @@ for arg in "$@"; do
 done
 export EMBEDDING_PROVIDER EMBEDDING_MODEL OPENAIAPI_URL MM_URL OPENCLAW_URL
 
+python3 "${OMEGA_DIR}/plugins/cybersecurity-knowledge/stage.py" verify
+
 agent_su=(su --group nogroup nobody)
 
 su www-data -s /bin/sh -c "sh /opt/nginx/nginx.sh"

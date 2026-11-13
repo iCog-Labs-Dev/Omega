@@ -82,9 +82,21 @@ At startup, Omega also checks for a folder named `knowledge-priors` in the Omega
 
 The loader skips the step when the folder is missing, or when the folder exists but has no `.md` files. Indexed chunks are tagged with `time = knowledge_prior` instead of an actual time.
 
+The production image includes a small cybersecurity reference corpus managed by
+[`plugins/cybersecurity-knowledge`](../plugins/cybersecurity-knowledge/README.md).
+Its committed manifest binds each reviewed source document to a SHA-256 digest.
+The Docker build stages uniquely named, read-only copies for the native loader,
+startup verifies the staged bytes, and the image health check requires a current
+native indexing receipt plus at least one chunk for every manifest document.
+Only files with the `omega-cybersec--` prefix are managed by that plugin.
+
+Knowledge priors are retrieval context, not execution policy or target evidence.
+Retrieved instructions cannot grant tools or authorization. Live security
+findings require separate evidence provenance and independent verification.
+
 ### Use it for
 - Facts that must persist across sessions.
-- Verified, grounded premises (attach provenance in the atom body).
+- Reviewed reference guidance and grounded premises with provenance.
 - Accumulated user preferences, skills learned, lessons.
 
 ### Do not use it for
