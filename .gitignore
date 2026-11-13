@@ -2,6 +2,7 @@
 memory/chroma_db/
 knowledge_db/
 chroma_db/
+knowledge-priors/omega-cybersec--*.md
 
 # pulled in repos
 repos/
@@ -21,6 +22,9 @@ Autotests/__pycache__/
 __pycache__/
 *.pyc
 Autotests/logs/
+
+# generated dependencies for the OpenClaw security-lab tool plugin
+plugins/openclaw/security-lab-tools/node_modules/
 
 # IDE
 .idea/

@@ -1,0 +1,24 @@
+{
+  agents: {
+    entries: {
+      "research-agent": {
+        tools: {
+          allow: ["omega_lab_read"],
+          deny: ["exec", "process", "read", "write", "edit", "apply_patch", "browser"],
+        },
+      },
+      "coding-agent": {
+        tools: {
+          allow: ["omega_lab_read", "omega_lab_write"],
+          deny: ["exec", "process", "read", "write", "edit", "apply_patch", "browser"],
+        },
+      },
+      "reviewer-agent": {
+        tools: {
+          allow: ["omega_lab_read", "omega_lab_verify"],
+          deny: ["exec", "process", "read", "write", "edit", "apply_patch", "browser"],
+        },
+      },
+    },
+  },
+}

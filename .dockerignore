@@ -19,6 +19,9 @@ __pycache__/
 *.pyo
 .pytest_cache/
 
+# Locally installed plugin dependencies are rebuilt or copied explicitly.
+**/node_modules/
+
 # Build/dev artifacts
 *.log
 *.tmp

@@ -1025,6 +1025,7 @@ if sys.argv[1]:
             -e "TG_BOT_TOKEN=${TG_BOT_TOKEN:-}"
             -e "SL_BOT_TOKEN=${SL_BOT_TOKEN:-}"
             -e "OMEGA_OPENCLAW_TOKEN=${OMEGA_OPENCLAW_TOKEN:-}"
+            -e "OMEGA_SUBAGENT_TRACE_PATH=${OMEGA_SUBAGENT_TRACE_PATH:-}"
             -e OMEGA_AUTH_SECRET="$OMEGA_AUTH_SECRET"
             -e IMPORT_KB_ON_START="${IMPORT_KB_ON_START:-0}"
             ${memory_import_env[@]+"${memory_import_env[@]}"}

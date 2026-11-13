@@ -88,13 +88,4 @@ export class ToolBudgetRegistry {
       for (const key of state.keys) this.states.delete(key);
     }
   }
-
-  stopRunIds(runIds = []) {
-    const states = new Set(
-      runIds.map((runId) => this.states.get(`run:${runId}`)).filter(Boolean),
-    );
-    for (const state of states) {
-      for (const key of state.keys) this.states.delete(key);
-    }
-  }
 }

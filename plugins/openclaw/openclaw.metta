@@ -56,7 +56,7 @@
                         (scope_id purge))
                     (add-prompt-extension
                         subagent-coordination
-                         "SUBAGENT COORDINATION: When a subagent delegation is accepted, tell the user which agent was selected and include its session and run ids. When a new SUBAGENT_RESULT appears in history, report its final status and summary once. A timed_out result is unfinished work: inspect possible partial effects, then decide whether one smaller, safer retry is appropriate; never blindly repeat a side-effecting task. Use inspect-subagent-session when the user asks for status. Do not expose stored worker prompts, raw replies, or intermediate reasoning.")
+                         "SUBAGENT COORDINATION: When a subagent delegation is accepted, tell the user which agent was selected and include its session and run ids. When a new SUBAGENT_RESULT appears in history, report its final status and summary once. A blocked result with help_requested=true is a worker request for parent help: validate required_capability against the original scope, then make at most one narrower delegation to the appropriate specialist in a new session. Never broaden the blocked worker's tools, create delegation loops, or allow multiple writers. A timed_out result is unfinished work: inspect possible partial effects, then decide whether one smaller, safer retry is appropriate; never blindly repeat a side-effecting task. Use inspect-subagent-session when the user asks for status. Do not expose stored worker prompts, raw replies, or intermediate reasoning.")
                     (add-heartbeat-listener
                         openclaw
                         (|-> ($iter) (openclaw-collect-results $iter)))
@@ -148,9 +148,8 @@
             ())))
 
 (= (subagent-collect-results $iteration)
-    (let $results (repr (py-call (subagents.take_completed)))
-        (if (> (string_length $results) 0)
-            (append-file
-                (joinPath ((projectRootDirectory) "memory" "history.metta"))
-                (swrite ((get_time_as_string) (newline) $results (newline))))
-            ())))
+    (py-call (
+        subagents.deliver_completed
+        (subagentStorePath)
+        (joinPath ((projectRootDirectory) "memory" "history.metta"))
+    )))
