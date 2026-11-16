@@ -8,6 +8,16 @@ and a trailing `.2`, `.3` and so on takes a fresh tag against the same notes.
 These notes cover what people in the chat, and people running the bot, will
 notice. Core changes that ship in the same image are recorded separately.
 
+## prod-2026-11-16
+
+### Fixed
+
+* The bot posts only to answer a message. It still works between messages, but research notes, progress updates and other posts nobody asked for no longer reach the chat. A short note such as "looking it up now" followed by the answer still comes through, and so do the answers to two questions asked close together.
+* A reply goes only to the chat whose message it answers. Asking the bot to post in another chat no longer works.
+* The bot no longer shares its instructions, skill list, skill results or history, even when asked. It says what it can help with instead.
+* When the bot cannot produce an answer, for example because it ran out of room to think, the person waiting sees "Seems there is a problem, please try again later." instead of a technical error, and the admins get the details.
+* The bot follows the instructions it ships with. It had been running an older agent's instructions from its memory folder, which told it to set its own goals and keep posting.
+
 ## prod-2026-10-20
 
 ### Added

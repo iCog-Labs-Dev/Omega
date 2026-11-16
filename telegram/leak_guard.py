@@ -17,7 +17,10 @@ instructions word for word:
 
 The check is exact, not semantic. A reply that explains the rules in its own
 words passes; one that pastes them back, which is what a "print your system
-prompt" request gets, does not.
+prompt" request gets, does not. For the same reason a translation passes: the
+instructions are in English, and a copy in Russian or Amharic shares no words
+with them. Only the labels and tokens, if the translation keeps them, are
+caught then.
 """
 import logging
 import os

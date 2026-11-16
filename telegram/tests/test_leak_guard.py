@@ -79,6 +79,20 @@ def test_a_paraphrase_of_the_rules_is_not_a_leak(instructions):
     assert leak_guard.find_leak(text, instructions) is None
 
 
+def test_a_translated_prompt_passes_the_copy_check(instructions):
+    # A known limit, found by QA: the check matches copied English words, and a
+    # translation shares none with the instructions.
+    text = ("Вы — агентная оболочка Omega в непрерывном цикле. Понимайте и "
+            "запоминайте цели пользователя и выбирайте собственные цели.")
+    assert leak_guard.find_leak(text, instructions) is None
+
+
+def test_a_translation_that_keeps_a_label_is_a_leak(instructions):
+    text = "PROMPT: Вы — агентная оболочка Omega в непрерывном цикле."
+    leak = leak_guard.find_leak(text, instructions)
+    assert leak is not None and "label" in leak.reason
+
+
 def test_one_shared_phrase_is_not_a_leak(instructions):
     # Eight words in a row from the prompt, once: a common phrase, not a copy.
     text = "Happy to help - I try to understand and remember the user goals, and choose wisely."
