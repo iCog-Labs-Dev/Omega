@@ -1,12 +1,28 @@
 # Changelog
 
-Each release has a section headed by its tag. The deploy publishes that section
-as the GitHub release, and the bot summarises it to users on its first start.
-A `pre-prod-*` tag rehearses the `prod-*` section of the same date on staging,
-and a trailing `.2`, `.3` and so on takes a fresh tag against the same notes.
+Each release has a section headed by its tag, `telegram-vMAJOR.MINOR.PATCH`.
+The section is published as the GitHub release, and the bot summarises it to
+users on its first start. A `telegram-vX.Y.Z-rc.N` tag rehearses the
+`telegram-vX.Y.Z` section on staging; each new rehearsal takes the next N.
+
+Pick the number by what the release asks of the people using and running the
+bot:
+
+* **Patch** (1.0.0 to 1.0.1): fixes only.
+* **Minor** (1.0.0 to 1.1.0): something new for users or operators, and
+  nothing anyone has to change.
+* **Major** (1.0.0 to 2.0.0): something people running the bot must act on,
+  such as a renamed secret or setting, a channel profile that needs rewriting,
+  or a new core that changes how the bot behaves.
 
 These notes cover what people in the chat, and people running the bot, will
 notice. Core changes that ship in the same image are recorded separately.
+Releases before version numbers are headed by their date tags.
+
+## telegram-v1.0.0
+
+The release deployed on 2026-11-16 as `prod-2026-11-16`, given the first
+version number. Its notes are in that section below.
 
 ## prod-2026-11-20
 
