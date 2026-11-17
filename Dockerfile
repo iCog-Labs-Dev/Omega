@@ -86,6 +86,9 @@ RUN find . -type f \( -name '*.sh' -o -path './scripts/omegaclaw' -o -path './Au
  && rm -rf ./.git \
  && chmod 0444 ./version
 
+# Validate and stage the curated corpus for Omega's nonrecursive loader.
+RUN python3 ./plugins/cybersecurity-knowledge/stage.py stage
+
 FROM ${SWIPL_IMAGE} AS runtime
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -151,3 +154,6 @@ RUN cp ${OMEGA_DIR}/run.metta /PeTTa/run.metta \
 
 ENTRYPOINT ["/PeTTa/repos/Omega/entrypoint.sh"]
 CMD []
+
+HEALTHCHECK --interval=30s --timeout=20s --start-period=600s --retries=3 \
+  CMD ["su", "--group", "nogroup", "nobody", "-s", "/bin/sh", "-c", "python3 /PeTTa/repos/Omega/plugins/cybersecurity-knowledge/verify_index.py"]
