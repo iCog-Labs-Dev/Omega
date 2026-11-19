@@ -1,0 +1,79 @@
+{
+  "scenario_id": "omega-container-hardening-v1",
+  "target": "omega-security-lab:/workspace",
+  "overall_status": "completed",
+  "findings": [
+    {
+      "id": "LAB-001",
+      "category": "excessive-file-permissions",
+      "target": "/workspace/config/app.json",
+      "disposition": "fixed",
+      "summary": "Set app.json and services.json to 0640 and test-credentials.txt to 0600.",
+      "changes": [],
+      "evidence": [],
+      "verification_checks": ["LAB-001"]
+    },
+    {
+      "id": "LAB-002",
+      "category": "insecure-application-setting",
+      "target": "app.debug",
+      "disposition": "fixed",
+      "summary": "Disable debug mode and its endpoint.",
+      "changes": [],
+      "evidence": [],
+      "verification_checks": ["LAB-002"]
+    },
+    {
+      "id": "LAB-003",
+      "category": "exposed-test-secret",
+      "target": "/workspace/public/test-credentials.txt",
+      "disposition": "fixed",
+      "summary": "Remove the synthetic credential from the public directory.",
+      "changes": [],
+      "evidence": [],
+      "verification_checks": ["LAB-003"]
+    },
+    {
+      "id": "LAB-004",
+      "category": "unnecessary-service",
+      "target": "container-local port 9090",
+      "disposition": "fixed",
+      "summary": "Disable the unnecessary test service and close port 9090.",
+      "changes": [],
+      "evidence": [],
+      "verification_checks": ["LAB-004"]
+    }
+  ],
+  "functionality": [
+    {
+      "id": "FUNC-001",
+      "status": "passed",
+      "evidence": []
+    },
+    {
+      "id": "FUNC-002",
+      "status": "passed",
+      "evidence": []
+    },
+    {
+      "id": "FUNC-003",
+      "status": "passed",
+      "evidence": []
+    }
+  ],
+  "subagent_contributions": [
+    {
+      "agent_id": "research-agent",
+      "session_id": "ses-...",
+      "run_id": "run-...",
+      "task": "",
+      "result_used_by_parent": true,
+      "summary": ""
+    }
+  ],
+  "duplicate_work": [],
+  "conflicting_actions": [],
+  "failures": [],
+  "unresolved_risks": [],
+  "limitations": []
+}

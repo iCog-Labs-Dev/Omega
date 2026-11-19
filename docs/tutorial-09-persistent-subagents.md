@@ -129,7 +129,7 @@ Chat is the user-facing view. Operators can also watch lifecycle events without
 revealing task content:
 
 ```bash
-docker logs -f omegaclaw 2>&1 | grep -E "Subagent run|SUBAGENT_RESULT"
+docker logs -f omega 2>&1 | grep -E "Subagent run|SUBAGENT_RESULT"
 ```
 
 Expected lifecycle:
