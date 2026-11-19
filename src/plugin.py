@@ -10,6 +10,7 @@ import importlib
 import importlib.util
 import sys
 import logging
+from config import config_get_by_key
 
 logger = logging.getLogger(__name__)
 
@@ -22,19 +23,116 @@ def _error(func, text):
     logger.error(error)
     raise RuntimeError(error)
 
+def parsePluginConfig(config_path):
+    """Parses the plugin config and returns a list of triples (loader, name, location)"""
+    global _plugins, _REPO, _LOADERS
+
+    try:
+        with open(config_path, "r") as f:
+            yaml_content = yaml.safe_load(f)
+    except Exception as e:
+        _error("parsePluginConfig", f"failed to read {config_path}: {repr(e)}")
+    if not isinstance(yaml_content, list):
+        _error(
+            "parsePluginConfig",
+            f"invalid plugin config format in {config_path}: expected a list of plugins"
+        )
+    if not yaml_content:
+        logger.warning(
+            f"parsePluginConfig: plugin config {config_path} is empty. "
+            "This file declares no plugins and will be skipped."
+        )
+
+    name_set = set()
+    plugins = []
+    for i, p in enumerate(yaml_content):
+        if not isinstance(p, dict):
+            _error(
+                "parsePluginConfig",
+                f"invalid plugin config format in {config_path}: expected a dict for each plugin, got {type(p)} at index {i}"
+            )
+        name = p.get("name")
+        if not name or not str(name).strip():
+            _error(
+                "parsePluginConfig",
+                f"'name' field is empty, file: {config_path}, index: {i}"
+            )
+        if not isinstance(name, str):
+            _error(
+                "parsePluginConfig",
+                f"'name' field is not a string, file: {config_path}, index: {i}"
+            )
+        if name in _plugins or name.casefold() in name_set:
+            _error(
+                "parsePluginConfig",
+                f"name '{name}' is not unique, file: {config_path}, index: {i}"
+            )
+        name_set.add(name.casefold())
+
+        # A drop-in turns a plugin off with `enabled: false`; such an entry
+        # needs no loader. See _list_core_plugins.
+        if p.get("enabled", True) is False:
+            continue
+
+        loader = p.get("loader")
+        if not loader in _LOADERS:
+            _error(
+                "parsePluginConfig",
+                f"plugin '{name}' requires a 'loader' from {_LOADERS}, "
+                f"got {loader!r}, file: {config_path}, index: {i}"
+            )
+
+        location = p.get("location")
+        if location is not None:
+            if not isinstance(location, str):
+                _error(
+                    "parsePluginConfig",
+                    f"'location' must be a string for plugin '{name}', "
+                    f"file: {config_path}, index: {i}"
+                )
+            location = str(pathlib.Path(location.format(REPO=_REPO)).resolve())
+        else:
+            location = ""
+
+        plugins.append([loader, name, location])
+
+    return plugins
+
+def _list_core_plugins(config_dir):
+    """Returns the plugins of config_dir/plugins.yaml with the drop-in files
+    of config_dir/plugins.d/*.yaml applied, in file name order. A drop-in
+    entry whose name is already listed replaces that entry in place, a new
+    name is added at the end, and `enabled: false` drops the plugin."""
+    plugins = {p[1].casefold(): p
+               for p in parsePluginConfig(config_dir.joinpath("plugins.yaml"))}
+    for path in sorted(config_dir.joinpath("plugins.d").glob("*.yaml")):
+        with open(path, "r") as f:
+            entries = yaml.safe_load(f)
+        if not entries:
+            continue
+        for p in entries:
+            if isinstance(p, dict) and p.get("enabled", True) is False \
+                    and isinstance(p.get("name"), str):
+                plugins.pop(p["name"].casefold(), None)
+        # parsePluginConfig validates the rest. A dict keeps the first
+        # position of a key, so a replaced entry loads where the original did.
+        for p in parsePluginConfig(path):
+            plugins[p[1].casefold()] = p
+    return list(plugins.values())
+
 def listPlugins():
-    """Loads the list of the plugins from ./config/plugins.yaml file, applies
-    the drop-in files from ./config/plugins.d/ on top of it and then returns
-    list of triples (loader, name, location). YAML file contains the list of
+    """Loads plugins from config/plugins.yaml, the drop-in files in
+    config/plugins.d/ and customPluginsConfigPath, then returns list of
+    triples (loader, name, location). YAML file contains the list of
     plugins each specified by these fields:
     - name - required, must be unique within one file
     - loader - required, must be either "python" or "metta"
     - location - optional, path to the plugin module used by Python loader
     - enabled - optional, false drops the plugin from the list
 
-    Drop-in files are read in file name order. An entry whose name is already
-    listed replaces that entry in place, so a deployment can swap a plugin or
-    turn it off without editing plugins.yaml:
+    A drop-in can replace or turn off a plugin from plugins.yaml without
+    editing it, which customPluginsConfigPath cannot: an external channel
+    that replaces core's own uses the same name.
 
         # config/plugins.d/telegram.yaml
         - name: telegram
@@ -42,54 +140,26 @@ def listPlugins():
           location: "{REPO}/plugins/telegram"
     """
     global _REPO
-    return _list_plugins(_REPO.joinpath("config"))
 
-def _list_plugins(config_dir):
-    """Merge plugins.yaml and plugins.d/*.yaml from config_dir into the list
-    of (loader, name, location) triples."""
-    manifests = [config_dir.joinpath("plugins.yaml")]
-    manifests += sorted(config_dir.joinpath("plugins.d").glob("*.yaml"))
+    core_plugins_config_path = _REPO.joinpath("./config/plugins.yaml")
+    custom_plugins_config_path = config_get_by_key("customPluginsConfigPath")
 
-    # A dict keeps the first position of a key, so a replaced entry loads
-    # where the original did.
-    entries = {}
-    for path in manifests:
-        for name, entry in _read_manifest(path):
-            entries[name] = entry
-
-    return [_plugin_triple(entry) for entry in entries.values()
-            if entry.get("enabled", True) is not False]
-
-def _read_manifest(path):
-    """Return the (name, entry) pairs of one manifest file in file order."""
-    with open(path, "r") as f:
-        yaml_content = yaml.safe_load(f) or []
-
-    names = set()
-    for i, p in enumerate(yaml_content):
-        name = p.get("name")
-        if name is None:
-            _error("listPlugins", f"name field is empty, file: {path}, index: {i}")
-        if name in names:
-            _error("listPlugins", f"name '{name}' is not unique, file: {path}")
-        names.add(name)
-        yield name, p
-
-def _plugin_triple(p):
-    """Validate one manifest entry and turn it into (loader, name, location)."""
-    global _REPO, _LOADERS
-
-    loader = p.get("loader", "metta")
-    if not loader in _LOADERS:
-        _error("listPlugins", f"incorrect loader type '{loader}', only {_LOADERS} are supported")
-
-    location = p.get("location")
-    if location is not None:
-        location = str(pathlib.Path(location.format(REPO=_REPO)).resolve())
+    core_plugins = _list_core_plugins(_REPO.joinpath("config"))
+    if custom_plugins_config_path:
+        custom_plugins = parsePluginConfig(custom_plugins_config_path)
     else:
-        location = ""
+        custom_plugins = []
 
-    return [loader, p["name"], location]
+    core_names = {p[1].casefold() for p in core_plugins}
+    for _, name, _ in custom_plugins:
+        if name.casefold() in core_names:
+            _error(
+                "listPlugins",
+                f"custom plugin '{name}' in {custom_plugins_config_path} "
+                f"conflicts with core plugin in {core_plugins_config_path}"
+            )
+
+    return core_plugins + custom_plugins
 
 class PythonPlugin:
     """Class to wrap the reference to the Python module and keep it inside
