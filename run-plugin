@@ -325,8 +325,12 @@ case "$MODE" in
         say "running the plugin's tests inside the container"
         # Core does not ship pytest, so the throwaway container installs it.
         # Baking it into every image to serve one command is the worse trade.
+        # Core's runtime stage has no pip either since its multi-stage build,
+        # so that comes from apt first, as in the --base-image overlay.
         run "docker run --rm --name '$CONTAINER-test' ${transient[*]} --entrypoint sh ${DOCKER_ARGS[*]:-} '$IMAGE' \
-             -c 'python3 -m pip install --quiet --no-cache-dir --break-system-packages pytest \
+             -c '(python3 -m pip --version >/dev/null 2>&1 || (apt-get update -qq \
+                    && apt-get install -y -qq --no-install-recommends python3-pip >/dev/null)) \
+                 && python3 -m pip install --quiet --no-cache-dir --break-system-packages pytest \
                  && python3 -m pytest $OMEGA_ROOT/plugins/$PLUGIN_NAME/tests -q'"
         ;;
     shell)
