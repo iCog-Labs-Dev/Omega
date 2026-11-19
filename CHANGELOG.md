@@ -8,6 +8,21 @@ and a trailing `.2`, `.3` and so on takes a fresh tag against the same notes.
 These notes cover what people in the chat, and people running the bot, will
 notice. Core changes that ship in the same image are recorded separately.
 
+## prod-2026-11-20
+
+### Fixed
+
+* Answers no longer go missing when the model writes several actions on one line. The bot's old core read one action per line, so an answer written straight after a lookup was swallowed by it. Since October about one message in eight got no reply that turn because of this.
+
+### Changed
+
+* The bot runs on the current Omega core. The model now calls the bot's skills directly instead of writing them out as text for the core to read.
+
+### Configuration
+
+* The core is built from the `telegram-core` branch of singnet/Omega_CustomBots: singnet/Omega `main` with the bot's open core changes merged on top, rebuilt by the `telegram-core-recipe` branch. Production pins `CORE_REF` to a tested commit of it.
+* The plugin is registered with a drop-in file, `config/plugins.d/telegram.yaml`, that replaces core's own Telegram channel. No core file is patched.
+
 ## prod-2026-11-16
 
 ### Fixed
