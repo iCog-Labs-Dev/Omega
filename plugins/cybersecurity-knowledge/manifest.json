@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "corpus_id": "omega-cybersecurity-reference",
+  "corpus_version": "2026.11.12",
+  "knowledge_class": "reference_guidance",
+  "documents": [
+    {
+      "path": "assessment-and-evidence-contract.md",
+      "title": "Cybersecurity assessment and evidence contract",
+      "reviewed": "2026-11-12",
+      "sha256": "bca69841a1334dc81d1389cf13a6473f18549277a9aea1831c11100a52243437",
+      "sources": [
+        "https://csrc.nist.gov/pubs/sp/800/61/r3/final",
+        "https://csrc.nist.gov/pubs/sp/800/86/final",
+        "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "path": "authorization-and-agent-boundaries.md",
+      "title": "Authorization and agent boundaries",
+      "reviewed": "2026-11-12",
+      "sha256": "836f1c7e4eb22e7cd3883d6d3f8d499c7a51f7a46178055b0c6956bdf199a5fe",
+      "sources": [
+        "https://csrc.nist.gov/pubs/sp/800/207/final",
+        "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "path": "container-isolation-and-hardening.md",
+      "title": "Container isolation and hardening",
+      "reviewed": "2026-11-12",
+      "sha256": "afbd18d12242be2eafbed5d92e3435782c30bd13c598cd5d3eed31d4006ba4b3",
+      "sources": [
+        "https://docs.docker.com/engine/security/",
+        "https://docs.docker.com/engine/security/seccomp/",
+        "https://docs.docker.com/engine/containers/resource_constraints/"
+      ]
+    },
+    {
+      "path": "evidence-integrity-and-reproducibility.md",
+      "title": "Evidence integrity and reproducibility",
+      "reviewed": "2026-11-12",
+      "sha256": "809ede0e7817b03cbdcd9ed9c7ef6ff72efb24e4128fa61397a143e6cabc1612",
+      "sources": [
+        "https://csrc.nist.gov/pubs/sp/800/86/final"
+      ]
+    },
+    {
+      "path": "incident-response-and-recovery.md",
+      "title": "Incident response and recovery",
+      "reviewed": "2026-11-12",
+      "sha256": "dc4134ca15f78d2693658cb0b10df98f662a3a66fb23b0dcc8071b0d9b5adb22",
+      "sources": [
+        "https://csrc.nist.gov/pubs/sp/800/61/r3/final"
+      ]
+    },
+    {
+      "path": "linux-host-assessment.md",
+      "title": "Linux host assessment",
+      "reviewed": "2026-11-12",
+      "sha256": "ba43a9340de3737a01ec7d835b7f95787f568d99ed4bc3275613b997b48d9229",
+      "sources": [
+        "https://docs.kernel.org/admin-guide/LSM/index.html",
+        "https://ubuntu.com/security/certifications/docs/usg",
+        "https://documentation.ubuntu.com/server/how-to/security/apparmor/"
+      ]
+    }
+  ]
+}
