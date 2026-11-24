@@ -54,7 +54,7 @@ class FakeExecutor:
         return {
             "status": "ok",
             "responseId": f"resp-{len(self.calls)}",
-            "reply": json.dumps(self.reply),
+            "reply": self.reply if isinstance(self.reply, str) else json.dumps(self.reply),
         }
 
 
@@ -64,12 +64,49 @@ def _runtime(sa, tmp_path, executor=None):
     return sa.SubagentRuntime(store, executor), executor
 
 
+def _valid_report():
+    return {
+        "scenario_id": "scenario-1",
+        "target": "authorized-target",
+        "overall_status": "completed",
+        "findings": [{
+            "id": "FINDING-1",
+            "category": "configuration",
+            "target": "config.json",
+            "disposition": "fixed",
+            "summary": "Configuration was corrected.",
+            "evidence": ["Independent check passed."],
+        }],
+        "functionality": [{
+            "id": "FUNC-1",
+            "status": "passed",
+            "evidence": ["Required behavior returned HTTP 200."],
+        }],
+        "subagent_contributions": [{
+            "agent_id": "reviewer-agent",
+            "session_id": "ses-1",
+            "run_id": "run-1",
+            "task": "Verify the final state.",
+            "result_used_by_parent": True,
+            "summary": "Verification passed.",
+        }],
+        "duplicate_work": [],
+        "conflicting_actions": [],
+        "failures": [],
+        "unresolved_risks": [],
+        "limitations": [],
+    }
+
+
 def test_registry_finds_agents_and_selects_by_capability(sa):
     registry = sa.DEFAULT_REGISTRY
     assert registry.get("research-agent").name == "Research Agent"
     assert registry.select("research", "Investigate sessions").id == "research-agent"
     assert registry.select("coding", "Implement the store").id == "coding-agent"
     assert registry.select("review", "Critique the result").id == "reviewer-agent"
+    assert "omega_lab_read" in registry.get("research-agent").allowed_tools
+    assert "omega_lab_write" in registry.get("coding-agent").allowed_tools
+    assert "omega_lab_verify" in registry.get("reviewer-agent").allowed_tools
 
 
 def test_explicit_agent_overrides_selection_and_unknown_capability_fails(sa):
@@ -189,6 +226,9 @@ def test_store_migrates_existing_session_schema(sa, tmp_path):
     assert session["scope_id"] == "default"
     assert session["disposed_at"] is None
     assert store.list_outbox() == []
+    with sqlite3.connect(path) as db:
+        run_columns = {row[1] for row in db.execute("PRAGMA table_info(subagent_runs)")}
+    assert {"evidence_json", "remaining_work_json"} <= run_columns
 
 
 def test_session_messages_are_isolated(sa, tmp_path):
@@ -234,11 +274,33 @@ def test_requested_tool_is_checked_before_run_creation(sa, tmp_path):
     assert executor.calls == []
 
 
+def test_default_tool_budget_is_allocated_by_worker_role(sa, tmp_path):
+    runtime, _ = _runtime(sa, tmp_path)
+    research = runtime.prepare(task="Inspect", capability="research")
+    assert research.budget.max_tool_calls == sa.DEFAULT_TOOL_CALLS
+    runtime.execute(research)
+
+    coding = runtime.prepare(task="Implement", capability="coding")
+    assert coding.budget.max_tool_calls == sa.DEFAULT_CODING_TOOL_CALLS
+
+
+def test_explicit_tool_budget_still_overrides_role_default(sa, tmp_path):
+    runtime, _ = _runtime(sa, tmp_path)
+    coding = runtime.prepare(
+        task="Small edit",
+        capability="coding",
+        context={"budget": {"max_tool_calls": 6}},
+    )
+    assert coding.budget.max_tool_calls == 6
+
+
 def test_only_compact_result_is_returned_while_transcript_stays_stored(sa, tmp_path):
     reply = {
         "status": "completed",
         "summary": "public summary",
         "findings": ["finding"],
+        "artifacts": [],
+        "evidence": ["finding independently observed"],
     }
     runtime, _ = _runtime(sa, tmp_path, FakeExecutor(reply=reply))
     result = runtime.run_subagent(
@@ -261,6 +323,78 @@ def test_executor_failure_returns_clean_result_and_persists_error(sa, tmp_path):
     assert run["error"] == "gateway down"
 
 
+@pytest.mark.parametrize("invalid_evidence", [[None], [""], ["   "]])
+def test_completed_result_rejects_null_or_blank_evidence(
+    sa, tmp_path, invalid_evidence
+):
+    reply = {
+        "status": "completed",
+        "summary": "Unsupported completion claim.",
+        "findings": [],
+        "artifacts": [],
+        "evidence": invalid_evidence,
+    }
+    runtime, _ = _runtime(sa, tmp_path, FakeExecutor(reply=reply))
+
+    result = runtime.run_subagent(task="Verify", capability="review")
+
+    assert result.status == "failed"
+    assert result.evidence == ()
+    assert "evidence" in result.error
+
+
+def test_partial_result_preserves_evidence_and_remaining_work(sa, tmp_path):
+    reply = {
+        "status": "partial",
+        "summary": "Two checks passed; one remains.",
+        "findings": ["Configuration was fixed."],
+        "artifacts": [],
+        "evidence": ["Read-back confirmed debug=false."],
+        "remaining_work": ["Independently verify the file mode."],
+    }
+    runtime, _ = _runtime(sa, tmp_path, FakeExecutor(reply=reply))
+
+    result = runtime.run_subagent(task="Remediate", capability="coding")
+
+    assert result.status == "partial"
+    assert result.evidence == ("Read-back confirmed debug=false.",)
+    assert result.remaining_work == ("Independently verify the file mode.",)
+    stored_run = runtime.store.list_runs(result.session_id)[0]
+    assert stored_run["status"] == "partial"
+    assert json.loads(stored_run["evidence_json"]) == list(result.evidence)
+    assert json.loads(stored_run["remaining_work_json"]) == list(result.remaining_work)
+    rendered = sa._render_result(result)
+    assert "status=partial" in rendered
+    assert "remaining_work=Independently verify the file mode." in rendered
+    assert "status=partial" in runtime.store.list_outbox()[0]["payload"]
+
+    inspected = json.loads(sa.inspect_session(result.session_id, runtime.store.path))
+    assert inspected["runs"][0]["status"] == "partial"
+    assert inspected["runs"][0]["evidence"] == list(result.evidence)
+    assert inspected["runs"][0]["remaining_work"] == list(result.remaining_work)
+
+
+@pytest.mark.parametrize("missing_field", ["evidence", "remaining_work"])
+def test_partial_result_requires_evidence_and_remaining_work(
+    sa, tmp_path, missing_field
+):
+    reply = {
+        "status": "partial",
+        "summary": "Work remains.",
+        "findings": [],
+        "artifacts": [],
+        "evidence": ["One check passed."],
+        "remaining_work": ["Run the final check."],
+    }
+    reply[missing_field] = []
+    runtime, _ = _runtime(sa, tmp_path, FakeExecutor(reply=reply))
+
+    result = runtime.run_subagent(task="Review", capability="review")
+
+    assert result.status == "failed"
+    assert missing_field in result.error
+
+
 def test_end_to_end_selection_projection_persistence_and_result(sa, tmp_path):
     runtime, executor = _runtime(sa, tmp_path)
     result = runtime.run_subagent(
@@ -268,6 +402,9 @@ def test_end_to_end_selection_projection_persistence_and_result(sa, tmp_path):
         capability="review",
         context={
             "facts": ["tests passed"],
+            "handoff_evidence": ["research run-1: config value observed"],
+            "remaining_work": ["apply the bounded fix"],
+            "freshness_checks": ["re-read only the changed file"],
             "constraints": ["read only"],
             "expected_output": "A short verdict",
             "requested_tools": ["read-file"],
@@ -278,6 +415,10 @@ def test_end_to_end_selection_projection_persistence_and_result(sa, tmp_path):
     assert "tests passed" in prompt
     assert "read only" in prompt
     assert "A short verdict" in prompt
+    assert "research run-1: config value observed" in prompt
+    assert "apply the bounded fix" in prompt
+    assert "re-read only the changed file" in prompt
+    assert "do not repeat discovery" in prompt
     assert "Return only a JSON object" in prompt
     assert len(runtime.store.list_messages(result.session_id)) == 2
 
@@ -312,6 +453,41 @@ def test_timed_out_result_returns_safe_retry_feedback(sa):
     assert "status=timed_out" in rendered
     assert "retryable=true" in rendered
     assert "inspect_partial_effects_then_retry_with_a_smaller_task" in rendered
+
+
+def test_blocked_result_requests_bounded_parent_help(sa):
+    result = sa.SubagentResult(
+        agent_id="research-agent",
+        session_id="ses-blocked",
+        run_id="run-blocked",
+        status="blocked",
+        summary="Task requires a target modification.",
+        findings=("required_capability:coding",),
+        error="help_required:write access is outside the research role",
+    )
+    rendered = sa._render_result(result)
+    assert "status=blocked" in rendered
+    assert "required_capability:coding" in rendered
+    assert "help_requested=true" in rendered
+    assert "parent_reassess_and_delegate_to_capable_agent" in rendered
+
+
+def test_metta_heartbeat_uses_durable_subagent_outbox_delivery():
+    path = os.path.join(_PLUGIN_DIR, "openclaw.metta")
+    with open(path, encoding="utf-8") as stream:
+        source = stream.read()
+    assert "subagents.deliver_completed" in source
+    assert "subagents.take_completed" not in source
+    assert "subagents.save_report" in source
+
+
+def test_entrypoint_preserves_trace_path_but_not_gateway_secret():
+    path = os.path.join(_REPO_ROOT, "entrypoint.sh")
+    with open(path, encoding="utf-8") as stream:
+        source = stream.read()
+    safe_vars = source.split('SAFE_VARS="', 1)[1].split('"', 1)[0]
+    assert "OMEGA_SUBAGENT_TRACE_PATH" in safe_vars
+    assert "OMEGA_OPENCLAW_TOKEN" not in safe_vars
 
 
 def test_plugin_facing_delegate_and_resume_flow(sa, tmp_path, monkeypatch):
@@ -372,6 +548,47 @@ def test_inspect_unknown_session_returns_clean_error(sa, tmp_path):
     ))
     assert inspected["status"] == "error"
     assert inspected["type"] == "session_error"
+
+
+def test_report_is_validated_and_atomically_saved_beside_store(sa, tmp_path):
+    store_path = tmp_path / "memory" / "subagents.sqlite3"
+    saved = json.loads(sa.save_report(
+        "workflow-1", _valid_report(), str(store_path)
+    ))
+    target = tmp_path / "memory" / "subagent_reports" / "workflow-1.json"
+    assert saved["status"] == "saved"
+    assert json.loads(target.read_text()) == _valid_report()
+    assert len(saved["sha256"]) == 64
+    assert saved["schema_valid"] is True
+    assert saved["independently_validated"] is False
+    assert saved["validation_status"] == "not_run"
+    assert not list(target.parent.glob("*.tmp"))
+
+    rejected = json.loads(sa.save_report("../escape", {}, str(store_path)))
+    assert rejected["status"] == "error"
+    assert rejected["type"] == "report_error"
+
+
+@pytest.mark.parametrize("invalid_evidence", [[None], [""], ["   "]])
+def test_report_rejects_null_or_blank_evidence(sa, tmp_path, invalid_evidence):
+    report = _valid_report()
+    report["findings"][0]["evidence"] = invalid_evidence
+
+    rejected = json.loads(sa.save_report(
+        "workflow-1", report, str(tmp_path / "subagents.sqlite3")
+    ))
+
+    assert rejected["status"] == "error"
+    assert "evidence" in rejected["message"]
+
+
+def test_report_rejects_empty_json_object(sa, tmp_path):
+    rejected = json.loads(sa.save_report(
+        "workflow-1", {}, str(tmp_path / "subagents.sqlite3")
+    ))
+
+    assert rejected["status"] == "error"
+    assert "schema validation failed" in rejected["message"]
 
 
 def test_resolved_tool_subset_reaches_executor_and_prompt(sa, tmp_path):
@@ -601,3 +818,68 @@ def test_budget_cannot_exceed_system_ceiling(sa, tmp_path):
             capability="coding",
             context={"budget": {"max_tool_calls": sa.MAX_TOOL_CALLS + 1}},
         )
+
+
+def test_coordination_trace_records_decisions_permissions_and_results(sa, tmp_path):
+    trace_path = tmp_path / "coordination.jsonl"
+    runtime = sa.SubagentRuntime(
+        sa.SessionStore(tmp_path / "trace.sqlite3"),
+        FakeExecutor(),
+        trace_path=trace_path,
+    )
+    result = runtime.run_subagent(
+        task="Inspect the disposable security lab",
+        capability="research",
+        context={
+            "context": "bounded private evidence",
+            "scope_id": "security-lab-run-1",
+            "constraints": ["Do not access the host"],
+            "artifacts": ["container snapshot"],
+            "requested_tools": ["read-file"],
+            "budget": {"max_tool_calls": 3, "timeout_seconds": 30},
+        },
+    )
+    events = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    assert [event["event"] for event in events] == [
+        "delegation_prepared", "worker_started", "worker_result"
+    ]
+    prepared = events[0]
+    assert prepared["agent_id"] == "research-agent"
+    assert prepared["selection"]["reason"] == "capability"
+    assert prepared["permissions"]["resolved_tools"] == ["read-file"]
+    assert prepared["budget"]["max_tool_calls"] == 3
+    assert prepared["context_projection"]["scope_id"] == "security-lab-run-1"
+    assert len(prepared["context_projection"]["context_sha256"]) == 64
+    assert "bounded private evidence" not in trace_path.read_text()
+    assert events[-1]["run_id"] == result.run_id
+    assert events[-1]["status"] == "completed"
+def test_unstructured_or_unevidenced_results_cannot_complete(sa, tmp_path):
+    runtime, _ = _runtime(sa, tmp_path, FakeExecutor(reply="plain worker reply"))
+    plain = runtime.run_subagent(task="Review", capability="review")
+    assert plain.status == "failed"
+    assert "must be one JSON object" in plain.error
+
+    runtime, _ = _runtime(sa, tmp_path, FakeExecutor(reply={
+        "status": "completed",
+        "summary": "claim without proof",
+        "findings": [],
+        "artifacts": [],
+        "evidence": [],
+    }))
+    unsupported = runtime.run_subagent(task="Review", capability="review")
+    assert unsupported.status == "failed"
+    assert "evidence(non-empty for completed results)" in unsupported.error
+
+
+def test_one_fenced_structured_result_is_validated_despite_brief_wrapper(sa, tmp_path):
+    reply = "Completed the bounded task.\n```json\n" + json.dumps({
+        "status": "completed",
+        "summary": "verified result",
+        "findings": [],
+        "artifacts": ["artifact"],
+        "evidence": ["independent check passed"],
+    }) + "\n```"
+    runtime, _ = _runtime(sa, tmp_path, FakeExecutor(reply=reply))
+    result = runtime.run_subagent(task="Review", capability="review")
+    assert result.status == "completed"
+    assert result.evidence == ("independent check passed",)

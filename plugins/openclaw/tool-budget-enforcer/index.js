@@ -24,7 +24,6 @@ export default definePluginEntry({
 
     api.on("before_tool_call", (event, ctx) => budgets.beforeToolCall(event, ctx));
     api.on("agent_end", (event, ctx) => budgets.end(event, ctx));
-    api.on("run_stopped", (event) => budgets.stopRunIds(event.runIds));
 
     api.registerHttpRoute({
       path: "/plugins/omega-tool-budget/health",
