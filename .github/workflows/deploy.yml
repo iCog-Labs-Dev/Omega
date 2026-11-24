@@ -304,6 +304,9 @@ jobs:
           # pipe, which www-data cannot open: the proxy dies with
           # "open() /dev/stderr failed (13: Permission denied)" and takes the
           # container with it.
+          # showStartupVersion=false: core otherwise posts its version string
+          # to the chat on every start, a post nobody asked for. A release says
+          # what changed through its announcement instead.
           docker run -d -it \
             --name omega \
             ${RESTART:+--restart=always} \
@@ -323,6 +326,7 @@ jobs:
             ${LLM_MODEL:+LLM=${LLM_MODEL}} \
             ${RELEASE_TAG:+releaseTag=${RELEASE_TAG} releaseRepo=${RELEASE_REPO}} \
             ${profile_arg} \
+            showStartupVersion=false \
             embeddingprovider=OpenAI
 
           docker ps --filter name=omega --format 'started {{.Names}} from {{.Image}}'

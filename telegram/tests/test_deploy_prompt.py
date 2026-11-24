@@ -132,3 +132,27 @@ def test_a_provider_without_its_own_prompt_gets_the_general_one(tmp_path):
 def test_an_image_with_no_prompt_stops_the_deploy(tmp_path):
     code, _, _ = _deploy(tmp_path, {}, OMA)
     assert code != 0
+
+
+def _bot_run_command():
+    """The `docker run -d` that starts the bot, as one line of arguments."""
+    with open(_DEPLOY) as handle:
+        workflow = yaml.safe_load(handle)
+    for job in workflow["jobs"].values():
+        for step in job.get("steps", []):
+            lines = (step.get("run") or "").splitlines()
+            for i, line in enumerate(lines):
+                if line.strip().startswith("docker run -d"):
+                    command = []
+                    for part in lines[i:]:
+                        command.append(part.strip().rstrip("\\").strip())
+                        if not part.rstrip().endswith("\\"):
+                            return " ".join(command)
+    raise AssertionError("no step in deploy.yml starts the bot with docker run -d")
+
+
+def test_the_bot_does_not_post_cores_version_on_start():
+    # Upstream core posts its version string to the chat on every start;
+    # staging posted "telegram-core-v1.0.0" to the group. Core skips it for any
+    # value but True, and the command line hands it the text "false".
+    assert "showStartupVersion=false" in _bot_run_command().split()
