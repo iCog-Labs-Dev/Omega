@@ -19,12 +19,7 @@ These notes cover what people in the chat, and people running the bot, will
 notice. Core changes that ship in the same image are recorded separately.
 Releases before version numbers are headed by their date tags.
 
-## telegram-v1.0.0
-
-The release deployed on 2026-11-16 as `prod-2026-11-16`, given the first
-version number. Its notes are in that section below.
-
-## prod-2026-11-20
+## telegram-v2.0.0
 
 ### Fixed
 
@@ -36,8 +31,13 @@ version number. Its notes are in that section below.
 
 ### Configuration
 
-* The core is built from the `telegram-core` branch of singnet/Omega_CustomBots: singnet/Omega `main` with the bot's open core changes merged on top, rebuilt by the `telegram-core-recipe` branch. Production pins `CORE_REF` to a tested commit of it.
+* The core is `telegram-core-v1.0.0` from singnet/Omega_CustomBots: singnet/Omega `main` with the bot's open core changes merged on top, built by the `telegram-core-recipe` branch. Set `CORE_REF` to that tag's commit before deploying this release.
 * The plugin is registered with a drop-in file, `config/plugins.d/telegram.yaml`, that replaces core's own Telegram channel. No core file is patched.
+
+## telegram-v1.0.0
+
+The release deployed on 2026-11-16 as `prod-2026-11-16`, given the first
+version number. Its notes are in that section below.
 
 ## prod-2026-11-16
 

@@ -8,7 +8,7 @@ directory records the announced tag, so a restart does not announce again.
 The deploy passes the tag and the repository holding the notes as run
 arguments, which core's config reads like any other setting:
 
-    run.metta commchannel=telegram releaseTag=prod-2026-10-20 releaseRepo=iCog-Labs-Dev/Omega
+    run.metta commchannel=telegram releaseTag=telegram-v2.0.0 releaseRepo=iCog-Labs-Dev/Omega
 
 Without releaseTag nothing is announced. Everything that can fail - the
 fetch, the model, the send - logs and gives up, so a release never stops the

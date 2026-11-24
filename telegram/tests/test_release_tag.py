@@ -105,9 +105,11 @@ def test_a_malformed_tag_is_refused():
 
 
 def test_rehearsals_and_other_tags_do_not_count_as_releases():
-    # Earlier rc tags, the date tags and other bots' tags are not releases.
+    # Earlier rc tags, the date tags, other bots' tags and core builds are not
+    # releases of the bot.
     existing = ["telegram-v1.1.0-rc.1", "telegram-v1.1.0-rc.2", "prod-2026-11-16",
-                "bgi-slack-v4.0.0", "telegram-core-20261110-405f692", "telegram-v1.0.0"]
+                "bgi-slack-v4.0.0", "telegram-core-20261110-405f692",
+                "telegram-core-v9.0.0", "telegram-v1.0.0"]
     assert check("telegram-v1.1.0", existing, CHANGELOG) == []
 
 
