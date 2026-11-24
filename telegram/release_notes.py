@@ -234,6 +234,7 @@ def announce():
             return ""
         import channels
         channels.commChannelSend(message)
+        logger.info(f"Release announcement for {tag.name}: {message}")
         mark_announced(tag)
         return message
     except Exception as e:

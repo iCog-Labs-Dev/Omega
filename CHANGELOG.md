@@ -23,7 +23,8 @@ Releases before version numbers are headed by their date tags.
 
 ### Fixed
 
-* Answers no longer go missing when the model writes several actions on one line. The bot's old core read one action per line, so an answer written straight after a lookup was swallowed by it. Since October about one message in eight got no reply that turn because of this.
+* Answers no longer go missing. Since October about one message in eight got no answer, most often when the bot looked something up before replying. Those answers now reach the chat.
+* Operators: the old core read the model's actions one per line, so an answer written on the same line as a lookup was swallowed. The new core takes the model's actions as tool calls, so that cannot happen.
 
 ### Changed
 
