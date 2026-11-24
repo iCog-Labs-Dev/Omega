@@ -9,16 +9,6 @@ from unittest.mock import patch
 
 PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN))
-# Core's parser lives in src/, which is there only when the plugin sits inside a
-# core tree. Checked out on its own, the two tests that read it skip themselves.
-for _core in (PLUGIN.parent, PLUGIN.parents[1]):
-    sys.path.insert(0, str(_core / "src"))
-try:
-    import helper
-except ModuleNotFoundError:
-    helper = None
-
-_NO_CORE = unittest.skipIf(helper is None, "core's src/helper.py is not on the path")
 import media_handler as mh
 from text_splitter import split_for_telegram
 
@@ -67,14 +57,14 @@ class SpeakTextTests(unittest.TestCase):
         self.assertEqual(self.delivered(), split_for_telegram(text))
         self.assertEqual(self.delivered(), ["a" * 3000, "b" * 3000, "c" * 2000])
 
-    @_NO_CORE
-    def test_parser_to_speech(self):
+    def test_tool_call_argument_to_speech(self):
+        # Core passes a tool call's arguments as JSON, so line breaks arrive as
+        # real newlines. A model that still writes \\n gets the same speech.
         for text in ("First\nSecond", "First\\nsend this aloud"):
-            with self.subTest(text=text), patch.object(
-                    helper, "LLM_COMMANDS", helper.LLM_COMMANDS | {"speak"}):
+            with self.subTest(text=text):
                 self.send.reset_mock()
-                parsed = helper.balance_parentheses("speak " + text)
-                argument = json.loads(parsed[len("((speak "):-2])
+                call = json.dumps({"name": "speak", "arguments": {"voice_text": text}})
+                argument = json.loads(call)["arguments"]["voice_text"]
                 self.assertEqual(mh.speak(argument), "VOICE_SENT")
                 self.assertEqual(self.delivered(), [text.replace("\\n", "\n")])
 
@@ -156,14 +146,13 @@ class SpeakTextTests(unittest.TestCase):
         self.synth.assert_not_called()
         self.send.assert_not_called()
 
-    @_NO_CORE
-    def test_missing_argument_parses_to_validation(self):
-        with patch.object(helper, "LLM_COMMANDS", helper.LLM_COMMANDS | {"speak"}):
-            # Core may or may not add the empty argument itself. Both forms reach
-            # validation: telegram.metta maps a bare (speak) to (speak "").
-            for command in ("speak", "(speak)", 'speak ""'):
-                self.assertIn(helper.balance_parentheses(command), ('((speak))', '((speak ""))'))
-        self.assertIn('(= (speak)\n   (speak ""))', (PLUGIN / "telegram.metta").read_text())
+    def test_speak_takes_one_argument_and_tolerates_none(self):
+        # Core builds the tool from add-skill's argument list and refuses a call
+        # that leaves an argument out, so speak declares exactly one. A bare
+        # (speak) from a MeTTa caller still reaches validation.
+        metta = (PLUGIN / "telegram.metta").read_text()
+        self.assertRegex(metta, r"\(add-skill speak\s+\"[^\"]*\"\s+\(voice_text\)\)")
+        self.assertIn('(= (speak)\n   (speak ""))', metta)
 
     def test_cleanup_preserves_language_and_numbers(self):
         self.assertEqual(mh.speak("Привет **мир**! 123 _слова_ `code` 👩‍💻"), "VOICE_SENT")

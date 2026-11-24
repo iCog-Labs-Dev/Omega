@@ -299,6 +299,23 @@ def test_generate_and_send_pdf_success():
          mh._generate_pdf_bytes, mh._live_send_document) = original
 
 
+def test_generate_and_send_pdf_turns_escaped_newlines_into_line_breaks():
+    original = (mh._pdf_generation_allowed, mh._prompt_is_unsafe,
+                mh._generate_pdf_bytes, mh._live_send_document)
+    seen = []
+    mh._pdf_generation_allowed = lambda: True
+    mh._prompt_is_unsafe = lambda content: False
+    mh._generate_pdf_bytes = lambda content, fonts: seen.append(content) or b"%PDF-test"
+    mh._live_send_document = lambda data, filename: None
+    try:
+        for content in ("Title\n\n- point", "Title\\n\\n- point"):
+            mh.generate_and_send_pdf(content + " " + str(len(seen)))
+        assert seen == ["Title\n\n- point 0", "Title\n\n- point 1"]
+    finally:
+        (mh._pdf_generation_allowed, mh._prompt_is_unsafe,
+         mh._generate_pdf_bytes, mh._live_send_document) = original
+
+
 def test_generate_and_send_pdf_checks_gate_and_content():
     original = mh._pdf_generation_allowed, mh._prompt_is_unsafe
     mh._pdf_generation_allowed = lambda: False

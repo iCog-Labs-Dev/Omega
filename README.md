@@ -75,11 +75,13 @@ the environment the agent sees, and switches to uid 65534 (`nobody`) before the
 agent starts. The plugin reaches Telegram, OpenRouter, Anthropic and OpenAI
 through that proxy, so the agent, and its `shell` skill, never see a key.
 
-Core is built from `CORE_REMOTE` at `CORE_REF`, which default to the `telegram`
-branch of `iCog-Labs-Dev/Omega`. Against a core that lacks something the plugin
-needs, `run-plugin` adds it to its copy: the manifest entry, the plugin's
-requirements install, and removing core's own `channels/telegram.py`, which
-claims the same channel id.
+Core is built from `CORE_REMOTE` at `CORE_REF`, which default to `main` of
+`singnet/Omega`. `run-plugin` copies the plugin to `plugins/telegram` and adds
+`config/plugins.d/telegram.yaml`, which replaces core's own `telegram` entry, so
+core's built-in channel and its prompt are never loaded. No core file is
+changed. It refuses a core that does not read `config/plugins.d` or does not
+install `plugins/*/requirements.txt`, and warns when core lacks the channel
+prompt hook or the tool veto that `/togglesearch` needs.
 
 ## Configuration
 
@@ -125,8 +127,8 @@ idle token, not one a running bot is polling with.
 | Trigger | Workflow | What happens |
 | --- | --- | --- |
 | pull request to `telegram-plugin` or `SNET_Telegram` | `ci.yml` | test, build, smoke test; publishes nothing |
-| `pre-prod-*` tag on `singnet/Omega_CustomBots` | `deploy-staging.yml` | the same, then publishes the image and deploys to staging |
-| `prod-*` tag on `singnet/Omega_CustomBots` | `deploy-production.yml` | the same against production, with `--restart=always` |
+| `telegram-vX.Y.Z-rc.N` tag on `singnet/Omega_CustomBots` | `deploy-staging.yml` | checks the tag, the same, then publishes the image and deploys to staging |
+| `telegram-vX.Y.Z` tag on `singnet/Omega_CustomBots` | `deploy-production.yml` | the same against production, with `--restart=always` |
 
 The deploy workflows do nothing in any other repository, so a tag pushed to
 `iCog-Labs-Dev/Omega` deploys nothing. `common.yml` builds the image and
@@ -141,26 +143,42 @@ missing dependency; only the image can.
 
 ### Releasing
 
-1. On `telegram-plugin`, add a `## prod-YYYY-MM-DD` section to `CHANGELOG.md`
+Releases are numbered `telegram-vMAJOR.MINOR.PATCH`. `CHANGELOG.md` says how
+to pick the number: patch for fixes only, minor for something new that nobody
+has to act on, major for something people running the bot must change.
+
+1. On `telegram-plugin`, add a `## telegram-vX.Y.Z` section to `CHANGELOG.md`
    describing what people in the chat will notice.
 2. Sync `SNET_Telegram` as above and merge the pull request.
-3. Publish the notes. The bot reads them, without logging in, from the GitHub
-   release of its tag in `iCog-Labs-Dev/Omega`, because `Omega_CustomBots` is
-   private. Tag `telegram-plugin` there and publish before deploying, or the
-   bot starts with nothing to announce:
+3. Check the tag, then publish the notes. The bot reads them, without logging
+   in, from the GitHub release of its tag in `iCog-Labs-Dev/Omega`, because
+   `Omega_CustomBots` is private. Tag `telegram-plugin` there and publish
+   before deploying, or the bot starts with nothing to announce:
 
    ```sh
-   tag=pre-prod-YYYY-MM-DD   # prod-YYYY-MM-DD for production
+   tag=telegram-vX.Y.Z-rc.1   # telegram-vX.Y.Z for production
+   python3 scripts/release_tag.py check "$tag"
    git tag "$tag" icog/telegram-plugin && git push icog "$tag"
    python3 scripts/changelog-section.py "$tag" \
      | gh release create "$tag" --repo iCog-Labs-Dev/Omega --title "$tag" \
-         --notes-file - --verify-tag --prerelease   # no --prerelease for prod-*
+         --notes-file - --verify-tag --prerelease   # no --prerelease for production
    ```
 
-4. Tag the merged `SNET_Telegram` commit `pre-prod-YYYY-MM-DD` and push the tag
-   to `singnet/Omega_CustomBots`. Staging deploys and announces that section.
-   Add `.2`, `.3` and so on for another rehearsal of the same notes.
-5. Repeat steps 3 and 4 with `prod-YYYY-MM-DD`. Production deploys.
+4. Tag the merged `SNET_Telegram` commit `telegram-vX.Y.Z-rc.1` and push the
+   tag to `singnet/Omega_CustomBots`. Staging deploys and announces the
+   `telegram-vX.Y.Z` section. Take `-rc.2`, `-rc.3` and so on for another
+   rehearsal; the bot does not announce a tag twice.
+5. Repeat steps 3 and 4 with `telegram-vX.Y.Z`. Production deploys.
+
+Both deploys run `scripts/release_tag.py check` first and stop when the tag is
+malformed, is not newer than the last release, or has no section in
+`CHANGELOG.md`. Releases before 2026-11-16 used date tags, `pre-prod-*` and
+`prod-*`; `telegram-v1.0.0` is the last of them, `prod-2026-11-16`.
+
+The announcement is the plugin's own, in `telegram/release_notes.py`. The deploy
+passes `releaseTag` and `releaseRepo`; on the first loop iteration the plugin
+fetches that release, has the model summarize it for chat users, and sends it
+once. `memory/announced_release` records the tag so a restart stays quiet.
 
 Production refuses to build unless the `CORE_REF` repository variable is a full
 40-character commit, so a branch moving mid-release cannot change what ships:

@@ -2,7 +2,10 @@ name: Deploy (production)
 
 # Tag a commit on the bot branch to release it:
 #
-#   git tag prod-2026-09-10 && git push origin prod-2026-09-10
+#   git tag telegram-v1.3.0 && git push origin telegram-v1.3.0
+#
+# telegram-v1.3.0-rc.N tags rehearse it on staging instead; see deploy-staging.yml
+# and scripts/release_tag.py.
 #
 # A tag push reads the workflow from the tagged commit, so this works without
 # the workflow ever being on the default branch.
@@ -10,7 +13,9 @@ name: Deploy (production)
 on:
   push:
     tags:
-      - "prod-*"
+      - "telegram-v*"
+      # Rehearsals, telegram-vX.Y.Z-rc.N, deploy staging.
+      - "!telegram-v*-*"
 
 concurrency:
   group: deploy-production
@@ -25,6 +30,23 @@ permissions:
 # not deploy: only singnet/Omega_CustomBots holds the deploy secrets.
 
 jobs:
+  # The tag has to name a release newer than the last one, with notes to
+  # announce, before anything is built. See scripts/release_tag.py.
+  release-tag:
+    if: github.repository == 'singnet/Omega_CustomBots'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # The other release tags, to compare this one with.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Check the release tag
+        run: python3 scripts/release_tag.py check "$GITHUB_REF_NAME"
+
   # A release names the core it ships. CORE_REF is resolved to a commit inside
   # the build job, and the whole run queues behind any other deploy, so a branch
   # there is read minutes to hours after the tag was pushed: whatever core had
@@ -52,6 +74,7 @@ jobs:
   # looks them up. See publish-release.yml.
   # See the note in deploy-staging.yml: skipped while the notes live elsewhere.
   publish-release:
+    needs: release-tag
     if: github.repository == 'singnet/Omega_CustomBots' && (vars.RELEASE_NOTES_REPO == '')
     permissions:
       contents: write
@@ -61,7 +84,7 @@ jobs:
 
   build:
     if: github.repository == 'singnet/Omega_CustomBots'
-    needs: pinned-core
+    needs: [pinned-core, release-tag]
     uses: ./.github/workflows/common.yml
     with:
       publish_docker: true

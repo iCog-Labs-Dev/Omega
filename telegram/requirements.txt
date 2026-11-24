@@ -7,7 +7,10 @@
 # generate-image failed at runtime with "No module named 'requests'".
 Pillow>=10.0.0
 pypdf>=4.0.0
-aiogram>=3.0.0
+# <3.33: 3.33.0 fails to import on the Python 3.11.2 in core's image
+# ("unhashable type: 'FailFast'" in aiogram/types/rich_text_union.py). Raise
+# the cap once core's image has a Python that builds that union.
+aiogram>=3.0.0,<3.33
 # >=1.4.0 for convert()/entities_to_markdownv2(), used to reveal link targets.
 telegramify-markdown>=1.4.0
 openai>=1.0.0

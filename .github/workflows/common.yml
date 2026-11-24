@@ -79,9 +79,11 @@ on:
 
 env:
   # Changing core is a one-line change here, or a repository variable, and
-  # needs no edit to the deploy workflows.
-  DEFAULT_CORE_REMOTE: 'https://github.com/iCog-Labs-Dev/Omega.git'
-  DEFAULT_CORE_REF: 'telegram'
+  # needs no edit to the deploy workflows. telegram-core is singnet/Omega main
+  # with the core changes the bot needs that are still open upstream merged on
+  # top, rebuilt by the telegram-core-recipe branch of this repository.
+  DEFAULT_CORE_REMOTE: 'https://github.com/singnet/Omega_CustomBots.git'
+  DEFAULT_CORE_REF: 'telegram-core'
   DEFAULT_IMAGE_NAME: 'omega-telegram-snet'
 
 jobs:
@@ -134,6 +136,18 @@ jobs:
             IMAGE_NAME="${{ inputs.registry }}/${owner}/${DEFAULT_IMAGE_NAME}"
           fi
           echo "image=${IMAGE_NAME}:${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Let git read this repository
+        # telegram-core is published in this repository, which is private, so
+        # fetching core from it needs the job's token. The header is scoped to
+        # this repository's URL; any other core remote is fetched as before.
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          git config --global \
+            "http.https://github.com/${GITHUB_REPOSITORY}.git.extraheader" \
+            "AUTHORIZATION: basic ${auth}"
 
       - name: Resolve the core commit
         id: core
@@ -233,16 +247,19 @@ jobs:
           loader, _, location = entries[0]
           print(f"manifest: {name} loader={loader} location={location}")
 
+          # The drop-in has to win over core's own 'telegram' entry, or core
+          # loads its built-in channel under the same id.
           expected = os.path.join(root, "plugins", name)
-          if location != expected:
-              sys.exit(f"'{name}' resolves to {location}, not {expected}")
+          if loader != "metta" or location != expected:
+              sys.exit(f"'{name}' resolves to {loader} at {location}, not metta at {expected}")
           entry_point = os.path.join(location, f"{name}.metta")
           if not os.path.isfile(entry_point):
               sys.exit(f"{entry_point} is missing, so the metta loader has nothing to import")
 
           sys.path.insert(0, location)
           for module in ("telegram_channel", "media_handler", "vision", "gateway", "config_helper",
-                         "markdown_render", "text_splitter", "speech_text", "speech_language"):
+                         "markdown_render", "text_splitter", "speech_text", "speech_language",
+                         "release_notes"):
               __import__(module)
               print(f"imported: {module}")
           print("plugin loads")

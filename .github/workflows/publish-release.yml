@@ -9,15 +9,15 @@ name: publish-release
 # notes live in CHANGELOG.md, are reviewed in the pull request that adds them,
 # and are published here before the deploy job runs.
 #
-# A pre-prod-* tag is published as a prerelease carrying the section of the
-# matching prod-* version, so staging rehearses the exact text production will
+# A telegram-vX.Y.Z-rc.N tag is published as a prerelease carrying the section of
+# release telegram-vX.Y.Z, so staging rehearses the exact text production will
 # send.
 
 on:
   workflow_call:
     inputs:
       tag:
-        description: 'Release tag to publish, for example prod-2026-09-17'
+        description: 'Release tag to publish, for example telegram-v1.3.0'
         required: true
         type: string
       prerelease:

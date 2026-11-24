@@ -1,32 +1,34 @@
 #!/usr/bin/env bash
 # Build and run an Omega core with this plugin plugged into it.
 #
-# The plugin is not usable on its own: it needs a core to load it, and core needs
-# four things changed before it will. This script makes those changes to a copy of
-# core rather than to core itself, so the plugin stays droppable and core stays
-# untouched. Point it at whichever core you want and it works out the rest:
+# The plugin is not usable on its own: it needs a core to load it. This script
+# copies the plugin into core and adds it the way core supports, without changing
+# any core file. Point it at whichever core you want:
 #
-#   ./run-plugin                                   # the fork's telegram branch, built from source
-#   ./run-plugin --base-image singularitynet/omega:v0.1.19   # published image, no core build
-#   ./run-plugin --core-remote https://github.com/singnet/Omega.git --core-ref main
+#   ./run-plugin                                   # telegram-core, built from source
+#   ./run-plugin --base-image IMAGE                # layer onto a published core image
+#   ./run-plugin --core-dir ../Omega               # an existing core checkout
 #   ./run-plugin --test                            # the plugin's own suite, inside the container
 #   ./run-plugin --dry-run                         # print the plan and stop
 #
-# What it changes in the copy of core, only when core needs it:
-#   - registers the plugin in config/plugins.yaml, dropping any entry that
-#     already claims its name (core aborts on a duplicate plugin name)
-#   - deletes channels/<name>.py, which would register the same channel id
-#   - installs each plugin's requirements.txt at build time
-#   - deletes memory/tg_prompt.txt, whose prompt section duplicates the
-#     plugin's own and is injected by core's run loop regardless of registration
+# What it adds to the copy of core:
+#   - plugins/<name>, the plugin itself
+#   - config/plugins.d/<name>.yaml, which replaces core's own <name> entry, so
+#     core's built-in channel of the same id is never loaded
+#
+# It refuses a core that cannot run the plugin without patches: one that does not
+# read config/plugins.d, or does not install plugins/*/requirements.txt. It warns
+# about a core that runs the plugin with a feature missing.
 #
 # Paths inside the image are read from the image itself. They have changed once
 # already (/PeTTa/repos/OmegaClaw-Core became /PeTTa/repos/Omega) and hardcoding
 # them is what broke the previous launcher against newer core.
 set -euo pipefail
 
-CORE_REMOTE="https://github.com/iCog-Labs-Dev/Omega.git"
-CORE_REF="telegram"
+# singnet/Omega main plus the open core changes this plugin needs; see the
+# telegram-core-recipe branch of singnet/Omega_CustomBots.
+CORE_REMOTE="https://github.com/singnet/Omega_CustomBots.git"
+CORE_REF="telegram-core"
 CORE_DIR=""
 BASE_IMAGE=""
 PLUGIN_DIR=""
@@ -54,8 +56,8 @@ usage() {
     sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; $d'
     cat <<'USAGE'
 Options:
-  --core-remote URL     git remote to build core from (default: iCog-Labs-Dev/Omega)
-  --core-ref REF        branch, tag or sha (default: telegram)
+  --core-remote URL     git remote to build core from (default: singnet/Omega_CustomBots)
+  --core-ref REF        branch, tag or sha (default: telegram-core)
   --core-dir PATH       use an existing core checkout instead of cloning
   --base-image IMAGE    layer onto a published core image; skips the core build
   --plugin-dir PATH     plugin source (default: ./telegram or ./plugins/telegram)
@@ -71,7 +73,7 @@ Options:
   --no-run              build and stop
   --test                run the plugin's test suite in the container instead of the bot
   --shell               open a shell in the container instead of the bot
-  --prepare-only        assemble the patched build context and stop, without docker
+  --prepare-only        assemble the build context and stop, without docker
   --dry-run             print every step without doing it
   -h, --help            this
 USAGE
@@ -103,6 +105,37 @@ while [ $# -gt 0 ]; do
         *)             die "unknown option $1 (try --help)" ;;
     esac
 done
+
+# The manifest drop-in that adds the plugin. Using the plugin's name replaces
+# core's own entry of that name, so core's built-in channel is not loaded.
+write_drop_in() {
+    printf -- '- name: %s\n  loader: metta\n  location: "{REPO}/plugins/%s"\n' \
+        "$PLUGIN_NAME" "$PLUGIN_NAME"
+}
+
+# Check that the core in $1 can run the plugin as it is. Refuses a core the
+# plugin cannot load on, and names each feature the bot would run without.
+check_core() {
+    local core="$1"
+    grep -qs 'plugins\.d' "$core/src/plugin.py" \
+        || die "this core does not read config/plugins.d, so it would load its own
+    '$PLUGIN_NAME' channel instead of the plugin. Use a core with drop-in manifests."
+    grep -qs 'plugins.*requirements\.txt' "$core/Dockerfile" \
+        || die "this core's Dockerfile does not install plugins/*/requirements.txt,
+    so the plugin's imports would be missing. Use a core with singnet/Omega#372."
+    grep -qs 'def prompt_file' "$core/src/channels.py" \
+        || say "    ! core adds memory/tg_prompt.txt for any 'telegram' channel; the bot
+      will get core's routing prompt next to its own."
+    grep -qs 'def commChannelIsToolDisabled' "$core/src/channels.py" \
+        || say "    ! core never asks a channel whether a tool is off; /togglesearch
+      will report search off while websearch keeps working."
+    local template="$core/proxy/nginx.conf.template"
+    if [ -f "$template" ] && ! grep -q "$PLUGIN_NAME-file/" "$template"; then
+        say "    ! no /$PLUGIN_NAME-file/ route in core's nginx template."
+        say "      Media downloads through the proxy will 404 on this core;"
+        say "      text will keep working. Use a core that carries the route."
+    fi
+}
 
 # ---- resolve the plugin ----------------------------------------------------
 
@@ -157,8 +190,8 @@ fi
 # ---- build ----------------------------------------------------------------
 
 if [ "$DO_BUILD" = 1 ] && [ -z "$BASE_IMAGE" ]; then
-    # Building core from source. Assemble a context: core at the chosen ref, with
-    # the plugin overlaid and the four core-side changes applied to the copy.
+    # Building core from source. Assemble a context: core at the chosen ref,
+    # with the plugin and its manifest drop-in added.
     if [ -n "$CORE_DIR" ]; then
         CORE_DIR="$(cd "$CORE_DIR" && pwd)"
         say "core        $CORE_DIR (existing checkout)"
@@ -186,73 +219,10 @@ if [ "$DO_BUILD" = 1 ] && [ -z "$BASE_IMAGE" ]; then
     run "mkdir -p '$CTX/plugins'"
     run "cp -a '$PLUGIN_DIR' '$CTX/plugins/$PLUGIN_NAME'"
 
-    if [ "$DRY_RUN" = 0 ]; then
-        manifest="$CTX/config/plugins.yaml"
-        [ -f "$manifest" ] || die "$CTX has no config/plugins.yaml; is this an Omega core?"
-
-        # Core aborts if two entries share a name, so an existing claim on this
-        # name is dropped rather than added to.
-        python3 - "$manifest" "$PLUGIN_NAME" <<'PY'
-import re, sys
-path, name = sys.argv[1], sys.argv[2]
-text = open(path).read()
-pattern = re.compile(r"^- name: %s\n(?:  .*\n)*" % re.escape(name), re.M)
-existing = pattern.search(text)
-if existing:
-    print(f"    - dropping core's own '{name}' entry")
-    text = pattern.sub("", text)
-entry = f'- name: {name}\n  loader: metta\n  location: "{{REPO}}/plugins/{name}"\n'
-text = text.rstrip("\n") + "\n\n" + entry
-open(path, "w").write(text)
-print(f"    - registered {name} at {{REPO}}/plugins/{name}")
-PY
-
-        if [ -f "$CTX/channels/$PLUGIN_NAME.py" ]; then
-            say "    - removing channels/$PLUGIN_NAME.py, which claims the same channel id"
-            rm -f "$CTX/channels/$PLUGIN_NAME.py"
-        fi
-
-        # Loose on purpose. Core is landing this, and patching a core that
-        # already does it installs the same files twice, each resolved on its
-        # own — the silent downgrade one invocation exists to prevent. Matching
-        # any plugin requirements path costs a missed patch on a core that
-        # mentions one without installing it, which nothing does.
-        if ! grep -q 'plugins.*requirements\.txt' "$CTX/Dockerfile"; then
-            say "    - teaching the Dockerfile to install plugin requirements"
-            python3 - "$CTX/Dockerfile" <<'PY'
-import re, sys
-path = sys.argv[1]
-text = open(path).read()
-block = (
-    "\n# Install each plugin's own dependencies, so enabling a plugin is the only\n"
-    "# step needed to run it. Added by run-plugin; core does not do this yet.\n"
-    "COPY ./plugins /tmp/plugins\n"
-    "RUN for req in /tmp/plugins/*/requirements.txt; do \\\n"
-    "      if [ -f \"$req\" ]; then \\\n"
-    "        python3 -m pip install --no-cache-dir --break-system-packages -r \"$req\"; \\\n"
-    "      fi; \\\n"
-    "    done \\\n"
-    " && rm -rf /tmp/plugins\n"
-)
-# After the last pip install of the builder stage, before the runtime stage.
-marker = re.search(r"^FROM .* AS (?!builder)", text, re.M)
-at = marker.start() if marker else len(text)
-open(path, "w").write(text[:at] + block + "\n" + text[at:])
-PY
-        fi
-
-        template="$CTX/proxy/nginx.conf.template"
-        if [ -f "$template" ] && ! grep -q "$PLUGIN_NAME-file/" "$template"; then
-            say "    ! no /$PLUGIN_NAME-file/ route in core's nginx template."
-            say "      Media downloads through the proxy will 404 on this core;"
-            say "      text will keep working. Use a core that carries the route."
-        fi
-
-        if [ -f "$CTX/memory/tg_prompt.txt" ]; then
-            say "    - removing core's memory/tg_prompt.txt, which duplicates the plugin's prompt"
-            rm -f "$CTX/memory/tg_prompt.txt"
-        fi
-    fi
+    run "mkdir -p '$CTX/config/plugins.d'"
+    run "write_drop_in > '$CTX/config/plugins.d/$PLUGIN_NAME.yaml'"
+    say "    - added config/plugins.d/$PLUGIN_NAME.yaml"
+    [ "$DRY_RUN" = 1 ] || check_core "$CTX"
 
     if [ "$PREPARE_ONLY" = 1 ]; then
         say "context ready at $CTX; not building"
@@ -262,8 +232,8 @@ PY
     run "docker build -t '$IMAGE' '$CTX'"
 
 elif [ "$DO_BUILD" = 1 ]; then
-    # Layering onto a published image. The plugin and the manifest change inside
-    # the image, so nothing needs core's build context.
+    # Layering onto a published image. The plugin and its drop-in go into the
+    # image, so nothing needs core's build context.
     say "core        $BASE_IMAGE (published image)"
     if [ "$DRY_RUN" = 0 ]; then
         docker image inspect "$BASE_IMAGE" >/dev/null 2>&1 || run "docker pull '$BASE_IMAGE'"
@@ -279,45 +249,26 @@ elif [ "$DO_BUILD" = 1 ]; then
     run "mkdir -p '$CTX'"
     run "mkdir -p '$CACHE_DIR'"
     run "cp -a '$PLUGIN_DIR' '$CTX/$PLUGIN_NAME'"
+    run "write_drop_in > '$CTX/$PLUGIN_NAME.yaml'"
     if [ "$DRY_RUN" = 0 ]; then
-        # The manifest edit is a file rather than a heredoc inside RUN: a
-        # Dockerfile RUN ends at its last continuation, so an embedded heredoc
-        # makes the next line a Dockerfile instruction and the build dies on
-        # "unknown instruction". BuildKit has a heredoc form for this, but
-        # requiring a syntax directive on someone else's base image is worse
-        # than copying in a script.
-        cat > "$CTX/register-plugin.py" <<'PATCH'
-"""Point core's manifest at this plugin, dropping any entry with the same name.
-
-Runs inside the image during the overlay build. Core aborts when two entries
-share a name, so the existing claim is replaced rather than added to.
-"""
-import re
-import sys
-
-path, name = sys.argv[1], sys.argv[2]
-text = open(path).read()
-text = re.sub(r"^- name: %s\n(?:  .*\n)*" % re.escape(name), "", text, flags=re.M)
-entry = '- name: %s\n  loader: metta\n  location: "{REPO}/plugins/%s"\n' % (name, name)
-open(path, "w").write(text.rstrip("\n") + "\n\n" + entry)
-print("registered %s at {REPO}/plugins/%s" % (name, name))
-PATCH
+        # A published image built its requirements before the plugin existed,
+        # so the overlay installs the plugin's own. The grep fails the build on
+        # a core that would ignore the drop-in and load its own channel instead.
         cat > "$CTX/Dockerfile" <<OVERLAY
 ARG BASE_IMAGE=$BASE_IMAGE
 FROM \${BASE_IMAGE}
 USER root
 ARG OMEGA_ROOT=$omega_dir
 ARG PLUGIN=$PLUGIN_NAME
+RUN grep -q 'plugins\.d' \${OMEGA_ROOT}/src/plugin.py \\
+ || { echo "this core does not read config/plugins.d; use a newer image" >&2; exit 1; }
 COPY $PLUGIN_NAME \${OMEGA_ROOT}/plugins/\${PLUGIN}
-COPY register-plugin.py /tmp/register-plugin.py
-RUN rm -f \${OMEGA_ROOT}/channels/\${PLUGIN}.py \${OMEGA_ROOT}/memory/tg_prompt.txt \\
- && (command -v pip3 >/dev/null 2>&1 || (apt-get update \\
+COPY $PLUGIN_NAME.yaml \${OMEGA_ROOT}/config/plugins.d/\${PLUGIN}.yaml
+RUN (command -v pip3 >/dev/null 2>&1 || (apt-get update \\
       && apt-get install -y --no-install-recommends python3-pip \\
       && rm -rf /var/lib/apt/lists/*)) \\
  && python3 -m pip install --no-cache-dir --break-system-packages \\
-      -r \${OMEGA_ROOT}/plugins/\${PLUGIN}/requirements.txt \\
- && python3 /tmp/register-plugin.py \${OMEGA_ROOT}/config/plugins.yaml \${PLUGIN} \\
- && rm -f /tmp/register-plugin.py
+      -r \${OMEGA_ROOT}/plugins/\${PLUGIN}/requirements.txt
 OVERLAY
     fi
     say "building $IMAGE on top of $BASE_IMAGE"
@@ -374,8 +325,12 @@ case "$MODE" in
         say "running the plugin's tests inside the container"
         # Core does not ship pytest, so the throwaway container installs it.
         # Baking it into every image to serve one command is the worse trade.
+        # Core's runtime stage has no pip either since its multi-stage build,
+        # so that comes from apt first, as in the --base-image overlay.
         run "docker run --rm --name '$CONTAINER-test' ${transient[*]} --entrypoint sh ${DOCKER_ARGS[*]:-} '$IMAGE' \
-             -c 'python3 -m pip install --quiet --no-cache-dir --break-system-packages pytest \
+             -c '(python3 -m pip --version >/dev/null 2>&1 || (apt-get update -qq \
+                    && apt-get install -y -qq --no-install-recommends python3-pip >/dev/null)) \
+                 && python3 -m pip install --quiet --no-cache-dir --break-system-packages pytest \
                  && python3 -m pytest $OMEGA_ROOT/plugins/$PLUGIN_NAME/tests -q'"
         ;;
     shell)

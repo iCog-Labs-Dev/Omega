@@ -27,13 +27,18 @@ outbound retry queue, and the channel auth handshake.
 
 ## Install
 
-**1. Register the plugin** in core's `config/plugins.yaml`:
+**1. Register the plugin** with a drop-in, `config/plugins.d/telegram.yaml`,
+so core's `config/plugins.yaml` stays as shipped:
 
 ```yaml
 - name: telegram
   loader: metta
   location: "{REPO}/plugins/telegram"
 ```
+
+The name matches core's built-in Telegram channel, so the drop-in replaces it:
+core's `channels/telegram.py` is not loaded, and neither is the routing prompt
+that channel adds from `memory/tg_prompt.txt`.
 
 The `metta` loader is what lets `telegram.metta` register the plugin's skills and
 its prompt section at load time. Core needs no telegram-specific code: the two
@@ -182,7 +187,7 @@ entrypoint. Restart after changing the voice.
 
 The plugin does not have to live inside the core tree. It finds its own files
 relative to its module, and reaches core's Python only through modules core puts
-on the path, so `location` in `plugins.yaml` can be any absolute path:
+on the path, so `location` in the drop-in can be any absolute path:
 
 ```yaml
 - name: telegram

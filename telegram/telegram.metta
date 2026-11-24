@@ -24,21 +24,25 @@
      (log INFO "telegram-plugin" "Registering Telegram communication channel")
      (let $rc (py-call (telegram_channel.loadOmegaPlugin)) ())
      (add-skill describe-image
-                "See/read an image the user attached. Call when a message shows [image] and you need its contents; optionally pass what to look for (example: describe-image what error is shown)"
+                "See/read an image the user attached. Call when a message shows [image] and you need its contents. The argument says what to look for, such as: what error is shown; it may be empty"
                 (image_query))
      (add-skill generate-image
-                "Generate an image and send it to the user. Use when the user asks you to create, draw, generate, paint, or show a picture or image. Pass a vivid, detailed English description; the image is generated and sent for you (example: generate-image a red panda astronaut floating in space, studio lighting)"
+                "Generate an image and send it to the user. Use when the user asks you to create, draw, generate, paint, or show a picture or image. The argument is a vivid, detailed English description, such as: a red panda astronaut floating in space, studio lighting. The image is generated and sent for you"
                 (image_description))
      (add-skill generate-pdf
-                "Generate a PDF document and send it to the user. Use when the user asks for a PDF containing text, a summary, or a report. Pass the complete text in double quotes on one line, writing line breaks as the TELEGRAM CHANNEL section explains (example: generate-pdf \"Quarterly report\")"
+                "Generate a PDF document and send it to the user. Use when the user asks for a PDF containing text, a summary, or a report. The argument is the complete text of the document, line breaks included"
                 (pdf_content))
      (add-skill install-pdf-font
-                "Install a font so generate-pdf can draw a script it cannot yet, such as Devanagari, Thai, Chinese or emoji. Use when generate-pdf answers PDF_FAILED naming characters it cannot draw. Pass a Google Fonts family name, not a URL. The download runs in the background and a message starting [install-pdf-font] arrives when it ends (example: install-pdf-font Noto Sans Devanagari)"
+                "Install a font so generate-pdf can draw a script it cannot yet, such as Devanagari, Thai, Chinese or emoji. Use when generate-pdf answers PDF_FAILED naming characters it cannot draw. The argument is a Google Fonts family name, not a URL, such as: Noto Sans Devanagari. The download runs in the background and a message starting [install-pdf-font] arrives when it ends"
                 (font_family))
      (add-skill speak
-                "Speak a reply aloud as Telegram voice messages. Long text is split and sent in order. Use when the user asks for speech. Pass the exact text; keep the command on one physical line and encode line breaks as backslash-n, as with send (example: speak Hello, I am Oma)"
+                "Speak a reply aloud as Telegram voice messages. Long text is split and sent in order. Use when the user asks for speech. The argument is the exact text to speak"
                 (voice_text))
      (addTelegramPromptSection)
+     ; The heartbeat comes once the channel and the LLM provider are started,
+     ; which the announcement needs. release_notes.announce works only once.
+     (add-heartbeat-listener telegram-release-notes
+                             (|-> ($iteration) (py-call (release_notes.announce))))
      ()))
 
 ;; The channel talks to the public, so it carries scope limits the default

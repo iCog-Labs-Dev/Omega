@@ -16,5 +16,6 @@ jobs:
     uses: ./.github/workflows/common.yml
     with:
       publish_docker: false
-      core_remote: ${{ vars.CORE_REMOTE }}
-      core_ref: ${{ vars.CORE_REF }}
+      # Follows the newest telegram-core; CORE_REF is production's pin.
+      core_remote: ${{ vars.STAGING_CORE_REMOTE }}
+      core_ref: ${{ vars.STAGING_CORE_REF }}

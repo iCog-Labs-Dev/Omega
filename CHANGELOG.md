@@ -1,12 +1,44 @@
 # Changelog
 
-Each release has a section headed by its tag. The deploy publishes that section
-as the GitHub release, and the bot summarises it to users on its first start.
-A `pre-prod-*` tag rehearses the `prod-*` section of the same date on staging,
-and a trailing `.2`, `.3` and so on takes a fresh tag against the same notes.
+Each release has a section headed by its tag, `telegram-vMAJOR.MINOR.PATCH`.
+The section is published as the GitHub release, and the bot summarises it to
+users on its first start. A `telegram-vX.Y.Z-rc.N` tag rehearses the
+`telegram-vX.Y.Z` section on staging; each new rehearsal takes the next N.
+
+Pick the number by what the release asks of the people using and running the
+bot:
+
+* **Patch** (1.0.0 to 1.0.1): fixes only.
+* **Minor** (1.0.0 to 1.1.0): something new for users or operators, and
+  nothing anyone has to change.
+* **Major** (1.0.0 to 2.0.0): something people running the bot must act on,
+  such as a renamed secret or setting, a channel profile that needs rewriting,
+  or a new core that changes how the bot behaves.
 
 These notes cover what people in the chat, and people running the bot, will
 notice. Core changes that ship in the same image are recorded separately.
+Releases before version numbers are headed by their date tags.
+
+## telegram-v2.0.0
+
+### Fixed
+
+* Answers no longer go missing. Since October about one message in eight got no answer, most often when the bot looked something up before replying. Those answers now reach the chat.
+* Operators: the old core read the model's actions one per line, so an answer written on the same line as a lookup was swallowed. The new core takes the model's actions as tool calls, so that cannot happen.
+
+### Changed
+
+* The bot runs on the current Omega core. The model now calls the bot's skills directly instead of writing them out as text for the core to read.
+
+### Configuration
+
+* The core is `telegram-core-v1.0.0` from singnet/Omega_CustomBots: singnet/Omega `main` with the bot's open core changes merged on top, built by the `telegram-core-recipe` branch. Set `CORE_REF` to that tag's commit before deploying this release.
+* The plugin is registered with a drop-in file, `config/plugins.d/telegram.yaml`, that replaces core's own Telegram channel. No core file is patched.
+
+## telegram-v1.0.0
+
+The release deployed on 2026-11-16 as `prod-2026-11-16`, given the first
+version number. Its notes are in that section below.
 
 ## prod-2026-11-16
 
