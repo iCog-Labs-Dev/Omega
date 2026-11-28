@@ -1,9 +1,45 @@
 import io
-import os, sys
+import os
+import sys
 import types
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+TELEGRAM_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(TELEGRAM_DIR))
+SRC_DIR = os.path.join(PROJECT_ROOT, "src")
+
+sys.path.insert(0, SRC_DIR)
+sys.path.insert(1, TELEGRAM_DIR)
+
+from unittest.mock import AsyncMock, patch
 
 import media_handler as mh
+import speech_language as sl
+
+
+def _fake_gtts(audio=b"google-mp3", expected_text=None, expected_lang=None):
+    """Create a fake gTTS module that writes predictable audio."""
+    fake_gtts = types.ModuleType("gtts")
+
+    class FakeGTTS:
+        def __init__(self, text, lang, timeout=None):
+            if expected_text is not None:
+                assert text == expected_text
+            if expected_lang is not None:
+                assert lang == expected_lang
+            self.timeout = timeout
+
+        def write_to_fp(self, buf):
+            buf.write(audio)
+
+    fake_gtts.gTTS = FakeGTTS
+    return fake_gtts
+
+
+def _fake_edge(communicate_class):
+    """Create a fake edge_tts module."""
+    fake_edge = types.ModuleType("edge_tts")
+    fake_edge.Communicate = communicate_class
+    return fake_edge
 
 
 def test_no_image_returns_marker():
@@ -318,6 +354,43 @@ def test_speak_success():
         mh._synthesise_speech = orig_synth
         mh._live_send_voice, mh._live_send_chat_action, mh._live_channel = orig_send, orig_action, orig_chan
 
+def test_speak_succeeds_when_edge_voice_catalogue_fails():
+    fake_edge = _fake_edge(None)
+    fake_edge.list_voices = AsyncMock(
+        side_effect=RuntimeError("Edge voice catalogue unavailable")
+    )
+
+    sent = {}
+    actions = []
+
+    with (
+        patch.dict(sys.modules, {"edge_tts": fake_edge}),
+        patch.object(sl, "_available_voices_cache", None),
+        patch.object(sl, "_available_voices_retry_after", 0.0),
+        patch.object(mh, "_tts_allowed", return_value=True),
+        patch.object(mh, "_prompt_is_unsafe", return_value=False),
+        patch.object(mh, "_synthesise_speech", return_value=b"audio-bytes"),
+        patch.object(
+            mh,
+            "_live_send_voice",
+            side_effect=lambda audio_bytes, caption=None: sent.update(
+                bytes=audio_bytes
+            ),
+        ),
+        patch.object(
+            mh,
+            "_live_send_chat_action",
+            side_effect=lambda action: actions.append(action),
+        ),
+    ):
+        out = mh.speak("hello there")
+
+    assert out == "VOICE_SENT", out
+    assert sent["bytes"] == b"audio-bytes", sent
+    assert "record_voice" in actions, actions
+    fake_edge.list_voices.assert_awaited_once()
+
+
 
 def test_synthesise_speech_uses_edge_tts():
     calls = {}
@@ -329,23 +402,167 @@ def test_synthesise_speech_uses_edge_tts():
     class FakeCommunicate:
         def __init__(self, text, voice):
             calls.update(text=text, voice=voice)
+
         def stream(self):
             return fake_stream()
 
-    fake_edge_tts = types.ModuleType("edge_tts")
-    fake_edge_tts.Communicate = FakeCommunicate
-    original = sys.modules.get("edge_tts")
-    sys.modules["edge_tts"] = fake_edge_tts
-    try:
+    with patch.dict(sys.modules, {
+        "edge_tts": _fake_edge(FakeCommunicate),
+    }):
         result = mh._synthesise_speech("hello", "en-US-AriaNeural")
+
+    assert result == b"mp3", result
+    assert calls["called"] is True
+    assert calls["text"] == "hello"
+    assert calls["voice"] == "en-US-AriaNeural"
+
+
+def test_synthesise_speech_falls_back_to_google_tts():
+    class FailingCommunicate:
+        def __init__(self, text, voice):
+            pass
+
+        def stream(self):
+            async def fail():
+                raise RuntimeError("edge down")
+                yield None
+
+            return fail()
+
+    with patch.dict(sys.modules, {
+        "edge_tts": _fake_edge(FailingCommunicate),
+        "gtts": _fake_gtts(
+            expected_text="hello",
+            expected_lang="en",
+        ),
+    }):
+        result = mh._synthesise_speech("hello", "en-US-AriaNeural")
+
+    assert result == b"google-mp3", result
+
+
+def test_synthesise_speech_falls_back_when_edge_returns_empty_audio():
+    class EmptyCommunicate:
+        def __init__(self, text, voice):
+            pass
+
+        def stream(self):
+            async def empty():
+                if False:
+                    yield None
+
+            return empty()
+
+    with patch.dict(sys.modules, {
+        "edge_tts": _fake_edge(EmptyCommunicate),
+        "gtts": _fake_gtts(expected_lang="en"),
+    }):
+        result = mh._synthesise_speech("hello", "en-US-AriaNeural")
+
+    assert result == b"google-mp3"
+
+
+def test_synthesise_speech_falls_back_when_edge_times_out():
+    import asyncio
+
+    class SlowCommunicate:
+        def __init__(self, text, voice):
+            pass
+
+        async def stream(self):
+            await asyncio.sleep(1)
+            yield {"type": "audio", "data": b"edge-mp3"}
+
+    with (
+        patch.dict(sys.modules, {
+            "edge_tts": _fake_edge(SlowCommunicate),
+            "gtts": _fake_gtts(expected_lang="en"),
+        }),
+        patch.object(mh, "EDGE_TTS_TIMEOUT", 0.01),
+    ):
+        result = mh._synthesise_speech("hello", "en-US-AriaNeural")
+
+    assert result == b"google-mp3", result
+
+
+def test_google_language_mapping_matches_gtts_codes():
+    expected = {
+        "nb": "no",
+        "nn": "no",
+        "he": "iw",
+        "fil": "tl",
+        "en": "en",
+    }
+
+    for language, google_code in expected.items():
+        assert sl.google_tts_language(language) == google_code
+
+
+def test_synthesise_speech_maps_detected_norwegian_to_google_code():
+    class FailingCommunicate:
+        def __init__(self, text, voice):
+            pass
+
+        def stream(self):
+            async def fail():
+                raise RuntimeError("edge unavailable")
+                yield None
+
+            return fail()
+
+    with (
+        patch.dict(sys.modules, {
+            "edge_tts": _fake_edge(FailingCommunicate),
+            "gtts": _fake_gtts(
+                expected_text="Hei",
+                expected_lang="no",
+            ),
+        }),
+        patch.object(mh, "detect_language", return_value="nb"),
+    ):
+        result = mh._synthesise_speech("Hei", "en-US-AriaNeural")
+
+    assert result == b"google-mp3", result
+
+
+def test_google_tts_verifies_https_including_the_english_retry():
+    import requests
+
+    for language in ("en", "xx"):
+        response = requests.Response()
+        response.status_code = 200
+        response.raw = io.BytesIO(b'["jQ1olc","[\\"bXAz\\"]"]')
+        response.request = requests.Request("POST", "https://translate.google.com/").prepare()
+        with (
+            patch.object(mh, "detect_language", return_value=language),
+            patch.object(requests.Session, "send", return_value=response) as send,
+        ):
+            result = mh._synthesise_google("Hello", "en-US-AriaNeural")
+
         assert result == b"mp3", result
-        assert calls["text"] == "hello"
-        assert calls["voice"] == "en-US-AriaNeural"
-    finally:
-        if original is None:
-            del sys.modules["edge_tts"]
-        else:
-            sys.modules["edge_tts"] = original
+        send.assert_called_once()
+        assert send.call_args.kwargs["verify"] is True
+        assert send.call_args.kwargs["timeout"] == mh.GOOGLE_TTS_TIMEOUT
+
+
+def test_google_tts_returns_none_on_network_errors():
+    import requests
+
+    for error in (
+        requests.Timeout("Google TTS request timed out"),
+        requests.exceptions.SSLError("invalid certificate"),
+    ):
+        with (
+            patch.object(mh, "detect_language", return_value="en"),
+            patch.object(requests.Session, "send", side_effect=error) as send,
+        ):
+            result = mh._synthesise_google("Hello", "en-US-AriaNeural")
+
+        assert result is None
+        send.assert_called_once()
+        assert send.call_args.kwargs["verify"] is True
+        assert send.call_args.kwargs["timeout"] == mh.GOOGLE_TTS_TIMEOUT
+        assert all(timeout > 0 for timeout in send.call_args.kwargs["timeout"])
 
 
 if __name__ == "__main__":
@@ -368,5 +585,13 @@ if __name__ == "__main__":
     test_speak_disabled()
     test_speak_synthesis_failure()
     test_speak_success()
+    test_speak_succeeds_when_edge_voice_catalogue_fails()
     test_synthesise_speech_uses_edge_tts()
+    test_synthesise_speech_falls_back_to_google_tts()
+    test_synthesise_speech_falls_back_when_edge_returns_empty_audio() 
+    test_synthesise_speech_falls_back_when_edge_times_out()
+    test_google_language_mapping_matches_gtts_codes()
+    test_synthesise_speech_maps_detected_norwegian_to_google_code()
+    test_google_tts_verifies_https_including_the_english_retry()
+    test_google_tts_returns_none_on_network_errors()
     print("all media_handler tests passed")

@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from collections import OrderedDict
 from itertools import groupby
 from speech_text import prepare_speech
-from speech_language import speech_parts, speech_chunks
+from speech_language import speech_parts, speech_chunks, detect_language, google_tts_language
 
 logger = logging.getLogger(__name__)
 
@@ -345,9 +345,12 @@ def generate_and_send(prompt):
 
 # --- Text-to-speech (outbound) ---------------------------------------------
 # speak skill: synthesise a voice message and send it via sendVoice.
-# Uses edge-tts (free, no API key). Voice is configurable via EDGE_TTS_VOICE.
+# Uses Edge TTS first, with automatic Google TTS fallback if Edge fails.
+# Voice is configurable via EDGE_TTS_VOICE.
 
 DEFAULT_TTS_VOICE = "en-US-AriaNeural"
+EDGE_TTS_TIMEOUT = 30
+GOOGLE_TTS_TIMEOUT = (5, 15)
 RECORDING_REFRESH_SECONDS = 4
 MAX_VOICE_REQUESTS = 100
 _voice_requests = OrderedDict()
@@ -456,26 +459,145 @@ def _tts_allowed():
         return False
 
 
-def _synthesise_speech(text, voice):
-    """Synthesise `text` via edge-tts and return raw MP3 bytes, or None on failure."""
+
+def _synthesise_edge(chunk_text, chunk_voice):
+    """Synthesize speech with Edge TTS, enforcing a timeout on streaming."""
+    import asyncio
+    import concurrent.futures
+    import io
+    import edge_tts
+
+    async def _stream():
+        with io.BytesIO() as buf:
+            async for chunk in edge_tts.Communicate(
+                chunk_text, voice=chunk_voice
+            ).stream():
+                if chunk["type"] == "audio":
+                    buf.write(chunk["data"])
+            return buf.getvalue()
+
+    async def _run():
+        return await asyncio.wait_for(
+            _stream(),
+            timeout=EDGE_TTS_TIMEOUT,
+        )
+
     try:
-        import asyncio, io, edge_tts
-        async def _run():
-            with io.BytesIO() as buf:
-                async for chunk in edge_tts.Communicate(text, voice=voice).stream():
-                    if chunk["type"] == "audio":
-                        buf.write(chunk["data"])
-                return buf.getvalue()
-        try:
-            loop = asyncio.get_running_loop()
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(asyncio.run, _run()).result()
-        except RuntimeError:
-            return asyncio.run(_run())
-    except Exception as e:
-        logger.error(f"TTS synthesis failed: {e}")
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_run())
+
+    # asyncio.run() cannot execute inside an already-running event loop.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, _run()).result()
+
+
+def _google_lang_from_voice(chunk_text, chunk_voice):
+    language = detect_language(chunk_text)
+
+    if language:
+        language = language.lower()
+    elif isinstance(chunk_voice, str) and chunk_voice.strip():
+        language = chunk_voice.split("-", 1)[0].lower()
+    else:
+        language = "en"
+
+    return google_tts_language(language)
+
+
+def _synthesise_google(chunk_text, chunk_voice):
+    """Synthesize speech using Google TTS over verified HTTPS."""
+    import io
+    import re
+    import urllib.request
+    import requests
+    from gtts import gTTS
+
+    class VerifiedGTTS(gTTS):
+        # gTTS has no verification option; reuse its prepared requests, not its transport.
+        def stream(self):
+            with requests.Session() as session:
+                for request in self._prepare_requests():
+                    response = session.send(
+                        request=request,
+                        verify=True,
+                        proxies=urllib.request.getproxies(),
+                        timeout=self.timeout,
+                    )
+                    response.raise_for_status()
+                    for line in response.iter_lines(chunk_size=1024):
+                        line = line.decode("utf-8")
+                        if "jQ1olc" not in line:
+                            continue
+                        audio = re.search(r'jQ1olc","\[\\"(.*)\\"]', line)
+                        if audio is None:
+                            raise RuntimeError("Google TTS returned invalid audio data")
+                        yield base64.b64decode(audio.group(1))
+
+    language = _google_lang_from_voice(chunk_text, chunk_voice)
+
+    try:
+        with io.BytesIO() as buf:
+            VerifiedGTTS(
+                text=chunk_text,
+                lang=language,
+                timeout=GOOGLE_TTS_TIMEOUT
+            ).write_to_fp(buf)
+            return buf.getvalue()
+
+    except ValueError:
+        if language == "en":
+            logger.warning(
+                "Google TTS does not support language %s", language
+            )
+            return None
+
+        logger.warning(
+            "Google TTS does not support language %s; falling back to English",
+            language,
+        )
+
+    except Exception as exc:
+        logger.warning("Google TTS synthesis failed: %s", exc)
         return None
+
+    try:
+        with io.BytesIO() as buf:
+            VerifiedGTTS(
+                text=chunk_text,
+                lang="en",
+                timeout=GOOGLE_TTS_TIMEOUT
+            ).write_to_fp(buf)
+            return buf.getvalue()
+    except Exception as exc:
+        logger.warning("Google TTS synthesis failed: %s", exc)
+        return None
+
+
+
+def _synthesise_speech(text, voice):
+    """Synthesize MP3 audio using Edge TTS, falling back to Google TTS."""
+
+    # Always try Edge first.
+    try:
+        audio = _synthesise_edge(text, voice)
+        if audio:
+            return audio
+
+        logger.warning("Edge TTS returned empty audio; trying Google TTS")
+    except Exception as exc:
+        logger.warning("Edge TTS failed: %s; trying Google TTS", exc)
+
+    # Automatically fall back to Google if Edge fails.
+    try:
+        audio = _synthesise_google(text, voice)
+        if audio:
+            return audio
+    except Exception as exc:
+        logger.warning("Google TTS failed: %s", exc)
+
+    return None
+
 
 
 def speak(text=""):

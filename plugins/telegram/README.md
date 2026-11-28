@@ -97,6 +97,12 @@ Both environment names survive the container entrypoint. `scripts/omega`
 forwards the voice from its environment; staging/production deployments read
 the GitHub Actions variable `EDGE_TTS_VOICE`. Restart after changing the voice.
 
+Speech synthesis uses **Edge TTS first**, with automatic fallback to **Google TTS** if Edge synthesis fails, times out, or returns empty audio. If the voice catalogue is unavailable, the configured Edge voice is retained so synthesis can still proceed.
+
+No provider-selection configuration is required. The fallback happens automatically.
+
+The `EDGE_TTS_VOICE` setting can still be used to configure the preferred Edge TTS voice.
+
 - The whole reply's main language selects the reply voice, preserving configured
   gender. A sentence written mostly in a script that voice cannot read, such as
   Russian or Chinese inside an English reply, gets a voice of its own language in
